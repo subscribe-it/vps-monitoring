@@ -103,14 +103,50 @@ Kompletny system monitoringu dla infrastruktury VPS oparty na Docker Swarm. Zawi
    - **Attachable**: ✓ (zaznacz)
    - Kliknij **Create**
 
-### Krok 4: Wdrożenie stacku
+### Krok 4: Utworzenie Docker Swarm Configs
+
+**⚠️ WAŻNE:** Przed wdrożeniem stacku musisz utworzyć Docker Swarm Configs. Stack używa configs zamiast bind mounts, aby działać w Portainer z Git repository.
+
+**W Portainer:**
+1. **Configs** → **Add config**
+2. Dla każdego pliku z listy poniżej:
+   - **Name**: (patrz tabela)
+   - **Content**: Skopiuj zawartość pliku z repozytorium
+   - Kliknij **Create the config**
+
+**Lista configs (14 plików):**
+- `prometheus_config` → `config/prometheus/prometheus.yml`
+- `prometheus_alerts_system` → `config/prometheus/alerts/system.yml`
+- `prometheus_alerts_http` → `config/prometheus/alerts/http.yml`
+- `prometheus_alerts_monitoring` → `config/prometheus/alerts/monitoring.yml`
+- `prometheus_alerts_prometheus` → `config/prometheus/alerts/prometheus.yml`
+- `loki_config` → `config/loki/loki-config.yaml`
+- `promtail_config` → `config/promtail/promtail-config.yaml`
+- `alertmanager_config` → `config/alertmanager/alertmanager.yml`
+- `blackbox_config` → `config/blackbox/blackbox.yml`
+- `grafana_datasources` → `config/grafana/provisioning/datasources/datasources.yml`
+- `grafana_dashboards` → `config/grafana/provisioning/dashboards/dashboards.yml`
+- `telegram_webhook_script` → `scripts/telegram-webhook.py`
+- `telegram_webhook_requirements` → `scripts/requirements.txt`
+- `dashboard_automation_script` → `scripts/dashboard-automation.py`
+
+**Alternatywnie przez CLI (jeśli masz dostęp SSH):**
+```bash
+git clone <repository-url>
+cd vps-monitoring
+./scripts/create-configs.sh create
+```
+
+**Szczegóły:** [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) - sekcja "Tworzenie Docker Swarm Configs"
+
+### Krok 5: Wdrożenie stacku
 
 1. W Portainer Stack Editor, przewiń do dołu
 2. Sprawdź czy wszystkie zmienne środowiskowe są dodane
 3. Kliknij **Deploy the stack**
 4. Poczekaj na utworzenie wszystkich serwisów (około 1-2 minuty)
 
-### Krok 5: Weryfikacja wdrożenia
+### Krok 6: Weryfikacja wdrożenia
 
 1. W Portainer → **Stacks** → **monitoring**
 2. Sprawdź status wszystkich serwisów:
@@ -144,7 +180,7 @@ xxx            monitoring_telegram-webhook replicated   1/1        python:3.11-s
 xxx            monitoring_uptime-kuma      replicated   1/1        louislam/uptime-kuma:latest
 ```
 
-### Krok 6: Konfiguracja Telegram (opcjonalnie, ale zalecane)
+### Krok 7: Konfiguracja Telegram (opcjonalnie, ale zalecane)
 
 **A. Utworzenie bota Telegram:**
 
@@ -178,7 +214,7 @@ xxx            monitoring_uptime-kuma      replicated   1/1        louislam/upti
 3. Kliknij **Update the stack**
 4. Sprawdź logi `telegram-webhook` serwisu - powinno być: `✅ Telegram credentials configured`
 
-### Krok 7: Konfiguracja Uptime Kuma
+### Krok 8: Konfiguracja Uptime Kuma
 
 1. Otwórz Uptime Kuma: `https://<MONITORING_HOST>/uptime-kuma`
 2. Przy pierwszym uruchomieniu utwórz konto administratora
@@ -191,7 +227,7 @@ xxx            monitoring_uptime-kuma      replicated   1/1        louislam/upti
 4. (Opcjonalnie) Skonfiguruj auto-restart:
    - Zobacz [ALERTING.md](docs/ALERTING.md) - sekcja "Uptime Kuma Auto-Restart"
 
-### Krok 8: Konfiguracja Duplicati (Backup)
+### Krok 9: Konfiguracja Duplicati (Backup)
 
 1. Otwórz Duplicati: `https://<MONITORING_HOST>/duplicati`
 2. Przy pierwszym uruchomieniu utwórz konto administratora
