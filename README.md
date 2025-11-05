@@ -33,7 +33,7 @@ Kompletny system monitoringu dla infrastruktury VPS oparty na Docker Swarm. Zawi
 
 - Docker Swarm zainicjalizowany
 - Traefik z siecią `traefik-public`
-- Porty: 3000, 3001, 3100, 8200, 9090, 9100, 8081, 8080, 9093, 9115
+- Porty: 3000, 3001, 3100, 8200, 9090, 9100, 8081, 8088, 9093, 9115
 - Portainer (dostęp do web UI)
 
 ## 📦 Wdrożenie w Portainer
@@ -332,7 +332,7 @@ Bezpośredni dostęp (porty):
 - Grafana: `http://<MONITORING_HOST>:3000`
 - Prometheus: `http://<MONITORING_HOST>:9090`
 - Alertmanager: `http://<MONITORING_HOST>:9093`
-- Telegram Webhook: `http://<MONITORING_HOST>:8080`
+- Telegram Webhook: `http://<MONITORING_HOST>:8088`
 - Blackbox Exporter: `http://<MONITORING_HOST>:9115`
 - Uptime Kuma: `http://<MONITORING_HOST>:3001`
 - Duplicati: `http://<MONITORING_HOST>:8200`

@@ -154,7 +154,7 @@ class AlertHandler(BaseHTTPRequestHandler):
 
 def main():
     """Main function"""
-    port = int(os.getenv('PORT', '8080'))
+    port = int(os.getenv('PORT', '8088'))
     
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         logger.warning("⚠️  Telegram credentials not configured!")
