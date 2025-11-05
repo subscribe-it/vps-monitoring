@@ -1,0 +1,114 @@
+global:
+  scrape_interval: 30s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'vps-monitoring'
+    environment: 'production'
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - 'alertmanager:9093'
+
+rule_files:
+  - "alerts/*.yml"
+
+scrape_configs:
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+    metrics_path: '/metrics'
+
+  # Node Exporter - system metrics
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+    metrics_path: '/metrics'
+
+  # cAdvisor - container metrics
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8081']
+    metrics_path: '/metrics'
+
+  # Blackbox Exporter - HTTP/HTTPS monitoring
+  - job_name: 'blackbox'
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+          - http://prometheus:9090
+          - http://grafana:3000
+          - http://loki:3100/ready
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  # Docker Swarm Service Discovery - automatic container discovery
+  - job_name: 'dockerswarm'
+    dockerswarm_sd_configs:
+      - host: unix:///var/run/docker.sock
+        role: tasks
+        port: 9090
+        filters:
+          - name: "label"
+            values: ["prometheus.io/scrape=true"]
+    relabel_configs:
+      # Only scrape containers with prometheus.io/scrape=true label
+      - source_labels: [__meta_dockerswarm_service_label_prometheus_io_scrape]
+        action: keep
+        regex: true
+      
+      # Use custom port from label if specified
+      - source_labels: [__meta_dockerswarm_service_label_prometheus_io_port]
+        target_label: __address__
+        replacement: '${1}:${__meta_dockerswarm_service_label_prometheus_io_port}'
+      
+      # Use custom path from label if specified
+      - source_labels: [__meta_dockerswarm_service_label_prometheus_io_path]
+        target_label: __metrics_path__
+        regex: (.+)
+        replacement: ${1}
+        # Default to /metrics if not specified
+        action: replace
+      
+      # Set job name from label or use service name
+      - source_labels: [__meta_dockerswarm_service_label_prometheus_io_job]
+        target_label: job
+        regex: (.+)
+        replacement: ${1}
+      - source_labels: [__meta_dockerswarm_service_name]
+        target_label: job
+        regex: (.+)
+        replacement: ${1}
+      
+      # Copy useful labels
+      - source_labels: [__meta_dockerswarm_service_label_app_name]
+        target_label: app_name
+      - source_labels: [__meta_dockerswarm_service_label_app_type]
+        target_label: app_type
+      - source_labels: [__meta_dockerswarm_service_label_com_docker_swarm_service_name]
+        target_label: service_name
+      - source_labels: [__meta_dockerswarm_task_name]
+        target_label: container_name
+      - source_labels: [__meta_dockerswarm_node_id]
+        target_label: node_id
+      
+      # Set instance label
+      - source_labels: [__address__]
+        target_label: instance
+      
+      # Add common labels
+      - target_label: monitored_by
+        replacement: prometheus
+      - target_label: discovery_method
+        replacement: dockerswarm
+

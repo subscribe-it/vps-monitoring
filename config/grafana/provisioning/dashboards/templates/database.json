@@ -1,0 +1,93 @@
+{
+  "dashboard": {
+    "title": "{{ app_name }} - Database",
+    "tags": ["database", "{{ app_name }}", "auto-generated"],
+    "timezone": "browser",
+    "schemaVersion": 27,
+    "version": 1,
+    "refresh": "30s",
+    "panels": [
+      {
+        "id": 1,
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+        "type": "graph",
+        "title": "CPU Usage",
+        "targets": [
+          {
+            "expr": "rate(container_cpu_usage_seconds_total{job=\"{{ job }}\"}[5m]) * 100",
+            "refId": "A"
+          }
+        ],
+        "datasource": "Prometheus"
+      },
+      {
+        "id": 2,
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+        "type": "graph",
+        "title": "Memory Usage",
+        "targets": [
+          {
+            "expr": "container_memory_usage_bytes{job=\"{{ job }}\"} / 1024 / 1024",
+            "refId": "A"
+          }
+        ],
+        "datasource": "Prometheus"
+      },
+      {
+        "id": 3,
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+        "type": "graph",
+        "title": "Disk I/O Read",
+        "targets": [
+          {
+            "expr": "rate(container_fs_reads_bytes_total{job=\"{{ job }}\"}[5m])",
+            "refId": "A"
+          }
+        ],
+        "datasource": "Prometheus"
+      },
+      {
+        "id": 4,
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+        "type": "graph",
+        "title": "Disk I/O Write",
+        "targets": [
+          {
+            "expr": "rate(container_fs_writes_bytes_total{job=\"{{ job }}\"}[5m])",
+            "refId": "A"
+          }
+        ],
+        "datasource": "Prometheus"
+      }
+    ],
+    "templating": {
+      "list": [
+        {
+          "name": "job",
+          "type": "query",
+          "query": "label_values(container_cpu_usage_seconds_total, job)",
+          "current": {
+            "value": "{{ job }}",
+            "text": "{{ job }}"
+          }
+        },
+        {
+          "name": "instance",
+          "type": "query",
+          "query": "label_values(container_cpu_usage_seconds_total{job=\"$job\"}, instance)",
+          "current": {
+            "value": "{{ instance }}",
+            "text": "{{ instance }}"
+          }
+        }
+      ]
+    },
+    "time": {
+      "from": "now-6h",
+      "to": "now"
+    },
+    "timepicker": {}
+  }
+}
+
+

@@ -1,0 +1,26 @@
+apiVersion: 1
+
+providers:
+  - name: 'Default'
+    orgId: 1
+    folder: 'Default'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards/default
+      foldersFromFilesStructure: true
+
+  - name: 'Templates'
+    orgId: 1
+    folder: 'Templates'
+    type: file
+    disableDeletion: true
+    updateIntervalSeconds: 10
+    allowUiUpdates: false
+    options:
+      path: /var/lib/grafana/dashboards/templates
+      foldersFromFilesStructure: false
+
+

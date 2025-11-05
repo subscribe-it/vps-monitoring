@@ -1,0 +1,38 @@
+groups:
+  - name: prometheus_alerts
+    interval: 30s
+    rules:
+      # Prometheus Target Down
+      - alert: PrometheusTargetDown
+        expr: |
+          up == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Prometheus target is down"
+          description: "Prometheus target {{ $labels.job }} on {{ $labels.instance }} has been down for more than 5 minutes"
+
+      # Prometheus Configuration Reload Failed
+      - alert: PrometheusConfigReloadFailed
+        expr: |
+          prometheus_config_last_reload_successful == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Prometheus configuration reload failed"
+          description: "Prometheus configuration reload failed for more than 5 minutes"
+
+      # Prometheus Too Many Restarts
+      - alert: PrometheusTooManyRestarts
+        expr: |
+          changes(process_start_time_seconds{job="prometheus"}[15m]) > 2
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Prometheus has restarted too many times"
+          description: "Prometheus has restarted {{ $value }} times in the last 15 minutes"
+
+

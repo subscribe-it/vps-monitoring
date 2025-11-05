@@ -1,0 +1,70 @@
+groups:
+  - name: http_alerts
+    interval: 30s
+    rules:
+      # HTTP 5xx Errors (from Traefik)
+      - alert: TraefikHigh5xxErrors
+        expr: |
+          rate(traefik_service_requests_total{code=~"5.."}[5m]) > 5
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High Traefik 5xx error rate"
+          description: "Service {{ $labels.service }} is experiencing high 5xx error rate through Traefik: {{ $value | humanize }} errors/sec"
+
+      # HTTP 4xx Errors (from Traefik)
+      - alert: TraefikHigh4xxErrors
+        expr: |
+          rate(traefik_service_requests_total{code=~"4.."}[5m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High Traefik 4xx error rate"
+          description: "Service {{ $labels.service }} is experiencing high 4xx error rate through Traefik: {{ $value | humanize }} errors/sec"
+
+      # HTTP 5xx Errors (from Blackbox Exporter - probe failures)
+      - alert: BlackboxProbeHttpFailure
+        expr: |
+          probe_http_status_code{code=~"5.."} > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "HTTP endpoint returning 5xx errors"
+          description: "Endpoint {{ $labels.instance }} is returning 5xx status code"
+
+      # HTTP 4xx Errors (from Blackbox Exporter)
+      - alert: BlackboxProbeHttp4xx
+        expr: |
+          probe_http_status_code{code=~"4.."} > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "HTTP endpoint returning 4xx errors"
+          description: "Endpoint {{ $labels.instance }} is returning 4xx status code"
+
+      # HTTP Response Time Too High (from Blackbox)
+      - alert: BlackboxSlowProbe
+        expr: |
+          probe_http_duration_seconds > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "HTTP endpoint slow response"
+          description: "Endpoint {{ $labels.instance }} has response time above 2 seconds: {{ $value }}s"
+
+      # HTTP Probe Down
+      - alert: BlackboxProbeDown
+        expr: |
+          probe_success == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "HTTP endpoint is down"
+          description: "Endpoint {{ $labels.instance }} is not responding (probe failed)"
+
