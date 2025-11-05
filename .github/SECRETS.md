@@ -11,7 +11,7 @@ Configure these secrets in your GitHub repository:
 
 | Secret Name | Description | Example Value |
 |------------|-------------|---------------|
-| `PORTAINER_MONITORING_WEBHOOK` | Portainer webhook for monitoring stack deployment | `http://57.129.41.248:9000/api/webhooks/xxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` |
+| `PORTAINER_MONITORING_WEBHOOK` | Portainer webhook for monitoring stack deployment | `http://57.129.41.248:9000/api/stacks/webhooks/7b485017-1319-4a75-b851-a09b12f6b047` |
 
 ## How to Configure
 
@@ -25,7 +25,12 @@ Configure these secrets in your GitHub repository:
 
 **Note:** The webhook URL format is:
 ```
-http://<portainer-host>:<port>/api/webhooks/<webhook-id>
+http://<portainer-host>:<port>/api/stacks/webhooks/<webhook-id>
+```
+
+**Example:**
+```
+http://57.129.41.248:9000/api/stacks/webhooks/7b485017-1319-4a75-b851-a09b12f6b047
 ```
 
 ### 2. Add Secret to GitHub
@@ -36,7 +41,19 @@ http://<portainer-host>:<port>/api/webhooks/<webhook-id>
 4. Add the secret:
    - **Name**: `PORTAINER_MONITORING_WEBHOOK`
    - **Secret**: Your webhook URL from Portainer
+   
+   **Example value:**
+   ```
+   http://57.129.41.248:9000/api/stacks/webhooks/7b485017-1319-4a75-b851-a09b12f6b047
+   ```
+   
 5. Click **Add secret**
+
+**Important:** 
+- Copy the entire webhook URL exactly as shown in Portainer
+- The format is: `http://<host>:<port>/api/stacks/webhooks/<webhook-id>`
+- Do NOT add any trailing slashes or extra characters
+- The webhook ID is unique for each stack
 
 ### 3. Verify Configuration
 
@@ -175,7 +192,12 @@ When you push to `main`:
 
 **Test webhook manually:**
 ```bash
-curl -X POST http://your-portainer-host:9000/api/webhooks/your-webhook-id
+curl -X POST http://57.129.41.248:9000/api/stacks/webhooks/7b485017-1319-4a75-b851-a09b12f6b047
+```
+
+Or with your webhook URL:
+```bash
+curl -X POST http://your-portainer-host:9000/api/stacks/webhooks/your-webhook-id
 ```
 
 ### Build succeeds but stack not updating?
@@ -225,7 +247,7 @@ curl -X POST http://your-portainer-host:9000/api/webhooks/your-webhook-id
 # - Compose path: docker-compose.yml
 
 # 2. Get webhook URL from Portainer
-WEBHOOK="http://57.129.41.248:9000/api/webhooks/xxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+WEBHOOK="http://57.129.41.248:9000/api/stacks/webhooks/7b485017-1319-4a75-b851-a09b12f6b047"
 
 # 3. Add to GitHub Secrets (via web UI)
 # PORTAINER_MONITORING_WEBHOOK = $WEBHOOK
