@@ -68,3 +68,25 @@ groups:
           summary: "Container not responding"
           description: "Container {{ $labels.container_name }} ({{ $labels.job }}) has not been seen for more than 60 seconds"
 
+      # Container Memory Limit Exceeded
+      - alert: ContainerMemoryLimitExceeded
+        expr: |
+          container_memory_usage_bytes{container_name!="", container_spec_memory_limit_bytes!=""} / container_spec_memory_limit_bytes{container_name!="", container_spec_memory_limit_bytes!=""} > 1.0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Container memory limit exceeded"
+          description: "Container {{ $labels.container_name }} ({{ $labels.job }}) has exceeded its memory limit. Usage: {{ $value | humanizePercentage }} of {{ $labels.container_spec_memory_limit_bytes | humanize }} limit"
+
+      # Container CPU Limit Exceeded
+      - alert: ContainerCPULimitExceeded
+        expr: |
+          rate(container_cpu_usage_seconds_total[5m]) * 100 > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container CPU usage exceeds 100%"
+          description: "Container {{ $labels.container_name }} ({{ $labels.job }}) is using more than 100% CPU ({{ $value }}%). This may indicate throttling or need for higher CPU limit."
+
