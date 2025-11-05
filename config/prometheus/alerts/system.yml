@@ -1,0 +1,70 @@
+groups:
+  - name: system_alerts
+    interval: 30s
+    rules:
+      # Critical CPU Usage
+      - alert: HighCPUUsage
+        expr: |
+          rate(container_cpu_usage_seconds_total[5m]) * 100 > 90
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High CPU usage detected"
+          description: "Container {{ $labels.container_name }} ({{ $labels.job }}) has CPU usage above 90% for more than 5 minutes. Current value: {{ $value }}%"
+
+      # Critical Memory Usage
+      - alert: HighMemoryUsage
+        expr: |
+          (container_memory_usage_bytes{container_name!=""} / container_spec_memory_limit_bytes{container_name!=""}) > 0.90
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High memory usage detected"
+          description: "Container {{ $labels.container_name }} ({{ $labels.job }}) is using more than 90% of its memory limit for more than 5 minutes. Current usage: {{ $value | humanizePercentage }}"
+
+      # Critical Memory Usage (alternative - without limit)
+      - alert: HighMemoryUsageAbsolute
+        expr: |
+          container_memory_usage_bytes{container_name!="", container_spec_memory_limit_bytes=""} > 2147483648
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High absolute memory usage detected"
+          description: "Container {{ $labels.container_name }} ({{ $labels.job }}) is using more than 2GB of memory: {{ $value | humanize }}"
+
+      # Critical Disk Usage (Node Exporter)
+      - alert: HighDiskUsage
+        expr: |
+          (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) < 0.10
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High disk usage detected"
+          description: "Disk usage on {{ $labels.instance }} is above 90%. Available space: {{ $value | humanizePercentage }}"
+
+      # Service Down
+      - alert: ServiceDown
+        expr: |
+          up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Service is down"
+          description: "Service {{ $labels.job }} on {{ $labels.instance }} has been down for more than 1 minute"
+
+      # Container Not Responding
+      - alert: ContainerNotResponding
+        expr: |
+          time() - container_last_seen > 60
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Container not responding"
+          description: "Container {{ $labels.container_name }} ({{ $labels.job }}) has not been seen for more than 60 seconds"
+

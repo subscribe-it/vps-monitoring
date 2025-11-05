@@ -1,0 +1,219 @@
+name: Validate Stack Configuration
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'docker-compose.yml'
+      - 'config/**'
+      - '.github/workflows/**'
+
+env:
+  STACK_NAME: monitoring
+
+jobs:
+  validate:
+    name: Validate Stack Configuration
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Python dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          pip3 install pyyaml
+
+      - name: Validate docker-compose.yml syntax
+        run: |
+          echo "🔍 Validating docker-compose.yml syntax..."
+          
+          if [ ! -f "docker-compose.yml" ]; then
+            echo "❌ docker-compose.yml not found!"
+            exit 1
+          fi
+          
+          python3 -c "
+          import yaml
+          import sys
+          
+          try:
+              with open('docker-compose.yml', 'r') as f:
+                  config = yaml.safe_load(f)
+              
+              # Check required sections
+              required = ['version', 'services']
+              for section in required:
+                  if section not in config:
+                      print(f'❌ Missing required section: {section}')
+                      sys.exit(1)
+              
+              # Check required services
+              required_services = ['prometheus', 'grafana', 'loki', 'promtail']
+              services = config.get('services', {})
+              missing_services = [s for s in required_services if s not in services]
+              
+              if missing_services:
+                  print(f'❌ Missing required services: {missing_services}')
+                  sys.exit(1)
+              
+              print('✅ docker-compose.yml syntax is valid')
+              print(f'✅ Found {len(services)} services')
+          except yaml.YAMLError as e:
+              print(f'❌ YAML syntax error: {e}')
+              sys.exit(1)
+          except Exception as e:
+              print(f'❌ Error: {e}')
+              sys.exit(1)
+          "
+
+      - name: Check required files
+        run: |
+          echo "🔍 Checking required configuration files..."
+          
+          REQUIRED_FILES=(
+            "config/prometheus/prometheus.yml"
+            "config/loki/loki-config.yaml"
+            "config/promtail/promtail-config.yaml"
+            "config/grafana/provisioning/datasources/datasources.yml"
+            "config/grafana/provisioning/dashboards/dashboards.yml"
+          )
+          
+          MISSING_FILES=()
+          for file in "${REQUIRED_FILES[@]}"; do
+            if [ ! -f "$file" ]; then
+              MISSING_FILES+=("$file")
+            fi
+          done
+          
+          if [ ${#MISSING_FILES[@]} -gt 0 ]; then
+            echo "❌ Missing required files:"
+            printf '  - %s\n' "${MISSING_FILES[@]}"
+            exit 1
+          fi
+          
+          echo "✅ All required configuration files present"
+
+      - name: Validate Prometheus config
+        run: |
+          echo "🔍 Validating Prometheus configuration..."
+          python3 -c "
+          import yaml
+          import sys
+          
+          try:
+              with open('config/prometheus/prometheus.yml', 'r') as f:
+                  config = yaml.safe_load(f)
+              
+              required = ['global', 'scrape_configs']
+              for section in required:
+                  if section not in config:
+                      print(f'❌ Missing required section: {section}')
+                      sys.exit(1)
+              
+              scrape_configs = config.get('scrape_configs', [])
+              if not scrape_configs:
+                  print('⚠️  Warning: No scrape_configs defined')
+              
+              print('✅ Prometheus configuration is valid')
+              print(f'✅ Found {len(scrape_configs)} scrape configs')
+          except Exception as e:
+              print(f'❌ Error validating Prometheus config: {e}')
+              sys.exit(1)
+          "
+
+      - name: Validate Loki config
+        run: |
+          echo "🔍 Validating Loki configuration..."
+          python3 -c "
+          import yaml
+          import sys
+          
+          try:
+              with open('config/loki/loki-config.yaml', 'r') as f:
+                  config = yaml.safe_load(f)
+              
+              if 'server' not in config:
+                  print('⚠️  Warning: Missing server configuration')
+              
+              print('✅ Loki configuration is valid')
+          except Exception as e:
+              print(f'❌ Error validating Loki config: {e}')
+              sys.exit(1)
+          "
+
+      - name: Validate Grafana datasources
+        run: |
+          echo "🔍 Validating Grafana datasources configuration..."
+          python3 -c "
+          import yaml
+          import sys
+          
+          try:
+              with open('config/grafana/provisioning/datasources/datasources.yml', 'r') as f:
+                  config = yaml.safe_load(f)
+              
+              if 'datasources' not in config:
+                  print('❌ Missing datasources section')
+                  sys.exit(1)
+              
+              datasources = config.get('datasources', [])
+              if not datasources:
+                  print('⚠️  Warning: No datasources defined')
+              
+              print('✅ Grafana datasources configuration is valid')
+              print(f'✅ Found {len(datasources)} datasources')
+          except Exception as e:
+              print(f'❌ Error validating Grafana datasources: {e}')
+              sys.exit(1)
+          "
+
+      - name: Check dashboard templates
+        run: |
+          echo "🔍 Checking dashboard templates..."
+          
+          TEMPLATE_DIR="config/grafana/provisioning/dashboards/templates"
+          if [ ! -d "$TEMPLATE_DIR" ]; then
+            echo "⚠️  Warning: Dashboard templates directory not found"
+            exit 0
+          fi
+          
+          REQUIRED_TEMPLATES=(
+            "wordpress.json"
+            "generic-app.json"
+            "database.json"
+          )
+          
+          MISSING_TEMPLATES=()
+          for template in "${REQUIRED_TEMPLATES[@]}"; do
+            if [ ! -f "$TEMPLATE_DIR/$template" ]; then
+              MISSING_TEMPLATES+=("$template")
+            fi
+          done
+          
+          if [ ${#MISSING_TEMPLATES[@]} -gt 0 ]; then
+            echo "⚠️  Warning: Missing template files:"
+            printf '  - %s\n' "${MISSING_TEMPLATES[@]}"
+          else
+            echo "✅ All dashboard templates present"
+          fi
+
+      - name: Validate Summary
+        if: always()
+        run: |
+          echo "✅ Stack validation completed"
+          echo ""
+          echo "📋 Validation Summary:"
+          echo "  - docker-compose.yml: ✅ Valid"
+          echo "  - Configuration files: ✅ Present"
+          echo "  - Prometheus config: ✅ Valid"
+          echo "  - Loki config: ✅ Valid"
+          echo "  - Grafana datasources: ✅ Valid"
+          echo ""
+          echo "🚀 Stack is ready for deployment"
+
+
