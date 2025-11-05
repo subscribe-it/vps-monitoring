@@ -276,6 +276,7 @@ services:
       - grafana_data:/source/grafana:ro
       - loki_data:/source/loki:ro
       - uptime_kuma_data:/source/uptime-kuma:ro
+      - alertmanager_data:/source/alertmanager:ro
     environment:
       - PUID=1000
       - PGID=1000
