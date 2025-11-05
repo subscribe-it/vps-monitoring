@@ -16,6 +16,38 @@ volumes:
   duplicati_backups: {}
   alertmanager_data: {}
 
+# Docker Swarm Configs - pliki konfiguracyjne (muszą być utworzone przed deployem)
+# Zobacz: docs/DEPLOYMENT.md - sekcja "Creating Docker Configs"
+configs:
+  prometheus_config:
+    external: true
+  prometheus_alerts_system:
+    external: true
+  prometheus_alerts_http:
+    external: true
+  prometheus_alerts_monitoring:
+    external: true
+  prometheus_alerts_prometheus:
+    external: true
+  loki_config:
+    external: true
+  promtail_config:
+    external: true
+  alertmanager_config:
+    external: true
+  blackbox_config:
+    external: true
+  grafana_datasources:
+    external: true
+  grafana_dashboards:
+    external: true
+  telegram_webhook_script:
+    external: true
+  telegram_webhook_requirements:
+    external: true
+  dashboard_automation_script:
+    external: true
+
 services:
   node-exporter:
     image: prom/node-exporter:latest
@@ -91,9 +123,18 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+    configs:
+      - source: prometheus_config
+        target: /etc/prometheus/prometheus.yml
+      - source: prometheus_alerts_system
+        target: /etc/prometheus/alerts/system.yml
+      - source: prometheus_alerts_http
+        target: /etc/prometheus/alerts/http.yml
+      - source: prometheus_alerts_monitoring
+        target: /etc/prometheus/alerts/monitoring.yml
+      - source: prometheus_alerts_prometheus
+        target: /etc/prometheus/alerts/prometheus.yml
     volumes:
-      - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - ./config/prometheus/alerts:/etc/prometheus/alerts:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - prometheus_data:/prometheus
     command:
@@ -144,8 +185,10 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+    configs:
+      - source: loki_config
+        target: /etc/loki/local-config.yaml
     volumes:
-      - ./config/loki/loki-config.yaml:/etc/loki/local-config.yaml:ro
       - loki_data:/loki
     command: -config.file=/etc/loki/local-config.yaml
     ports:
@@ -170,8 +213,10 @@ services:
       restart_policy:
         condition: any
         delay: 5s
+    configs:
+      - source: promtail_config
+        target: /etc/promtail/config.yml
     volumes:
-      - ./config/promtail/promtail-config.yaml:/etc/promtail/config.yml:ro
       - /var/log:/var/log:ro
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -205,11 +250,17 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
+    configs:
+      - source: grafana_datasources
+        target: /etc/grafana/provisioning/datasources/datasources.yml
+      - source: grafana_dashboards
+        target: /etc/grafana/provisioning/dashboards/dashboards.yml
     volumes:
       - grafana_data:/var/lib/grafana
-      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./config/grafana/provisioning/dashboards/default:/var/lib/grafana/dashboards/default:ro
-      - ./config/grafana/provisioning/dashboards/templates:/var/lib/grafana/dashboards/templates:ro
+      # Templates directory - bind mount (katalog)
+      # Uwaga: Zmień tę ścieżkę na właściwą lokalizację gdzie Portainer klonuje repo
+      # Alternatywnie: usuń ten volume jeśli nie potrzebujesz preloaded templates
+      - /opt/vps-monitoring/config/grafana/provisioning/dashboards/templates:/var/lib/grafana/dashboards/templates:ro
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
       - GF_USERS_ALLOW_SIGN_UP=false
@@ -318,8 +369,10 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+    configs:
+      - source: alertmanager_config
+        target: /etc/alertmanager/alertmanager.yml
     volumes:
-      - ./config/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - alertmanager_data:/alertmanager
     command:
       - '--config.file=/etc/alertmanager/alertmanager.yml'
@@ -349,8 +402,9 @@ services:
       restart_policy:
         condition: any
         delay: 5s
-    volumes:
-      - ./config/blackbox/blackbox.yml:/etc/blackbox_exporter/config.yml:ro
+    configs:
+      - source: blackbox_config
+        target: /etc/blackbox_exporter/config.yml
     command:
       - '--config.file=/etc/blackbox_exporter/config.yml'
     ports:
@@ -382,9 +436,11 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
-    volumes:
-      - ./scripts/telegram-webhook.py:/app/telegram-webhook.py:ro
-      - ./scripts/requirements.txt:/app/requirements.txt:ro
+    configs:
+      - source: telegram_webhook_script
+        target: /app/telegram-webhook.py
+      - source: telegram_webhook_requirements
+        target: /app/requirements.txt
     working_dir: /app
     command: sh -c "pip install -q -r requirements.txt && python3 telegram-webhook.py"
     environment:
@@ -422,9 +478,14 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
+    configs:
+      - source: dashboard_automation_script
+        target: /app/dashboard-automation.py
     volumes:
-      - ./scripts/dashboard-automation.py:/app/dashboard-automation.py:ro
-      - ./config/grafana/provisioning/dashboards/templates:/app/templates:ro
+      # Templates directory - bind mount (katalog)
+      # Uwaga: Zmień tę ścieżkę na właściwą lokalizację gdzie Portainer klonuje repo
+      # Alternatywnie: usuń ten volume - dashboard-automation będzie działać bez templates
+      - /opt/vps-monitoring/config/grafana/provisioning/dashboards/templates:/app/templates:ro
     working_dir: /app
     command: python3 dashboard-automation.py
     environment:
@@ -438,4 +499,3 @@ services:
     depends_on:
       - grafana
       - prometheus
-

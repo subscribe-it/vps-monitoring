@@ -121,8 +121,110 @@ Jeśli nie istnieje, utwórz ją:
 docker network create --driver overlay traefik-public
 ```
 
-### 4. Wdrożenie stacku
+### 4. Tworzenie Docker Swarm Configs
 
+**⚠️ WAŻNE:** Przed wdrożeniem stacku musisz utworzyć Docker Swarm Configs. Stack używa `external: true` configs zamiast bind mounts, aby działać w Portainer z Git repository.
+
+#### Opcja A: Przez Portainer UI (Zalecane)
+
+1. **W Portainer** → **Configs** → **Add config**
+2. Dla każdego pliku konfiguracyjnego:
+   - **Name**: (patrz lista poniżej)
+   - **Content**: Skopiuj zawartość pliku z repozytorium
+   - Kliknij **Create the config**
+
+**Lista configs do utworzenia:**
+
+| Config Name | Plik źródłowy |
+|------------|---------------|
+| `prometheus_config` | `config/prometheus/prometheus.yml` |
+| `prometheus_alerts_system` | `config/prometheus/alerts/system.yml` |
+| `prometheus_alerts_http` | `config/prometheus/alerts/http.yml` |
+| `prometheus_alerts_monitoring` | `config/prometheus/alerts/monitoring.yml` |
+| `prometheus_alerts_prometheus` | `config/prometheus/alerts/prometheus.yml` |
+| `loki_config` | `config/loki/loki-config.yaml` |
+| `promtail_config` | `config/promtail/promtail-config.yaml` |
+| `alertmanager_config` | `config/alertmanager/alertmanager.yml` |
+| `blackbox_config` | `config/blackbox/blackbox.yml` |
+| `grafana_datasources` | `config/grafana/provisioning/datasources/datasources.yml` |
+| `grafana_dashboards` | `config/grafana/provisioning/dashboards/dashboards.yml` |
+| `telegram_webhook_script` | `scripts/telegram-webhook.py` |
+| `telegram_webhook_requirements` | `scripts/requirements.txt` |
+| `dashboard_automation_script` | `scripts/dashboard-automation.py` |
+
+**Uwaga:** Nazwy configs muszą być dokładnie takie same jak w tabeli powyżej!
+
+#### Opcja B: Przez CLI (szybsze)
+
+Jeśli masz dostęp SSH do VPS:
+
+```bash
+# Sklonuj repozytorium (jeśli jeszcze nie masz)
+git clone <repository-url>
+cd vps-monitoring
+
+# Uruchom skrypt tworzenia configs
+./scripts/create-configs.sh create
+
+# Sprawdź czy configs zostały utworzone
+./scripts/create-configs.sh list
+```
+
+**Aktualizacja configs po zmianie plików:**
+
+```bash
+# Zaktualizuj pliki w repozytorium
+git pull
+
+# Zaktualizuj configs (skrypt automatycznie usuwa i tworzy na nowo)
+./scripts/create-configs.sh create
+```
+
+#### Opcja C: Ręcznie przez Docker CLI
+
+```bash
+# Przykład: tworzenie prometheus_config
+docker config create prometheus_config config/prometheus/prometheus.yml
+
+# Powtórz dla wszystkich plików z listy powyżej
+```
+
+### 5. Przygotowanie katalogu templates (opcjonalnie)
+
+**Uwaga:** Grafana templates directory wymaga bind mount (katalog, nie pojedynczy plik). 
+
+**Opcja 1: Użyj standardowej ścieżki (jeśli masz dostęp SSH):**
+
+```bash
+# Na VPS, utwórz katalog i skopiuj templates
+sudo mkdir -p /opt/vps-monitoring/config/grafana/provisioning/dashboards/templates
+sudo cp -r config/grafana/provisioning/dashboards/templates/* /opt/vps-monitoring/config/grafana/provisioning/dashboards/templates/
+```
+
+**Opcja 2: Zmień ścieżkę w docker-compose.yml:**
+
+Jeśli Portainer klonuje repo do innej lokalizacji, zmień w `docker-compose.yml`:
+- Grafana service: zmień `/opt/vps-monitoring/...` na właściwą ścieżkę
+- Dashboard-automation service: zmień `/opt/vps-monitoring/...` na właściwą ścieżkę
+
+**Opcja 3: Pomiń templates (dashboard-automation będzie działać, ale bez preloaded templates):**
+
+Możesz usunąć bind mount dla templates - dashboard-automation będzie tworzyć dashboardy bez preloaded templates.
+
+### 6. Wdrożenie stacku
+
+**W Portainer:**
+1. **Stacks** → **Add stack**
+2. **Name**: `monitoring`
+3. **Type**: `Docker Swarm`
+4. **Build method**: `Repository` (Git)
+5. **Repository URL**: Twój GitHub repository URL
+6. **Repository reference**: `main`
+7. **Compose path**: `docker-compose.yml`
+8. Dodaj zmienne środowiskowe (patrz Krok 2)
+9. Kliknij **Deploy the stack**
+
+**Lub przez CLI:**
 ```bash
 # Wdróż stack
 docker stack deploy -c docker-compose.yml monitoring
