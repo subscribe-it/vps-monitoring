@@ -287,10 +287,10 @@ curl -X POST http://localhost:9093/api/v2/alerts \
 
 ```bash
 # Sprawdź health
-curl http://localhost:8080/
+curl http://localhost:8088/
 
 # Wyślij test webhook
-curl -X POST http://localhost:8080/webhook \
+curl -X POST http://localhost:8088/webhook \
   -H "Content-Type: application/json" \
   -d '{
     "alerts": [{

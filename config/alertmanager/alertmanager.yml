@@ -30,21 +30,21 @@ route:
 receivers:
   - name: 'telegram-default'
     webhook_configs:
-      - url: 'http://telegram-webhook:8080/webhook'
+      - url: 'http://telegram-webhook:8088/webhook'
         send_resolved: true
         http_config:
           follow_redirects: true
 
   - name: 'telegram-critical'
     webhook_configs:
-      - url: 'http://telegram-webhook:8080/webhook'
+      - url: 'http://telegram-webhook:8088/webhook'
         send_resolved: true
         http_config:
           follow_redirects: true
 
   - name: 'telegram-warning'
     webhook_configs:
-      - url: 'http://telegram-webhook:8080/webhook'
+      - url: 'http://telegram-webhook:8088/webhook'
         send_resolved: true
         http_config:
           follow_redirects: true
