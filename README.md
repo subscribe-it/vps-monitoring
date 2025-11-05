@@ -207,7 +207,7 @@ xxx            monitoring_uptime-kuma      replicated   1/1        louislam/upti
    - **Schedule**: Ustaw harmonogram (np. codziennie o 2:00)
 4. Zapisz i uruchom pierwszy backup
 
-### Krok 9: Dostęp do serwisów
+### Krok 10: Dostęp do serwisów
 
 Po wdrożeniu, wszystkie serwisy są dostępne przez Traefik HTTPS:
 
@@ -219,7 +219,7 @@ Po wdrożeniu, wszystkie serwisy są dostępne przez Traefik HTTPS:
 - **Uptime Kuma**: `https://<MONITORING_HOST>/uptime-kuma`
 - **Duplicati**: `https://<MONITORING_HOST>/duplicati`
 
-### Krok 10: Konfiguracja automatycznego wdrożenia (opcjonalnie)
+### Krok 11: Konfiguracja automatycznego wdrożenia (opcjonalnie)
 
 **Automatyczne wdrożenie przez GitHub Actions:**
 
@@ -237,7 +237,7 @@ Po wdrożeniu, wszystkie serwisy są dostępne przez Traefik HTTPS:
 - GitHub Actions waliduje konfigurację przed wdrożeniem
 - Szczegóły: [.github/SECRETS.md](.github/SECRETS.md)
 
-### Krok 11: Aktualizacja stacku
+### Krok 12: Aktualizacja stacku
 
 **Automatyczna aktualizacja (jeśli skonfigurowano webhook):**
 
