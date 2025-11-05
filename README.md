@@ -277,6 +277,7 @@ Portainer automatycznie ściąga obrazy Docker z rejestrów określonych w `dock
   - Publiczne obrazy: działają automatycznie
   - Prywatne obrazy: wymagają Registry authentication w Portainer
   - Zobacz: [DEPLOYMENT.md](docs/DEPLOYMENT.md) - sekcja "Docker Image Pulling"
+- **Szczegółowy proces deployu**: [DEPLOYMENT_PROCESS.md](docs/DEPLOYMENT_PROCESS.md) - kompletny opis procesu wdrożenia krok po kroku
 
 ### Troubleshooting
 
