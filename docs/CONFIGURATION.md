@@ -268,6 +268,47 @@ labels:
 - `/uptime-kuma` → Uptime Kuma (port 3001)
 - `/duplicati` → Duplicati (port 8200)
 
+### Traefik Metrics Configuration
+
+Monitoring stack automatycznie scrapuje metryki Traefik, jeśli są włączone.
+
+**Wymagane w konfiguracji Traefik:**
+
+Dodaj do `traefik.yml` lub dynamic config:
+
+```yaml
+metrics:
+  prometheus:
+    entryPoint: traefik  # entrypoint dla dashboard/metrics (zwykle port 8080)
+    addEntryPointsLabels: true
+    addServicesLabels: true
+    addRoutersLabels: true
+```
+
+**Lub przez environment variables:**
+
+```yaml
+environment:
+  - TRAEFIK_METRICS_PROMETHEUS_ENTRYPOINT=traefik
+  - TRAEFIK_METRICS_PROMETHEUS_ADDENTRYPOINTSLABELS=true
+  - TRAEFIK_METRICS_PROMETHEUS_ADDSERVICESLABELS=true
+  - TRAEFIK_METRICS_PROMETHEUS_ADDROUTERSLABELS=true
+```
+
+**Sprawdzenie:**
+
+Metryki powinny być dostępne na `http://traefik:8080/metrics` (wewnątrz sieci).
+
+**Prometheus scrape config:**
+
+Stack automatycznie scrapuje Traefik na `traefik:8080/metrics` (30s interval).
+
+**Alerty Traefik:**
+
+- `TraefikHighRequestRate` - wysokie request rate (>100 req/sec)
+- `TraefikHighResponseTime` - wysokie response time (>2s 95th percentile)
+- `TraefikEntrypointDown` - endpoint metryk nie odpowiada
+
 ## Zmienne środowiskowe
 
 ### Wszystkie zmienne
