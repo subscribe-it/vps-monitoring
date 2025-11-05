@@ -219,9 +219,41 @@ Po wdrożeniu, wszystkie serwisy są dostępne przez Traefik HTTPS:
 - **Uptime Kuma**: `https://<MONITORING_HOST>/uptime-kuma`
 - **Duplicati**: `https://<MONITORING_HOST>/duplicati`
 
-### Krok 10: Aktualizacja stacku
+### Krok 10: Konfiguracja automatycznego wdrożenia (opcjonalnie)
 
-**Aktualizacja przez Portainer:**
+**Automatyczne wdrożenie przez GitHub Actions:**
+
+1. W Portainer → **Stacks** → **monitoring** → **Webhooks**
+2. Kliknij **Add webhook** (jeśli nie ma jeszcze webhooka)
+3. Skopiuj **Webhook URL** (format: `http://57.129.41.248:9000/api/stacks/webhooks/xxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`)
+4. W GitHub → **Settings** → **Secrets and variables** → **Actions**
+5. Kliknij **New repository secret**
+6. **Name**: `PORTAINER_MONITORING_WEBHOOK`
+7. **Secret**: Wklej webhook URL z Portainera
+8. Kliknij **Add secret**
+
+**Po skonfigurowaniu:**
+- Każdy push do branch `main` automatycznie aktualizuje stack w Portainer
+- GitHub Actions waliduje konfigurację przed wdrożeniem
+- Szczegóły: [.github/SECRETS.md](.github/SECRETS.md)
+
+### Krok 11: Aktualizacja stacku
+
+**Automatyczna aktualizacja (jeśli skonfigurowano webhook):**
+
+1. Wprowadź zmiany w `docker-compose.yml` lub plikach konfiguracyjnych
+2. Zcommit i push do `main`:
+   ```bash
+   git add .
+   git commit -m "feat: update monitoring configuration"
+   git push origin main
+   ```
+3. GitHub Actions automatycznie:
+   - Waliduje konfigurację
+   - Wywołuje webhook Portainera
+   - Portainer aktualizuje stack
+
+**Ręczna aktualizacja przez Portainer:**
 
 1. W Portainer → **Stacks** → **monitoring**
 2. Kliknij **Editor**
