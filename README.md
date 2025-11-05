@@ -33,36 +33,255 @@ Kompletny system monitoringu dla infrastruktury VPS oparty na Docker Swarm. Zawi
 
 - Docker Swarm zainicjalizowany
 - Traefik z siecią `traefik-public`
-- Porty: 3000, 3001, 3100, 8200, 9090, 9100, 8081
+- Porty: 3000, 3001, 3100, 8200, 9090, 9100, 8081, 8080, 9093, 9115
+- Portainer (dostęp do web UI)
 
-### Instalacja
+## 📦 Wdrożenie w Portainer
 
-1. Sklonuj repozytorium:
+### Krok 1: Przygotowanie repozytorium
+
+**Opcja A: W Portainer (Rekomendowane)**
+
+1. Otwórz Portainer → **Stacks**
+2. Kliknij **Add stack**
+3. Wybierz **Web editor**
+4. Nazwa stacku: `monitoring`
+5. Wklej zawartość pliku `docker-compose.yml` do edytora
+
+**Opcja B: Z Git Repository**
+
+1. Otwórz Portainer → **Stacks**
+2. Kliknij **Add stack**
+3. Wybierz **Git repository**
+4. **Repository URL**: `https://github.com/twoje-repo/vps-monitoring.git`
+5. **Repository reference**: `main` (lub branch)
+6. **Compose path**: `docker-compose.yml`
+7. **Auto-update**: (opcjonalnie) włącz dla automatycznych aktualizacji
+
+### Krok 2: Konfiguracja zmiennych środowiskowych
+
+1. W Portainer Stack Editor, przewiń do sekcji **Environment variables**
+2. Kliknij **Add environment variable** dla każdej zmiennej:
+
+#### Wymagane zmienne:
+
+| Name | Value | Opis |
+|------|-------|------|
+| `GRAFANA_ADMIN_PASSWORD` | `twoje_bezpieczne_haslo` | Hasło admin Grafana (min. 8 znaków) |
+| `MONITORING_HOST` | `57.129.41.248` | IP Twojego VPS (lub domena) |
+| `PROMETHEUS_RETENTION` | `720h` | Retention danych Prometheus (30 dni) |
+| `LOKI_RETENTION_DAYS` | `720` | Retention logów Loki (30 dni) |
+
+#### Opcjonalne zmienne (zalecane):
+
+| Name | Value | Opis |
+|------|-------|------|
+| `TELEGRAM_BOT_TOKEN` | `123456789:ABC...` | Token bota Telegram z @BotFather |
+| `TELEGRAM_CHAT_ID` | `123456789` | ID czatu/channelu dla alertów |
+| `GRAFANA_ADMIN_USER` | `admin` | Użytkownik admin Grafana (domyślnie: admin) |
+| `CHECK_INTERVAL` | `60` | Interwał sprawdzania nowych kontenerów (sekundy) |
+
+**Przykład dodawania zmiennej:**
+
+1. Kliknij **Add environment variable**
+2. **Name**: `GRAFANA_ADMIN_PASSWORD`
+3. **Value**: `MojeSilneHaslo123!`
+4. Kliknij **Add**
+5. Powtórz dla wszystkich zmiennych
+
+**Gotowy template:** Zobacz `env.portainer.example` w repozytorium - możesz skopiować wszystkie zmienne stamtąd.
+
+### Krok 3: Weryfikacja sieci Traefik
+
+1. W Portainer, przejdź do **Networks**
+2. Sprawdź czy istnieje sieć `traefik-public`
+3. Jeśli nie istnieje:
+   - Kliknij **Add network**
+   - **Name**: `traefik-public`
+   - **Driver**: `overlay`
+   - **Scope**: `swarm`
+   - **Attachable**: ✓ (zaznacz)
+   - Kliknij **Create**
+
+### Krok 4: Wdrożenie stacku
+
+1. W Portainer Stack Editor, przewiń do dołu
+2. Sprawdź czy wszystkie zmienne środowiskowe są dodane
+3. Kliknij **Deploy the stack**
+4. Poczekaj na utworzenie wszystkich serwisów (około 1-2 minuty)
+
+### Krok 5: Weryfikacja wdrożenia
+
+1. W Portainer → **Stacks** → **monitoring**
+2. Sprawdź status wszystkich serwisów:
+   - Wszystkie powinny być w stanie **Running** (zielony)
+   - Jeśli któryś jest **Pending** lub **Failed**, kliknij na niego i sprawdź logi
+
+3. Sprawdź logi serwisów:
+   - Kliknij na serwis (np. `prometheus`)
+   - Kliknij **Logs**
+   - Sprawdź czy nie ma błędów
+
+4. Sprawdź status przez terminal:
 ```bash
+docker service ls | grep monitoring
+```
+
+Oczekiwany output (12 serwisów):
+```
+ID             NAME                        MODE         REPLICAS   IMAGE
+xxx            monitoring_alertmanager    replicated   1/1        prom/alertmanager:latest
+xxx            monitoring_blackbox-exporter replicated  1/1        prom/blackbox-exporter:latest
+xxx            monitoring_cadvisor         global       1/1        gcr.io/cadvisor/cadvisor:v0.47.0
+xxx            monitoring_dashboard-automation replicated 1/1     python:3.11-slim
+xxx            monitoring_duplicati       replicated   1/1        lscr.io/linuxserver/duplicati:latest
+xxx            monitoring_grafana          replicated   1/1        grafana/grafana:latest
+xxx            monitoring_loki             replicated   1/1        grafana/loki:latest
+xxx            monitoring_node-exporter    global       1/1        prom/node-exporter:latest
+xxx            monitoring_prometheus       replicated   1/1        prom/prometheus:latest
+xxx            monitoring_promtail         global       1/1        grafana/promtail:latest
+xxx            monitoring_telegram-webhook replicated   1/1        python:3.11-slim
+xxx            monitoring_uptime-kuma      replicated   1/1        louislam/uptime-kuma:latest
+```
+
+### Krok 6: Konfiguracja Telegram (opcjonalnie, ale zalecane)
+
+**A. Utworzenie bota Telegram:**
+
+1. Otwórz Telegram i znajdź [@BotFather](https://t.me/BotFather)
+2. Wyślij `/newbot`
+3. Podaj nazwę bota (np. "VPS Monitoring Bot")
+4. Podaj username bota (np. "vps_monitoring_bot")
+5. Skopiuj **token** bota (format: `123456789:ABCdefGHIjklMNOpqrsTUVwxyz`)
+
+**B. Uzyskanie Chat ID:**
+
+**Dla czatu prywatnego:**
+1. Napisz wiadomość do swojego bota
+2. Otwórz w przeglądarce: `https://api.telegram.org/bot<TOKEN>/getUpdates`
+   - Zastąp `<TOKEN>` tokenem bota
+3. Znajdź w odpowiedzi: `"chat":{"id":123456789}`
+4. To jest Twój Chat ID
+
+**Dla kanału/grupy:**
+1. Dodaj bota do kanału/grupy
+2. Uczyń bota administratorem kanału
+3. Wyślij wiadomość do kanału
+4. Sprawdź `getUpdates` API - znajdź ID kanału (ujemne dla kanałów)
+
+**C. Dodanie do Portainer:**
+
+1. W Portainer → **Stacks** → **monitoring** → **Editor**
+2. Dodaj zmienne środowiskowe:
+   - `TELEGRAM_BOT_TOKEN` = `twój_token_z_botfather`
+   - `TELEGRAM_CHAT_ID` = `twój_chat_id`
+3. Kliknij **Update the stack**
+4. Sprawdź logi `telegram-webhook` serwisu - powinno być: `✅ Telegram credentials configured`
+
+### Krok 7: Konfiguracja Uptime Kuma
+
+1. Otwórz Uptime Kuma: `https://<MONITORING_HOST>/uptime-kuma`
+2. Przy pierwszym uruchomieniu utwórz konto administratora
+3. Dodaj monitorowane serwisy:
+   - Kliknij **Add Monitor**
+   - **Type**: HTTP(s)
+   - **URL**: URL serwisu do monitorowania
+   - **Interval**: 60 sekund
+   - **Retries**: 2
+4. (Opcjonalnie) Skonfiguruj auto-restart:
+   - Zobacz [ALERTING.md](docs/ALERTING.md) - sekcja "Uptime Kuma Auto-Restart"
+
+### Krok 8: Konfiguracja Duplicati (Backup)
+
+1. Otwórz Duplicati: `https://<MONITORING_HOST>/duplicati`
+2. Przy pierwszym uruchomieniu utwórz konto administratora
+3. Utwórz nowy backup job:
+   - Kliknij **Add backup**
+   - **Source**: Wybierz volumes z `/source/`:
+     - `/source/prometheus` → Prometheus data
+     - `/source/grafana` → Grafana data
+     - `/source/loki` → Loki data
+     - `/source/uptime-kuma` → Uptime Kuma data
+     - `/source/alertmanager` → Alertmanager data
+   - **Destination**: Wybierz storage (S3, FTP, Google Drive, etc.)
+   - **Schedule**: Ustaw harmonogram (np. codziennie o 2:00)
+4. Zapisz i uruchom pierwszy backup
+
+### Krok 9: Dostęp do serwisów
+
+Po wdrożeniu, wszystkie serwisy są dostępne przez Traefik HTTPS:
+
+- **Grafana**: `https://<MONITORING_HOST>/grafana`
+  - Login: `admin` / Hasło: (z `GRAFANA_ADMIN_PASSWORD`)
+- **Prometheus**: `https://<MONITORING_HOST>/prometheus`
+- **Alertmanager**: `https://<MONITORING_HOST>/alertmanager`
+- **Loki**: `https://<MONITORING_HOST>/loki`
+- **Uptime Kuma**: `https://<MONITORING_HOST>/uptime-kuma`
+- **Duplicati**: `https://<MONITORING_HOST>/duplicati`
+
+### Krok 10: Aktualizacja stacku
+
+**Aktualizacja przez Portainer:**
+
+1. W Portainer → **Stacks** → **monitoring**
+2. Kliknij **Editor**
+3. Zaktualizuj `docker-compose.yml` (np. wklej nową wersję)
+4. Zaktualizuj zmienne środowiskowe jeśli potrzeba
+5. Kliknij **Update the stack**
+
+**Aktualizacja przez Git (jeśli używasz Git repository):**
+
+1. W Portainer → **Stacks** → **monitoring**
+2. Kliknij **Editor**
+3. Kliknij **Pull and redeploy** (jeśli masz auto-update wyłączone)
+4. Lub: włącz **Auto-update** w ustawieniach stacku
+
+### Troubleshooting
+
+**Problem: Serwis nie startuje**
+
+1. W Portainer → **Stacks** → **monitoring** → kliknij na serwis
+2. Sprawdź **Logs** - znajdź błąd
+3. Sprawdź **Inspect** - sprawdź konfigurację
+4. Sprawdź czy wszystkie zmienne środowiskowe są ustawione
+
+**Problem: Nie mogę się połączyć z serwisem przez Traefik**
+
+1. Sprawdź czy Traefik działa: `docker service ls | grep traefik`
+2. Sprawdź czy sieć `traefik-public` istnieje
+3. Sprawdź logi Traefik: `docker service logs traefik`
+4. Sprawdź czy serwis ma poprawne Traefik labels w `docker-compose.yml`
+
+**Problem: Brak metryk w Prometheus**
+
+1. Sprawdź logi Prometheus: `docker service logs monitoring_prometheus`
+2. Sprawdź targets w Prometheus: `https://<MONITORING_HOST>/prometheus/targets`
+3. Sprawdź czy kontenery mają label `prometheus.io/scrape=true`
+
+**Problem: Alerty nie są wysyłane do Telegram**
+
+1. Sprawdź logi telegram-webhook: `docker service logs monitoring_telegram-webhook`
+2. Sprawdź czy `TELEGRAM_BOT_TOKEN` i `TELEGRAM_CHAT_ID` są ustawione
+3. Sprawdź czy bot ma dostęp do czatu/kanału
+4. Sprawdź status Alertmanager: `https://<MONITORING_HOST>/alertmanager`
+
+### Instalacja lokalna (alternatywa)
+
+Jeśli nie używasz Portainera, możesz wdrożyć lokalnie:
+
+```bash
+# 1. Sklonuj repozytorium
 git clone <repository-url>
 cd vps-monitoring
-```
 
-2. Skonfiguruj zmienne środowiskowe:
-
-**W Portainer:**
-- Otwórz Stack → Editor → Environment variables
-- Dodaj zmienne z pliku `env.portainer.example`
-- Zobacz szczegóły w [DEPLOYMENT.md](docs/DEPLOYMENT.md)
-
-**Lokalnie:**
-```bash
+# 2. Skonfiguruj zmienne
 cp env.portainer.example .env
-# Edytuj .env i ustaw hasła oraz konfigurację
-```
+nano .env  # Edytuj zmienne
 
-3. Wdróż stack:
-```bash
+# 3. Wdróż stack
 docker stack deploy -c docker-compose.yml monitoring
-```
 
-4. Sprawdź status:
-```bash
+# 4. Sprawdź status
 docker service ls | grep monitoring
 ```
 
