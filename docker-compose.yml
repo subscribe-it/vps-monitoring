@@ -257,10 +257,10 @@ services:
         target: /etc/grafana/provisioning/dashboards/dashboards.yml
     volumes:
       - grafana_data:/var/lib/grafana
-      # Templates directory - bind mount (katalog)
-      # Uwaga: Zmień tę ścieżkę na właściwą lokalizację gdzie Portainer klonuje repo
-      # Alternatywnie: usuń ten volume jeśli nie potrzebujesz preloaded templates
-      - /opt/vps-monitoring/config/grafana/provisioning/dashboards/templates:/var/lib/grafana/dashboards/templates:ro
+      # Templates directory - opcjonalny bind mount (katalog)
+      # Jeśli chcesz użyć templates, odkomentuj poniższą linię i zmień ścieżkę na właściwą lokalizację gdzie Portainer klonuje repo
+      # W Portainer: sprawdź ścieżkę w Stack → Editor → gdzie jest docker-compose.yml (zwykle /data/compose/ID/)
+      # - /data/compose/25/config/grafana/provisioning/dashboards/templates:/var/lib/grafana/dashboards/templates:ro
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
       - GF_USERS_ALLOW_SIGN_UP=false
@@ -482,10 +482,11 @@ services:
       - source: dashboard_automation_script
         target: /app/dashboard-automation.py
     volumes:
-      # Templates directory - bind mount (katalog)
-      # Uwaga: Zmień tę ścieżkę na właściwą lokalizację gdzie Portainer klonuje repo
-      # Alternatywnie: usuń ten volume - dashboard-automation będzie działać bez templates
-      - /opt/vps-monitoring/config/grafana/provisioning/dashboards/templates:/app/templates:ro
+      # Templates directory - opcjonalny bind mount (katalog)
+      # Jeśli chcesz użyć templates, odkomentuj poniższą linię i zmień ścieżkę na właściwą lokalizację gdzie Portainer klonuje repo
+      # W Portainer: sprawdź ścieżkę w Stack → Editor → gdzie jest docker-compose.yml (zwykle /data/compose/ID/)
+      # dashboard-automation będzie działać bez templates (utworzy dashboardy bez preloaded templates)
+      # - /data/compose/25/config/grafana/provisioning/dashboards/templates:/app/templates:ro
     working_dir: /app
     command: python3 dashboard-automation.py
     environment:
