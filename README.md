@@ -268,6 +268,16 @@ Po wdrożeniu, wszystkie serwisy są dostępne przez Traefik HTTPS:
 3. Kliknij **Pull and redeploy** (jeśli masz auto-update wyłączone)
 4. Lub: włącz **Auto-update** w ustawieniach stacku
 
+**Uwaga o Docker Images:**
+
+Portainer automatycznie ściąga obrazy Docker z rejestrów określonych w `docker-compose.yml`:
+- ✅ **Publiczne obrazy** (Docker Hub): automatycznie ściągane przy deployu
+- ✅ **Obrazy z tego stacku**: wszystkie są publiczne (Prometheus, Grafana, Loki, etc.)
+- ⚠️ **Jeśli używasz własnych obrazów z ghcr.io**:
+  - Publiczne obrazy: działają automatycznie
+  - Prywatne obrazy: wymagają Registry authentication w Portainer
+  - Zobacz: [DEPLOYMENT.md](docs/DEPLOYMENT.md) - sekcja "Docker Image Pulling"
+
 ### Troubleshooting
 
 **Problem: Serwis nie startuje**
