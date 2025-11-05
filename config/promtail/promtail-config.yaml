@@ -51,14 +51,14 @@ scrape_configs:
         replacement: '/var/lib/docker/containers/${1}/*.log'
     
     pipeline_stages:
-      # Parse JSON logs if available
+      # Parse JSON logs (Docker JSON log driver format)
       - json:
           expressions:
             output: log
             stream: stream
-            attrs: attrs
+            time: time
       
-      # Extract timestamp from log
+      # Extract timestamp from JSON log
       - timestamp:
           source: time
           format: RFC3339Nano
@@ -66,23 +66,19 @@ scrape_configs:
             - RFC3339
             - Unix
       
-      # Extract log level if present
-      - regex:
-          expression: '.*level=(?P<level>\w+).*'
-      - labels:
-          level:
-      
-      # Output final log line
+      # Output: use parsed log field if available, otherwise use raw line
       - output:
           source: output
       
-      # Add Docker labels
+      # Extract log level if present
+      - regex:
+          expression: '(?i).*level[=:]\s*(?P<level>\w+).*|(?i).*\b(?P<level>ERROR|WARN|WARNING|INFO|DEBUG|TRACE|FATAL)\b.*'
+      - labels:
+          level:
+      
+      # Add Docker stream label (stdout/stderr)
       - labels:
           stream:
-          container_id:
-          container_name:
-          image_name:
-          image_id:
 
   # System logs (optional)
   - job_name: system
