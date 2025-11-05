@@ -253,6 +253,7 @@ System monitoruje i alertuje o:
 - **Błędy HTTP 4xx** (>10 errors/sec przez 5 min)
 - **Błędy HTTP 5xx** (>5 errors/sec przez 5 min)
 - **Serwis nieaktywny** (serwis padł/nie odpowiada)
+- **Traefik metrics** (wysoki request rate, wysokie response time, endpoint down)
 
 ### Powiadomienia Telegram
 
