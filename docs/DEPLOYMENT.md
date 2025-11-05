@@ -160,6 +160,83 @@ docker service logs monitoring_dashboard-automation
 - Prometheus: `http://<MONITORING_HOST>:9090`
 - Uptime Kuma: `http://<MONITORING_HOST>:3001` (pierwsze uruchomienie - utwórz konto)
 
+### Docker Image Pulling
+
+**TAK - Portainer automatycznie ściąga obrazy Docker przy deployu/aktualizacji stacku.**
+
+**Jak to działa:**
+
+1. **Przy pierwszym deployu:**
+   - Portainer analizuje `docker-compose.yml`
+   - Dla każdego serwisu sprawdza `image:` 
+   - Automatycznie wykonuje `docker pull <image>` dla każdego obrazu
+   - Tworzy kontenery z pobranymi obrazami
+
+2. **Przy aktualizacji stacku (webhook lub Pull and redeploy):**
+   - Portainer sprawdza czy obrazy się zmieniły
+   - Jeśli `image:` tag się zmienił (np. `latest` → nowszy build), ściąga nowy obraz
+   - Aktualizuje kontenery z nowymi obrazami
+
+**Obrazy w tym stacku (wszystkie publiczne):**
+
+Wszystkie obrazy używane w `docker-compose.yml` są z **publicznych rejestrów**:
+- Docker Hub: `prom/prometheus:latest`, `grafana/grafana:latest`, `grafana/loki:latest`, etc.
+- Google Container Registry: `gcr.io/cadvisor/cadvisor:v0.47.0`
+- LinuxServer.io: `lscr.io/linuxserver/duplicati:latest`
+- Python official: `python:3.11-slim`
+
+**✅ Nie wymagają autoryzacji - Portainer automatycznie je ściąga.**
+
+**Jeśli używasz własnych obrazów z GitHub Container Registry (ghcr.io):**
+
+**Publiczne obrazy ghcr.io:**
+- ✅ Działają automatycznie - Portainer ściąga je bez dodatkowej konfiguracji
+- Format: `ghcr.io/username/repo:tag`
+
+**Prywatne obrazy ghcr.io:**
+- ⚠️ **Wymagają Registry authentication** w Portainer
+- Konfiguracja:
+
+1. **W Portainer** → **Registries** → **Add registry**
+2. Wybierz **Custom** (dla ghcr.io)
+3. **Name**: `GitHub Container Registry` (lub dowolna nazwa)
+4. **Registry URL**: `https://ghcr.io`
+5. **Authentication**:
+   - **Username**: Twój GitHub username
+   - **Password**: GitHub Personal Access Token (PAT)
+6. Kliknij **Create registry**
+
+**GitHub Personal Access Token:**
+1. GitHub → **Settings** → **Developer settings** → **Personal access tokens** → **Tokens (classic)**
+2. **Generate new token (classic)**
+3. **Note**: `Portainer ghcr.io access`
+4. **Expiration**: Wybierz okres (np. 90 dni lub No expiration)
+5. **Scopes**: Zaznacz `read:packages` (minimum)
+6. **Generate token**
+7. **Skopiuj token** - użyj jako password w Portainer registry
+
+**Po skonfigurowaniu:**
+- Portainer automatycznie użyje tego registry przy pull obrazów z `ghcr.io`
+- Obrazy są cache'owane lokalnie - nie są ściągane przy każdym deployu jeśli nie zmienił się tag
+- Portainer automatycznie wykrywa nowsze wersje jeśli używasz tagów jak `latest` lub `production`
+
+**Przykład użycia własnego obrazu:**
+
+Jeśli masz własny obraz w `docker-compose.yml`:
+```yaml
+services:
+  my-service:
+    image: ghcr.io/your-username/your-repo:production
+    # ... reszta konfiguracji
+```
+
+I obraz jest **prywatny**:
+- Skonfiguruj Registry w Portainer (jak wyżej)
+- Portainer automatycznie użyje credentials przy pull
+
+Jeśli obraz jest **publiczny**:
+- Nie wymaga konfiguracji - działa automatycznie
+
 ## Konfiguracja kontenerów do monitorowania
 
 ### Dodanie labeli do istniejącego serwisu
