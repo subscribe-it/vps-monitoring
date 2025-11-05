@@ -1,0 +1,112 @@
+groups:
+  - name: monitoring_stack_alerts
+    interval: 30s
+    rules:
+      # Grafana Down
+      - alert: GrafanaDown
+        expr: |
+          up{job="grafana"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service_name: 'grafana'
+        annotations:
+          summary: "Grafana is down"
+          description: "Grafana service has been down for more than 1 minute. Monitoring dashboard is unavailable."
+
+      # Prometheus Down
+      - alert: PrometheusDown
+        expr: |
+          up{job="prometheus"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service_name: 'prometheus'
+        annotations:
+          summary: "Prometheus is down"
+          description: "Prometheus service has been down for more than 1 minute. Metrics collection is stopped."
+
+      # Loki Down
+      - alert: LokiDown
+        expr: |
+          up{job="loki"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service_name: 'loki'
+        annotations:
+          summary: "Loki is down"
+          description: "Loki service has been down for more than 1 minute. Log aggregation is stopped."
+
+      # Alertmanager Down
+      - alert: AlertmanagerDown
+        expr: |
+          up{job="alertmanager"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service_name: 'alertmanager'
+        annotations:
+          summary: "Alertmanager is down"
+          description: "Alertmanager service has been down for more than 1 minute. Alert routing is unavailable."
+
+      # Prometheus High Memory Usage
+      - alert: PrometheusHighMemoryUsage
+        expr: |
+          (container_memory_usage_bytes{container_name=~"prometheus.*"} / container_spec_memory_limit_bytes{container_name=~"prometheus.*"}) > 0.90
+        for: 5m
+        labels:
+          severity: warning
+          service_name: 'prometheus'
+        annotations:
+          summary: "Prometheus high memory usage"
+          description: "Prometheus is using more than 90% of its memory limit. Current usage: {{ $value | humanizePercentage }}"
+
+      # Grafana High Memory Usage
+      - alert: GrafanaHighMemoryUsage
+        expr: |
+          (container_memory_usage_bytes{container_name=~"grafana.*"} / container_spec_memory_limit_bytes{container_name=~"grafana.*"}) > 0.90
+        for: 5m
+        labels:
+          severity: warning
+          service_name: 'grafana'
+        annotations:
+          summary: "Grafana high memory usage"
+          description: "Grafana is using more than 90% of its memory limit. Current usage: {{ $value | humanizePercentage }}"
+
+      # Loki High Memory Usage
+      - alert: LokiHighMemoryUsage
+        expr: |
+          (container_memory_usage_bytes{container_name=~"loki.*"} / container_spec_memory_limit_bytes{container_name=~"loki.*"}) > 0.90
+        for: 5m
+        labels:
+          severity: warning
+          service_name: 'loki'
+        annotations:
+          summary: "Loki high memory usage"
+          description: "Loki is using more than 90% of its memory limit. Current usage: {{ $value | humanizePercentage }}"
+
+      # Dashboard Automation Not Running
+      - alert: DashboardAutomationDown
+        expr: |
+          up{job="dashboard-automation"} == 0
+        for: 5m
+        labels:
+          severity: warning
+          service_name: 'dashboard-automation'
+        annotations:
+          summary: "Dashboard automation is down"
+          description: "Dashboard automation service has been down for more than 5 minutes. Automatic dashboard creation is disabled."
+
+      # Prometheus Target Scraping Errors
+      - alert: PrometheusScrapingErrors
+        expr: |
+          rate(prometheus_target_scrapes_exceeded_sample_limit_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          service_name: 'prometheus'
+        annotations:
+          summary: "Prometheus scraping errors"
+          description: "Prometheus is experiencing scraping errors. Some targets may not be properly monitored."
+
