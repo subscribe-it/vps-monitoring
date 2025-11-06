@@ -1,17 +1,18 @@
 # Troubleshooting - VPS Monitoring Stack
 
-## Problem: "rejected" services lub "bind source path does not exist"
+## Problem: "config not found" errors
 
 ### Symptomy
 
 Błędy typu:
 ```
-invalid mount config for type "bind": bind source path does not exist: /data/compose/25/config/promtail/promtail-config.yaml
+service telegram-webhook: config not found: telegram_webhook_script
+service prometheus: config not found: prometheus_config
 ```
 
 ### Przyczyna
 
-Portainer próbuje użyć bind mounts z względnymi ścieżkami, ale stack używa Docker Swarm Configs zamiast bind mounts.
+Docker Swarm Configs nie zostały utworzone w Portainer przed deployem stacku.
 
 ### Rozwiązanie
 
@@ -33,9 +34,69 @@ W Portainer → **Configs** → sprawdź czy wszystkie 14 configs istnieją:
 - `telegram_webhook_requirements`
 - `dashboard_automation_script`
 
-**2. Jeśli brakuje configs:**
+**2. Jeśli brakuje configs (NAJWAŻNIEJSZE!):**
 
-Utwórz je zgodnie z instrukcjami w [DEPLOYMENT.md](DEPLOYMENT.md) - sekcja "Tworzenie Docker Swarm Configs".
+**Musisz utworzyć wszystkie 14 configs przed deployem stacku!**
+
+**Szybka instrukcja:**
+
+1. W Portainer → **Configs** → **Add config**
+2. Dla każdego pliku z listy poniżej:
+   - **Name**: (dokładnie jak w tabeli - ważne!)
+   - **Content**: Skopiuj zawartość pliku z repozytorium GitHub
+   - Kliknij **Create the config**
+
+**Lista wszystkich 14 configs:**
+
+| Config Name | Plik źródłowy w repo |
+|------------|---------------------|
+| `prometheus_config` | `config/prometheus/prometheus.yml` |
+| `prometheus_alerts_system` | `config/prometheus/alerts/system.yml` |
+| `prometheus_alerts_http` | `config/prometheus/alerts/http.yml` |
+| `prometheus_alerts_monitoring` | `config/prometheus/alerts/monitoring.yml` |
+| `prometheus_alerts_prometheus` | `config/prometheus/alerts/prometheus.yml` |
+| `loki_config` | `config/loki/loki-config.yaml` |
+| `promtail_config` | `config/promtail/promtail-config.yaml` |
+| `alertmanager_config` | `config/alertmanager/alertmanager.yml` |
+| `blackbox_config` | `config/blackbox/blackbox.yml` |
+| `grafana_datasources` | `config/grafana/provisioning/datasources/datasources.yml` |
+| `grafana_dashboards` | `config/grafana/provisioning/dashboards/dashboards.yml` |
+| `telegram_webhook_script` | `scripts/telegram-webhook.py` |
+| `telegram_webhook_requirements` | `scripts/requirements.txt` |
+| `dashboard_automation_script` | `scripts/dashboard-automation.py` |
+
+**⚠️ WAŻNE:**
+- Nazwy configs muszą być **dokładnie** takie same jak w tabeli (case-sensitive!)
+- Jeśli brakuje choć jednego config, stack nie wystartuje
+- Po utworzeniu wszystkich configs, zaktualizuj stack w Portainer
+
+**Alternatywnie przez CLI (jeśli masz SSH):**
+```bash
+git clone <repository-url>
+cd vps-monitoring
+./scripts/create-configs.sh create
+```
+
+Szczegóły: [DEPLOYMENT.md](DEPLOYMENT.md) - sekcja "Tworzenie Docker Swarm Configs"
+
+## Problem: "rejected" services lub "bind source path does not exist"
+
+### Symptomy
+
+Błędy typu:
+```
+invalid mount config for type "bind": bind source path does not exist: /data/compose/25/config/promtail/promtail-config.yaml
+```
+
+### Przyczyna
+
+Portainer próbuje użyć bind mounts z względnymi ścieżkami, ale stack używa Docker Swarm Configs zamiast bind mounts.
+
+### Rozwiązanie
+
+**1. Sprawdź czy wszystkie Docker Configs są utworzone:**
+
+W Portainer → **Configs** → sprawdź czy wszystkie 14 configs istnieją:
 
 **3. Zaktualizuj stack w Portainer:**
 
@@ -237,4 +298,5 @@ docker config rm prometheus_config
 # Utwórz na nowo
 docker config create prometheus_config config/prometheus/prometheus.yml
 ```
+
 
