@@ -55,8 +55,8 @@ configs:
     external: true
   uptime_kuma_config:
     external: true
-  uptime_kuma_init_script:
-    external: true
+  uptime_kuma_init_script_v2:
+    file: ./scripts/uptime-kuma-init.py
 
 services:
   node-exporter:
