@@ -114,7 +114,7 @@ Kompletny system monitoringu dla infrastruktury VPS oparty na Docker Swarm. Zawi
    - **Content**: Skopiuj zawartość pliku z repozytorium
    - Kliknij **Create the config**
 
-**Lista configs (14 plików):**
+**Lista configs (19 plików):**
 - `prometheus_config` → `config/prometheus/prometheus.yml`
 - `prometheus_alerts_system` → `config/prometheus/alerts/system.yml`
 - `prometheus_alerts_http` → `config/prometheus/alerts/http.yml`
@@ -129,6 +129,11 @@ Kompletny system monitoringu dla infrastruktury VPS oparty na Docker Swarm. Zawi
 - `telegram_webhook_script` → `scripts/telegram-webhook.py`
 - `telegram_webhook_requirements` → `scripts/requirements.txt`
 - `dashboard_automation_script` → `scripts/dashboard-automation.py`
+- `dashboard_template_wordpress` → `config/grafana/provisioning/dashboards/templates/wordpress.json`
+- `dashboard_template_generic_app` → `config/grafana/provisioning/dashboards/templates/generic-app.json`
+- `dashboard_template_database` → `config/grafana/provisioning/dashboards/templates/database.json`
+- `uptime_kuma_config` → `config/uptime-kuma/uptime-kuma-config.yaml`
+- `uptime_kuma_init_script` → `scripts/uptime-kuma-init.py`
 
 **Alternatywnie przez CLI (jeśli masz dostęp SSH):**
 ```bash
@@ -216,6 +221,27 @@ xxx            monitoring_uptime-kuma      replicated   1/1        louislam/upti
 
 ### Krok 8: Konfiguracja Uptime Kuma
 
+**Automatyczna konfiguracja z pliku YAML:**
+
+Uptime Kuma automatycznie ładuje konfigurację z pliku `config/uptime-kuma/uptime-kuma-config.yaml` przez serwis `uptime-kuma-init`. 
+
+**Konfiguracja przez plik YAML:**
+
+1. Edytuj `config/uptime-kuma/uptime-kuma-config.yaml`:
+   - Dodaj monitory do sekcji `monitors`
+   - Skonfiguruj ustawienia w sekcji `settings`
+2. Zaktualizuj Docker Swarm Config `uptime_kuma_config`:
+   ```bash
+   docker config rm uptime_kuma_config
+   docker config create uptime_kuma_config config/uptime-kuma/uptime-kuma-config.yaml
+   ```
+3. Zrestartuj serwis `uptime-kuma-init`:
+   ```bash
+   docker service update --force monitoring_uptime-kuma-init
+   ```
+
+**Konfiguracja przez web UI (alternatywa):**
+
 1. Otwórz Uptime Kuma: `https://<MONITORING_HOST>/uptime-kuma`
 2. Przy pierwszym uruchomieniu utwórz konto administratora
 3. Dodaj monitorowane serwisy:
@@ -226,6 +252,10 @@ xxx            monitoring_uptime-kuma      replicated   1/1        louislam/upti
    - **Retries**: 2
 4. (Opcjonalnie) Skonfiguruj auto-restart:
    - Zobacz [ALERTING.md](docs/ALERTING.md) - sekcja "Uptime Kuma Auto-Restart"
+
+**Zmienne środowiskowe dla Uptime Kuma:**
+- `UPTIME_KUMA_USERNAME` - username dla API (domyślnie: admin)
+- `UPTIME_KUMA_PASSWORD` - hasło (ustaw przy pierwszym uruchomieniu przez web UI)
 
 ### Krok 9: Konfiguracja Duplicati (Backup)
 
@@ -411,7 +441,7 @@ Serwis `dashboard-automation` (Python) działa jako osobny kontener w stacku:
    - `app.type` - typ aplikacji (np. `wordpress`, `api`, `database`)
 3. Dla każdego nowo wykrytego serwisu:
    - Sprawdza czy dashboard już istnieje (przez Grafana API)
-   - Jeśli nie istnieje, pobiera odpowiedni template z `config/grafana/provisioning/dashboards/templates/`
+   - Jeśli nie istnieje, pobiera odpowiedni template z Docker Swarm Configs (`/app/templates/`)
    - Wypełnia template zmiennymi z labelów Prometheus:
      - `{{app.name}}` → nazwa serwisu
      - `{{app.type}}` → typ aplikacji
@@ -425,6 +455,8 @@ Serwis `dashboard-automation` (Python) działa jako osobny kontener w stacku:
 - `generic-app.json` - uniwersalny template (CPU, memory, network, disk I/O)
 - `database.json` - template dla baz danych (CPU, memory, disk I/O Read/Write)
 
+**Uwaga:** Templates są dostarczane przez Docker Swarm Configs (nie wymagają bind mounts), co zapewnia kompatybilność z Portainer i Git repository deployments.
+
 **Konfiguracja przez zmienne środowiskowe:**
 - `GRAFANA_URL` - URL Grafana API (http://grafana:3000)
 - `GRAFANA_ADMIN_USER` - użytkownik admin Grafana
@@ -436,8 +468,8 @@ Serwis `dashboard-automation` (Python) działa jako osobny kontener w stacku:
 
 ```
 vps-monitoring/
-├── docker-compose.yml              # Docker Swarm stack (9 serwisów)
-├── .env.example                    # Template zmiennych środowiskowych
+├── docker-compose.yml              # Docker Swarm stack (12 serwisów)
+├── env.portainer.example           # Template zmiennych środowiskowych
 ├── README.md                       # Ten plik
 ├── config/
 │   ├── prometheus/
@@ -446,6 +478,8 @@ vps-monitoring/
 │   │   └── loki-config.yaml        # Konfiguracja Loki (retention, limits, storage)
 │   ├── promtail/
 │   │   └── promtail-config.yaml    # Konfiguracja Promtail (scraping logów Docker)
+│   ├── uptime-kuma/
+│   │   └── uptime-kuma-config.yaml  # Konfiguracja Uptime Kuma (monitory, ustawienia)
 │   └── grafana/
 │       └── provisioning/
 │           ├── datasources/
@@ -462,7 +496,9 @@ vps-monitoring/
 │   └── CONFIGURATION.md            # Szczegóły konfiguracji każdego komponentu
 ├── scripts/
 │   ├── dashboard-automation.py     # Skrypt automatycznego tworzenia dashboardów
-│   └── deploy.sh                   # Skrypt wdrożenia i zarządzania stackiem
+│   ├── uptime-kuma-init.py         # Skrypt inicjalizacji Uptime Kuma z pliku YAML
+│   ├── deploy.sh                   # Skrypt wdrożenia i zarządzania stackiem
+│   └── requirements.txt            # Python dependencies
 └── .github/
     ├── workflows/
     │   ├── validate.yml            # Walidacja konfiguracji przy PR

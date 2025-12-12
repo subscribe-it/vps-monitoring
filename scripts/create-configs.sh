@@ -113,6 +113,34 @@ create_configs() {
         (docker config rm dashboard_automation_script 2>/dev/null; \
          docker config create dashboard_automation_script "$REPO_DIR/scripts/dashboard-automation.py")
     
+    # Dashboard templates
+    echo -e "${YELLOW}Creating dashboard_template_wordpress...${NC}"
+    docker config create dashboard_template_wordpress "$REPO_DIR/config/grafana/provisioning/dashboards/templates/wordpress.json" 2>/dev/null || \
+        (docker config rm dashboard_template_wordpress 2>/dev/null; \
+         docker config create dashboard_template_wordpress "$REPO_DIR/config/grafana/provisioning/dashboards/templates/wordpress.json")
+    
+    echo -e "${YELLOW}Creating dashboard_template_generic_app...${NC}"
+    docker config create dashboard_template_generic_app "$REPO_DIR/config/grafana/provisioning/dashboards/templates/generic-app.json" 2>/dev/null || \
+        (docker config rm dashboard_template_generic_app 2>/dev/null; \
+         docker config create dashboard_template_generic_app "$REPO_DIR/config/grafana/provisioning/dashboards/templates/generic-app.json")
+    
+    echo -e "${YELLOW}Creating dashboard_template_database...${NC}"
+    docker config create dashboard_template_database "$REPO_DIR/config/grafana/provisioning/dashboards/templates/database.json" 2>/dev/null || \
+        (docker config rm dashboard_template_database 2>/dev/null; \
+         docker config create dashboard_template_database "$REPO_DIR/config/grafana/provisioning/dashboards/templates/database.json")
+    
+    # Uptime Kuma config
+    echo -e "${YELLOW}Creating uptime_kuma_config...${NC}"
+    docker config create uptime_kuma_config "$REPO_DIR/config/uptime-kuma/uptime-kuma-config.yaml" 2>/dev/null || \
+        (docker config rm uptime_kuma_config 2>/dev/null; \
+         docker config create uptime_kuma_config "$REPO_DIR/config/uptime-kuma/uptime-kuma-config.yaml")
+    
+    # Uptime Kuma init script
+    echo -e "${YELLOW}Creating uptime_kuma_init_script...${NC}"
+    docker config create uptime_kuma_init_script "$REPO_DIR/scripts/uptime-kuma-init.py" 2>/dev/null || \
+        (docker config rm uptime_kuma_init_script 2>/dev/null; \
+         docker config create uptime_kuma_init_script "$REPO_DIR/scripts/uptime-kuma-init.py")
+    
     echo ""
     echo -e "${GREEN}✅ All Docker Configs created successfully!${NC}"
     echo ""
@@ -140,6 +168,11 @@ delete_configs() {
         "telegram_webhook_script"
         "telegram_webhook_requirements"
         "dashboard_automation_script"
+        "dashboard_template_wordpress"
+        "dashboard_template_generic_app"
+        "dashboard_template_database"
+        "uptime_kuma_config"
+        "uptime_kuma_init_script"
     )
     
     for config in "${configs[@]}"; do
@@ -181,4 +214,5 @@ case "${1:-create}" in
         exit 1
         ;;
 esac
+
 

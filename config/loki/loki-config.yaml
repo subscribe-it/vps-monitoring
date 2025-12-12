@@ -1,4 +1,6 @@
-auth_enabled: false
+# Authentication is handled by Traefik HTTPS reverse proxy
+# Set LOKI_AUTH_ENABLED=true to enable basic HTTP auth (requires additional config)
+auth_enabled: ${LOKI_AUTH_ENABLED:-false}
 
 server:
   http_listen_port: 3100
@@ -71,5 +73,6 @@ ruler:
     kvstore:
       store: inmemory
   enable_api: true
+
 
 

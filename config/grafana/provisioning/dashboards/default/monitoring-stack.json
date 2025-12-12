@@ -1,0 +1,273 @@
+{
+  "dashboard": {
+    "title": "Monitoring Stack Overview",
+    "tags": ["monitoring", "infrastructure", "stack"],
+    "timezone": "browser",
+    "schemaVersion": 27,
+    "version": 1,
+    "refresh": "30s",
+    "panels": [
+      {
+        "id": 1,
+        "gridPos": {"h": 8, "w": 6, "x": 0, "y": 0},
+        "type": "stat",
+        "title": "Prometheus Up",
+        "targets": [
+          {
+            "expr": "up{job=\"prometheus\"}",
+            "refId": "A"
+          }
+        ],
+        "datasource": "Prometheus",
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "red"},
+                {"value": 1, "color": "green"}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 2,
+        "gridPos": {"h": 8, "w": 6, "x": 6, "y": 0},
+        "type": "stat",
+        "title": "Grafana Up",
+        "targets": [
+          {
+            "expr": "up{job=~\".*grafana.*\"}",
+            "refId": "A"
+          }
+        ],
+        "datasource": "Prometheus",
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "red"},
+                {"value": 1, "color": "green"}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 3,
+        "gridPos": {"h": 8, "w": 6, "x": 12, "y": 0},
+        "type": "stat",
+        "title": "Loki Up",
+        "targets": [
+          {
+            "expr": "up{job=~\".*loki.*\"}",
+            "refId": "A"
+          }
+        ],
+        "datasource": "Prometheus",
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "red"},
+                {"value": 1, "color": "green"}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 4,
+        "gridPos": {"h": 8, "w": 6, "x": 18, "y": 0},
+        "type": "stat",
+        "title": "Alertmanager Up",
+        "targets": [
+          {
+            "expr": "up{job=\"alertmanager\"}",
+            "refId": "A"
+          }
+        ],
+        "datasource": "Prometheus",
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "red"},
+                {"value": 1, "color": "green"}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 5,
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+        "type": "graph",
+        "title": "Prometheus CPU Usage",
+        "targets": [
+          {
+            "expr": "rate(container_cpu_usage_seconds_total{job=\"prometheus\"}[5m]) * 100",
+            "refId": "A",
+            "legendFormat": "CPU %"
+          }
+        ],
+        "datasource": "Prometheus"
+      },
+      {
+        "id": 6,
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+        "type": "graph",
+        "title": "Prometheus Memory Usage",
+        "targets": [
+          {
+            "expr": "container_memory_usage_bytes{job=\"prometheus\"} / 1024 / 1024",
+            "refId": "A",
+            "legendFormat": "Memory MB"
+          }
+        ],
+        "datasource": "Prometheus"
+      },
+      {
+        "id": 7,
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+        "type": "graph",
+        "title": "Grafana CPU Usage",
+        "targets": [
+          {
+            "expr": "rate(container_cpu_usage_seconds_total{job=~\".*grafana.*\"}[5m]) * 100",
+            "refId": "A",
+            "legendFormat": "CPU %"
+          }
+        ],
+        "datasource": "Prometheus"
+      },
+      {
+        "id": 8,
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+        "type": "graph",
+        "title": "Grafana Memory Usage",
+        "targets": [
+          {
+            "expr": "container_memory_usage_bytes{job=~\".*grafana.*\"} / 1024 / 1024",
+            "refId": "A",
+            "legendFormat": "Memory MB"
+          }
+        ],
+        "datasource": "Prometheus"
+      },
+      {
+        "id": 9,
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24},
+        "type": "graph",
+        "title": "Loki CPU Usage",
+        "targets": [
+          {
+            "expr": "rate(container_cpu_usage_seconds_total{job=~\".*loki.*\"}[5m]) * 100",
+            "refId": "A",
+            "legendFormat": "CPU %"
+          }
+        ],
+        "datasource": "Prometheus"
+      },
+      {
+        "id": 10,
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24},
+        "type": "graph",
+        "title": "Loki Memory Usage",
+        "targets": [
+          {
+            "expr": "container_memory_usage_bytes{job=~\".*loki.*\"} / 1024 / 1024",
+            "refId": "A",
+            "legendFormat": "Memory MB"
+          }
+        ],
+        "datasource": "Prometheus"
+      },
+      {
+        "id": 11,
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 32},
+        "type": "graph",
+        "title": "Prometheus Targets",
+        "targets": [
+          {
+            "expr": "up",
+            "refId": "A",
+            "legendFormat": "{{ job }}"
+          }
+        ],
+        "datasource": "Prometheus"
+      },
+      {
+        "id": 12,
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 32},
+        "type": "graph",
+        "title": "Prometheus Scrape Duration",
+        "targets": [
+          {
+            "expr": "prometheus_target_interval_length_seconds",
+            "refId": "A",
+            "legendFormat": "{{ job }}"
+          }
+        ],
+        "datasource": "Prometheus"
+      },
+      {
+        "id": 13,
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 40},
+        "type": "graph",
+        "title": "Node Exporter Metrics",
+        "targets": [
+          {
+            "expr": "rate(node_cpu_seconds_total[5m]) * 100",
+            "refId": "A",
+            "legendFormat": "CPU {{ cpu }}"
+          },
+          {
+            "expr": "node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes",
+            "refId": "B",
+            "legendFormat": "Memory Used"
+          }
+        ],
+        "datasource": "Prometheus"
+      },
+      {
+        "id": 14,
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 48},
+        "type": "graph",
+        "title": "Alertmanager Alerts",
+        "targets": [
+          {
+            "expr": "alertmanager_alerts",
+            "refId": "A",
+            "legendFormat": "{{ alertname }}"
+          }
+        ],
+        "datasource": "Prometheus"
+      },
+      {
+        "id": 15,
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 48},
+        "type": "graph",
+        "title": "Prometheus Storage",
+        "targets": [
+          {
+            "expr": "prometheus_tsdb_storage_blocks_bytes",
+            "refId": "A",
+            "legendFormat": "Storage Bytes"
+          }
+        ],
+        "datasource": "Prometheus"
+      }
+    ],
+    "time": {
+      "from": "now-6h",
+      "to": "now"
+    },
+    "timepicker": {}
+  }
+}
+

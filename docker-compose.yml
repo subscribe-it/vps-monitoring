@@ -47,6 +47,16 @@ configs:
     external: true
   dashboard_automation_script:
     external: true
+  dashboard_template_wordpress:
+    external: true
+  dashboard_template_generic_app:
+    external: true
+  dashboard_template_database:
+    external: true
+  uptime_kuma_config:
+    external: true
+  uptime_kuma_init_script:
+    external: true
 
 services:
   node-exporter:
@@ -56,6 +66,13 @@ services:
       restart_policy:
         condition: any
         delay: 5s
+      resources:
+        limits:
+          cpus: '0.2'
+          memory: 128M
+        reservations:
+          cpus: '0.05'
+          memory: 32M
     command:
       - '--path.procfs=/host/proc'
       - '--path.rootfs=/rootfs'
@@ -81,6 +98,13 @@ services:
       restart_policy:
         condition: any
         delay: 5s
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
     command:
       - --docker_only=true
       - --housekeeping_interval=30s
@@ -213,6 +237,13 @@ services:
       restart_policy:
         condition: any
         delay: 5s
+      resources:
+        limits:
+          cpus: '0.3'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
     configs:
       - source: promtail_config
         target: /etc/promtail/config.yml
@@ -294,6 +325,19 @@ services:
       restart_policy:
         condition: any
         delay: 5s
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3001/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     volumes:
       - uptime_kuma_data:/app/data
     ports:
@@ -320,6 +364,13 @@ services:
       restart_policy:
         condition: any
         delay: 5s
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
     volumes:
       - duplicati_data:/config
       - duplicati_backups:/backups
@@ -402,6 +453,13 @@ services:
       restart_policy:
         condition: any
         delay: 5s
+      resources:
+        limits:
+          cpus: '0.2'
+          memory: 128M
+        reservations:
+          cpus: '0.05'
+          memory: 32M
     configs:
       - source: blackbox_config
         target: /etc/blackbox_exporter/config.yml
@@ -481,12 +539,12 @@ services:
     configs:
       - source: dashboard_automation_script
         target: /app/dashboard-automation.py
-    # Templates directory - opcjonalny bind mount (katalog)
-    # Jeśli chcesz użyć templates, dodaj sekcję volumes z poniższą linią i zmień ścieżkę na właściwą lokalizację gdzie Portainer klonuje repo
-    # W Portainer: sprawdź ścieżkę w Stack → Editor → gdzie jest docker-compose.yml (zwykle /data/compose/ID/)
-    # dashboard-automation będzie działać bez templates (utworzy dashboardy bez preloaded templates)
-    # volumes:
-    #   - /data/compose/25/config/grafana/provisioning/dashboards/templates:/app/templates:ro
+      - source: dashboard_template_wordpress
+        target: /app/templates/wordpress.json
+      - source: dashboard_template_generic_app
+        target: /app/templates/generic-app.json
+      - source: dashboard_template_database
+        target: /app/templates/database.json
     working_dir: /app
     command: python3 dashboard-automation.py
     environment:
@@ -500,3 +558,40 @@ services:
     depends_on:
       - grafana
       - prometheus
+
+  uptime-kuma-init:
+    image: python:3.11-slim
+    hostname: uptime-kuma-init
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: none
+      resources:
+        limits:
+          cpus: '0.1'
+          memory: 128M
+        reservations:
+          cpus: '0.05'
+          memory: 32M
+    configs:
+      - source: uptime_kuma_config
+        target: /app/config/uptime-kuma-config.yaml
+      - source: uptime_kuma_init_script
+        target: /app/uptime-kuma-init.py
+      - source: telegram_webhook_requirements
+        target: /app/requirements.txt
+    working_dir: /app
+    command: sh -c "pip install -q -r requirements.txt && python3 uptime-kuma-init.py"
+    environment:
+      - UPTIME_KUMA_URL=http://uptime-kuma:3001
+      - UPTIME_KUMA_USERNAME=${UPTIME_KUMA_USERNAME:-admin}
+      - UPTIME_KUMA_PASSWORD=${UPTIME_KUMA_PASSWORD:-}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
+    networks:
+      - monitoring
+    depends_on:
+      - uptime-kuma

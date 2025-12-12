@@ -748,3 +748,4 @@ docker network inspect monitoring_monitoring
 - Wykonuje rolling update (zero-downtime)
 - Zachowuje dane w volumes
 
+
