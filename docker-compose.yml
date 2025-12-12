@@ -571,7 +571,7 @@ services:
     configs:
       - source: uptime_kuma_config
         target: /app/config/uptime-kuma-config.yaml
-      - source: uptime_kuma_init_script
+      - source: uptime_kuma_init_script_v2
         target: /app/uptime-kuma-init.py
       - source: telegram_webhook_requirements
         target: /app/requirements.txt

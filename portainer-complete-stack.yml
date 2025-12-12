@@ -115,7 +115,7 @@ configs:
     file: ./config/grafana/provisioning/dashboards/templates/database.json
   uptime_kuma_config:
     file: ./config/uptime-kuma/uptime-kuma-config.yaml
-  uptime_kuma_init_script:
+  uptime_kuma_init_script_v2:
     file: ./scripts/uptime-kuma-init.py
 
 # ===== SERVICES =====
@@ -703,7 +703,7 @@ services:
     configs:
       - source: uptime_kuma_config
         target: /app/config/uptime-kuma-config.yaml
-      - source: uptime_kuma_init_script
+      - source: uptime_kuma_init_script_v2
         target: /app/uptime-kuma-init.py
       - source: telegram_webhook_requirements
         target: /app/requirements.txt
