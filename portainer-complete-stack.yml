@@ -708,14 +708,13 @@ services:
           - node.role == manager
       restart_policy:
         condition: none  # Runs once, doesn't restart
-
-    resources:
-      limits:
-        cpus: '0.1'
-        memory: 128M
-      reservations:
-        cpus: '0.05'
-        memory: 32M
+      resources:
+        limits:
+          cpus: '0.1'
+          memory: 128M
+        reservations:
+          cpus: '0.05'
+          memory: 32M
 
     configs:
       - source: uptime_kuma_config
