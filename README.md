@@ -40,23 +40,25 @@ Kompletny system monitoringu dla infrastruktury VPS oparty na Docker Swarm. Zawi
 
 ### Krok 1: Przygotowanie repozytorium
 
-**Opcja A: W Portainer (Rekomendowane)**
+**Opcja A: Z Git Repository (Rekomendowane)**
+
+1. Otwórz Portainer → **Stacks**
+2. Kliknij **Add stack**
+3. Wybierz **Git repository**
+4. **Repository URL**: `https://github.com/subscribe-it/vps-monitoring.git`
+5. **Repository reference**: `main` (lub branch)
+6. **Compose path**: `portainer-complete-stack.yml` (lub `docker-compose.yml`)
+7. **Auto-update**: (opcjonalnie) włącz dla automatycznych aktualizacji
+
+**Opcja B: Web Editor**
 
 1. Otwórz Portainer → **Stacks**
 2. Kliknij **Add stack**
 3. Wybierz **Web editor**
 4. Nazwa stacku: `monitoring`
-5. Wklej zawartość pliku `docker-compose.yml` do edytora
+5. Wklej zawartość pliku `portainer-complete-stack.yml` (lub `docker-compose.yml`) do edytora
 
-**Opcja B: Z Git Repository**
-
-1. Otwórz Portainer → **Stacks**
-2. Kliknij **Add stack**
-3. Wybierz **Git repository**
-4. **Repository URL**: `https://github.com/twoje-repo/vps-monitoring.git`
-5. **Repository reference**: `main` (lub branch)
-6. **Compose path**: `docker-compose.yml`
-7. **Auto-update**: (opcjonalnie) włącz dla automatycznych aktualizacji
+**Uwaga:** `portainer-complete-stack.yml` zawiera pełną dokumentację z komentarzami i jest zalecany do użycia w Portainerze.
 
 ### Krok 2: Konfiguracja zmiennych środowiskowych
 
@@ -468,8 +470,10 @@ Serwis `dashboard-automation` (Python) działa jako osobny kontener w stacku:
 
 ```
 vps-monitoring/
-├── docker-compose.yml              # Docker Swarm stack (13 serwisów)
+├── docker-compose.yml              # Docker Swarm stack (13 serwisów) - podstawowa wersja
+├── portainer-complete-stack.yml    # Docker Swarm stack z pełną dokumentacją (zalecany dla Portainera)
 ├── env.portainer.example           # Template zmiennych środowiskowych
+├── DEPLOY.md                       # Szybki przewodnik wdrożenia
 ├── README.md                       # Ten plik
 ├── dockerfiles/                    # Dockerfiles dla custom obrazów
 │   ├── telegram-webhook/
