@@ -9,14 +9,21 @@
 **Opcja A: Przez Portainer UI**
 1. Portainer → **Configs** → **Add config**
 2. Dla każdego z 19 plików:
-   - **Name**: (patrz lista poniżej)
-   - **Content**: Skopiuj zawartość pliku z GitHub
+   - **Name**: (patrz lista poniżej) - **WAŻNE: użyj dokładnie tej nazwy!**
+   - **Content**: Skopiuj zawartość pliku z GitHub (kliknij Raw, aby zobaczyć surową zawartość)
    - Kliknij **Create the config**
+3. **ODŚWIEŻ stronę Portainera (F5)** po utworzeniu wszystkich configs
+4. Sprawdź czy wszystkie 19 configs są widoczne przed wdrożeniem stacku
 
-**Opcja B: Przez skrypt (jeśli masz SSH)**
+**Opcja B: Przez skrypt (jeśli masz SSH) - REKOMENDOWANE**
 ```bash
 cd /run/media/dawid/Linux_Projekty/vps-monitoring
 ./scripts/create-configs.sh create
+```
+
+**Pomocnik do sprawdzania configs:**
+```bash
+./scripts/portainer-configs-helper.sh
 ```
 
 **Lista wszystkich 19 configs:**
