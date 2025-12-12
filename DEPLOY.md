@@ -59,15 +59,17 @@ cd /run/media/dawid/Linux_Projekty/vps-monitoring
 3. **Build method**: Wybierz **Git repository**
 4. **Repository URL**: `https://github.com/subscribe-it/vps-monitoring.git`
 5. **Repository reference**: `main`
-6. **Compose path**: `docker-compose.yml`
+6. **Compose path**: `portainer-complete-stack.yml` (lub `docker-compose.yml` jeśli preferujesz)
 7. **Auto-update**: (opcjonalnie) włącz dla automatycznych aktualizacji
 
-**Opcja B: Web Editor**
+**Opcja B: Web Editor (Rekomendowane dla portainer-complete-stack.yml)**
 
 1. Portainer → **Stacks** → **Add stack**
 2. **Name**: `monitoring`
 3. **Build method**: Wybierz **Web editor**
-4. Skopiuj zawartość `docker-compose.yml` z GitHub i wklej do edytora
+4. Skopiuj zawartość `portainer-complete-stack.yml` z GitHub i wklej do edytora
+   - Plik zawiera pełną dokumentację i komentarze dla Portainera
+   - Alternatywnie możesz użyć `docker-compose.yml` (mniej dokumentacji)
 
 ### 4. ✅ Konfiguracja zmiennych środowiskowych
 
