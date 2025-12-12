@@ -37,28 +37,20 @@
 #
 # 1. Docker Swarm must be initialized
 # 2. Traefik network 'traefik-public' must exist (overlay, attachable)
-# 3. All 19 Docker Swarm Configs must be created BEFORE deployment:
-#    - prometheus_config
-#    - prometheus_alerts_system
-#    - prometheus_alerts_http
-#    - prometheus_alerts_monitoring
-#    - prometheus_alerts_prometheus
-#    - loki_config
-#    - promtail_config
-#    - alertmanager_config
-#    - blackbox_config
-#    - grafana_datasources
-#    - grafana_dashboards
-#    - telegram_webhook_script
-#    - telegram_webhook_requirements
-#    - dashboard_automation_script
-#    - dashboard_template_wordpress
-#    - dashboard_template_generic_app
-#    - dashboard_template_database
-#    - uptime_kuma_config
-#    - uptime_kuma_init_script
+# 3. Configs are automatically loaded from files in the repository
+#    No need to create Docker Swarm Configs manually - they are loaded from:
+#    - ./config/prometheus/prometheus.yml
+#    - ./config/prometheus/alerts/*.yml
+#    - ./config/loki/loki-config.yaml
+#    - ./config/promtail/promtail-config.yaml
+#    - ./config/alertmanager/alertmanager.yml
+#    - ./config/blackbox/blackbox.yml
+#    - ./config/grafana/provisioning/**/*.yml
+#    - ./scripts/*.py
+#    - ./scripts/requirements.txt
+#    - ./config/uptime-kuma/uptime-kuma-config.yaml
 #
-# See DEPLOY.md for detailed instructions on creating configs.
+# All configs are automatically loaded when deploying from Git repository.
 #
 # ============================================
 
@@ -84,47 +76,47 @@ volumes:
   alertmanager_data: {}    # Alertmanager state
 
 # ===== DOCKER SWARM CONFIGS =====
-# All configs must be created BEFORE deploying this stack
-# See DEPLOY.md for instructions on creating configs
+# All configs are loaded directly from files in the repository
+# No need to create configs manually - they are automatically loaded from files
 configs:
   prometheus_config:
-    external: true
+    file: ./config/prometheus/prometheus.yml
   prometheus_alerts_system:
-    external: true
+    file: ./config/prometheus/alerts/system.yml
   prometheus_alerts_http:
-    external: true
+    file: ./config/prometheus/alerts/http.yml
   prometheus_alerts_monitoring:
-    external: true
+    file: ./config/prometheus/alerts/monitoring.yml
   prometheus_alerts_prometheus:
-    external: true
+    file: ./config/prometheus/alerts/prometheus.yml
   loki_config:
-    external: true
+    file: ./config/loki/loki-config.yaml
   promtail_config:
-    external: true
+    file: ./config/promtail/promtail-config.yaml
   alertmanager_config:
-    external: true
+    file: ./config/alertmanager/alertmanager.yml
   blackbox_config:
-    external: true
+    file: ./config/blackbox/blackbox.yml
   grafana_datasources:
-    external: true
+    file: ./config/grafana/provisioning/datasources/datasources.yml
   grafana_dashboards:
-    external: true
+    file: ./config/grafana/provisioning/dashboards/dashboards.yml
   telegram_webhook_script:
-    external: true
+    file: ./scripts/telegram-webhook.py
   telegram_webhook_requirements:
-    external: true
+    file: ./scripts/requirements.txt
   dashboard_automation_script:
-    external: true
+    file: ./scripts/dashboard-automation.py
   dashboard_template_wordpress:
-    external: true
+    file: ./config/grafana/provisioning/dashboards/templates/wordpress.json
   dashboard_template_generic_app:
-    external: true
+    file: ./config/grafana/provisioning/dashboards/templates/generic-app.json
   dashboard_template_database:
-    external: true
+    file: ./config/grafana/provisioning/dashboards/templates/database.json
   uptime_kuma_config:
-    external: true
+    file: ./config/uptime-kuma/uptime-kuma-config.yaml
   uptime_kuma_init_script:
-    external: true
+    file: ./scripts/uptime-kuma-init.py
 
 # ===== SERVICES =====
 services:
