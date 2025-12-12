@@ -471,7 +471,7 @@ services:
       - monitoring
 
   telegram-webhook:
-    image: python:3.11-slim
+    image: ghcr.io/subscribe-it/vps-monitoring-telegram-webhook:latest
     hostname: telegram-webhook
     deploy:
       replicas: 1
@@ -513,7 +513,7 @@ services:
       - alertmanager
 
   dashboard-automation:
-    image: python:3.11-slim
+    image: ghcr.io/subscribe-it/vps-monitoring-dashboard-automation:latest
     hostname: dashboard-automation
     deploy:
       replicas: 1
@@ -560,7 +560,7 @@ services:
       - prometheus
 
   uptime-kuma-init:
-    image: python:3.11-slim
+    image: ghcr.io/subscribe-it/vps-monitoring-uptime-kuma-init:latest
     hostname: uptime-kuma-init
     deploy:
       replicas: 1

@@ -468,9 +468,16 @@ Serwis `dashboard-automation` (Python) działa jako osobny kontener w stacku:
 
 ```
 vps-monitoring/
-├── docker-compose.yml              # Docker Swarm stack (12 serwisów)
+├── docker-compose.yml              # Docker Swarm stack (13 serwisów)
 ├── env.portainer.example           # Template zmiennych środowiskowych
 ├── README.md                       # Ten plik
+├── dockerfiles/                    # Dockerfiles dla custom obrazów
+│   ├── telegram-webhook/
+│   │   └── Dockerfile              # Dockerfile dla Telegram webhook
+│   ├── dashboard-automation/
+│   │   └── Dockerfile              # Dockerfile dla Dashboard automation
+│   └── uptime-kuma-init/
+│       └── Dockerfile              # Dockerfile dla Uptime Kuma init
 ├── config/
 │   ├── prometheus/
 │   │   └── prometheus.yml          # Konfiguracja Prometheus z Docker Swarm Service Discovery
@@ -673,6 +680,16 @@ docker service ps monitoring_grafana
 
 ### GitHub Actions Workflows
 
+**Build Docker Images:**
+- Automatically builds custom Docker images on push to `main`
+- Pushes images to GitHub Container Registry (ghcr.io)
+- Images are pre-built and ready for deployment:
+  - `ghcr.io/subscribe-it/vps-monitoring-telegram-webhook:latest`
+  - `ghcr.io/subscribe-it/vps-monitoring-dashboard-automation:latest`
+  - `ghcr.io/subscribe-it/vps-monitoring-uptime-kuma-init:latest`
+- Supports multi-platform builds (linux/amd64, linux/arm64)
+- Uses Docker layer caching for faster builds
+
 **Automatic Validation:**
 - Pull requests are automatically validated
 - Checks docker-compose.yml syntax
@@ -687,21 +704,29 @@ docker service ps monitoring_grafana
 
 ### Setup
 
-1. **Configure GitHub Secret:**
+1. **Docker Images (Automatic):**
+   - Custom Docker images are automatically built by GitHub Actions
+   - Images are pushed to GitHub Container Registry (ghcr.io)
+   - No manual build required - images are ready to use
+   - Images are public and can be pulled by Portainer automatically
+
+2. **Configure GitHub Secret:**
    - Add `PORTAINER_MONITORING_WEBHOOK` secret
    - Get webhook URL from Portainer (Stack → Webhooks)
    - See [.github/SECRETS.md](.github/SECRETS.md) for details
 
-2. **Configure Portainer Stack:**
+3. **Configure Portainer Stack:**
    - Create stack in Portainer with "Repository" method
    - Point to your GitHub repository
    - Set branch to `main`
    - Compose path: `docker-compose.yml`
+   - Portainer will automatically pull images from ghcr.io
 
-3. **Deploy:**
+4. **Deploy:**
    - Push changes to `main` branch
-   - GitHub Actions validates and triggers webhook
-   - Portainer automatically updates the stack
+   - GitHub Actions builds images and validates configuration
+   - GitHub Actions triggers Portainer webhook
+   - Portainer automatically updates the stack with new images
 
 See [.github/SECRETS.md](.github/SECRETS.md) for detailed setup instructions.
 

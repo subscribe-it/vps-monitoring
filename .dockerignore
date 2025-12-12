@@ -1,0 +1,39 @@
+# Git
+.git
+.gitignore
+.github
+
+# Documentation
+*.md
+docs/
+
+# Docker
+docker-compose.yml
+.dockerignore
+
+# Configs (will be mounted via Docker Swarm Configs)
+config/
+
+# Environment files
+.env
+.env.*
+env.*
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
