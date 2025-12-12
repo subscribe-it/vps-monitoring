@@ -319,7 +319,7 @@ services:
     volumes:
       - loki_data:/loki
 
-    command: -config.file=/etc/loki/local-config.yaml
+    command: -config.file=/etc/loki/local-config.yaml -config.expand-env=true
 
     ports:
       - "3100:3100"
@@ -557,7 +557,7 @@ services:
           memory: 32M
 
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8088/health || exit 1"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8088/ || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3

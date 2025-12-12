@@ -147,6 +147,11 @@ class AlertHandler(BaseHTTPRequestHandler):
             'telegram_configured': bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)
         }).encode())
     
+    def do_HEAD(self):
+        """Health check endpoint for HEAD requests"""
+        self.send_response(200)
+        self.end_headers()
+    
     def log_message(self, format, *args):
         """Override to use logger instead of print"""
         logger.info(f"{self.address_string()} - {format % args}")
