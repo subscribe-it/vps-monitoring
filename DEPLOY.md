@@ -2,50 +2,25 @@
 
 ## Krok po kroku
 
-### 1. ✅ Przygotowanie Docker Swarm Configs (WAŻNE!)
+### 1. ✅ Przygotowanie Configs (AUTOMATYCZNE!)
 
-**Musisz utworzyć wszystkie configs PRZED wdrożeniem stacku!**
+**✅ Configs są automatycznie ładowane z plików w repozytorium!**
 
-**Opcja A: Przez Portainer UI**
-1. Portainer → **Configs** → **Add config**
-2. Dla każdego z 19 plików:
-   - **Name**: (patrz lista poniżej) - **WAŻNE: użyj dokładnie tej nazwy!**
-   - **Content**: Skopiuj zawartość pliku z GitHub (kliknij Raw, aby zobaczyć surową zawartość)
-   - Kliknij **Create the config**
-3. **ODŚWIEŻ stronę Portainera (F5)** po utworzeniu wszystkich configs
-4. Sprawdź czy wszystkie 19 configs są widoczne przed wdrożeniem stacku
+**Nie musisz tworzyć Docker Swarm Configs ręcznie** - wszystkie configs są automatycznie ładowane z plików w repozytorium podczas wdrażania stacku z Git.
 
-**Opcja B: Przez skrypt (jeśli masz SSH) - REKOMENDOWANE**
-```bash
-cd /run/media/dawid/Linux_Projekty/vps-monitoring
-./scripts/create-configs.sh create
-```
+**Pliki configs są automatycznie dostępne:**
+- `config/prometheus/prometheus.yml`
+- `config/prometheus/alerts/*.yml`
+- `config/loki/loki-config.yaml`
+- `config/promtail/promtail-config.yaml`
+- `config/alertmanager/alertmanager.yml`
+- `config/blackbox/blackbox.yml`
+- `config/grafana/provisioning/**/*.yml`
+- `scripts/*.py`
+- `scripts/requirements.txt`
+- `config/uptime-kuma/uptime-kuma-config.yaml`
 
-**Pomocnik do sprawdzania configs:**
-```bash
-./scripts/portainer-configs-helper.sh
-```
-
-**Lista wszystkich 19 configs:**
-1. `prometheus_config` → `config/prometheus/prometheus.yml`
-2. `prometheus_alerts_system` → `config/prometheus/alerts/system.yml`
-3. `prometheus_alerts_http` → `config/prometheus/alerts/http.yml`
-4. `prometheus_alerts_monitoring` → `config/prometheus/alerts/monitoring.yml`
-5. `prometheus_alerts_prometheus` → `config/prometheus/alerts/prometheus.yml`
-6. `loki_config` → `config/loki/loki-config.yaml`
-7. `promtail_config` → `config/promtail/promtail-config.yaml`
-8. `alertmanager_config` → `config/alertmanager/alertmanager.yml`
-9. `blackbox_config` → `config/blackbox/blackbox.yml`
-10. `grafana_datasources` → `config/grafana/provisioning/datasources/datasources.yml`
-11. `grafana_dashboards` → `config/grafana/provisioning/dashboards/dashboards.yml`
-12. `telegram_webhook_script` → `scripts/telegram-webhook.py`
-13. `telegram_webhook_requirements` → `scripts/requirements.txt`
-14. `dashboard_automation_script` → `scripts/dashboard-automation.py`
-15. `dashboard_template_wordpress` → `config/grafana/provisioning/dashboards/templates/wordpress.json`
-16. `dashboard_template_generic_app` → `config/grafana/provisioning/dashboards/templates/generic-app.json`
-17. `dashboard_template_database` → `config/grafana/provisioning/dashboards/templates/database.json`
-18. `uptime_kuma_config` → `config/uptime-kuma/uptime-kuma-config.yaml`
-19. `uptime_kuma_init_script` → `scripts/uptime-kuma-init.py`
+**Uwaga:** Jeśli używasz metody **Web Editor** w Portainerze (kopiujesz YAML), musisz upewnić się, że wszystkie pliki configs są dostępne w repozytorium Git, ponieważ Portainer ładuje je automatycznie podczas wdrażania.
 
 ### 2. ✅ Sprawdź sieć Traefik
 
@@ -100,8 +75,8 @@ W Portainer Stack Editor, dodaj zmienne środowiskowe:
 
 ### 5. ✅ Deploy
 
-1. Sprawdź czy wszystkie configs są utworzone (19 plików)
-2. Sprawdź czy zmienne środowiskowe są dodane
+1. Sprawdź czy zmienne środowiskowe są dodane
+2. Jeśli używasz **Git repository** - upewnij się, że wszystkie pliki configs są w repozytorium
 3. Kliknij **Deploy the stack**
 4. Poczekaj na uruchomienie wszystkich serwisów (1-2 minuty)
 
@@ -161,7 +136,9 @@ docker service logs monitoring_telegram-webhook
 ## ⚠️ Troubleshooting
 
 **Problem: "config not found"**
-- Sprawdź czy wszystkie 19 configs są utworzone w Portainer → Configs
+- Jeśli używasz **Git repository** - upewnij się, że wszystkie pliki configs są dostępne w repozytorium
+- Jeśli używasz **Web Editor** - upewnij się, że wszystkie pliki są dostępne w repozytorium Git
+- Sprawdź czy ścieżki do plików w `portainer-complete-stack.yml` są poprawne
 
 **Problem: "network traefik-public not found"**
 - Utwórz sieć `traefik-public` jako overlay network
