@@ -38,6 +38,9 @@ jobs:
           - name: uptime-kuma-init
             dockerfile: dockerfiles/uptime-kuma-init/Dockerfile
             context: .
+          - name: wordpress-stack-discovery
+            dockerfile: dockerfiles/wordpress-stack-discovery/Dockerfile
+            context: .
 
     steps:
       - name: Checkout repository
@@ -92,6 +95,7 @@ jobs:
           echo "- \`${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-telegram-webhook:latest\`" >> $GITHUB_STEP_SUMMARY
           echo "- \`${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-dashboard-automation:latest\`" >> $GITHUB_STEP_SUMMARY
           echo "- \`${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-uptime-kuma-init:latest\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-wordpress-stack-discovery:latest\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "📦 Images are ready to be used in docker-compose.yml" >> $GITHUB_STEP_SUMMARY
 

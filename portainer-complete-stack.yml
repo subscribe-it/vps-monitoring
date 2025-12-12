@@ -724,6 +724,60 @@ services:
     depends_on:
       - uptime-kuma
 
+  # ===== WORDPRESS STACK DISCOVERY =====
+  # Automatically discovers WordPress stacks in Docker Swarm and creates:
+  # - Uptime Kuma monitors (WordPress HTTP, MariaDB TCP, Redis TCP)
+  # - Grafana dashboards (using templates)
+  # Image: Pre-built in GitHub Container Registry (ghcr.io)
+  # Runs continuously, checking for new stacks every 5 minutes
+  wordpress-stack-discovery:
+    image: ghcr.io/subscribe-it/vps-monitoring-wordpress-stack-discovery:latest
+    hostname: wordpress-stack-discovery
+
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: any
+        delay: 5s
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+    configs:
+      - source: dashboard_template_wordpress
+        target: /app/templates/wordpress.json
+      - source: dashboard_template_generic_app
+        target: /app/templates/generic-app.json
+      - source: dashboard_template_database
+        target: /app/templates/database.json
+
+    environment:
+      - UPTIME_KUMA_URL=http://uptime-kuma:3001
+      - UPTIME_KUMA_USERNAME=${UPTIME_KUMA_USERNAME:-admin}
+      - UPTIME_KUMA_PASSWORD=${UPTIME_KUMA_PASSWORD:-}
+      - GRAFANA_URL=http://grafana:3000
+      - GRAFANA_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GRAFANA_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - CHECK_INTERVAL=300  # 5 minutes
+      - STACK_PATTERN=jpolski_.*_prod_.*
+
+    networks:
+      - monitoring
+
+    depends_on:
+      - uptime-kuma
+      - grafana
+
   # ===== DUPLICATI =====
   # Backup solution for monitoring data
   # Backs up Prometheus, Grafana, Loki, Uptime Kuma, and Alertmanager volumes

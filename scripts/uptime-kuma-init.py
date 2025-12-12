@@ -140,6 +140,39 @@ class UptimeKumaClient:
         except Exception as e:
             logger.error(f"Error creating monitor '{monitor_config.get('name')}': {e}")
             return False
+    
+    def update_monitor(self, monitor_id: int, monitor_config: Dict) -> bool:
+        """Update an existing monitor"""
+        try:
+            payload = {
+                'name': monitor_config.get('name'),
+                'type': monitor_config.get('type', 'http'),
+                'url': monitor_config.get('url'),
+                'interval': monitor_config.get('interval', 60),
+                'retries': monitor_config.get('retries', 2),
+                'timeout': monitor_config.get('timeout', 10),
+            }
+            
+            # Add TCP-specific fields if needed
+            if monitor_config.get('type') == 'tcp':
+                payload['port'] = monitor_config.get('port', 3306)
+            
+            response = self.session.put(
+                f"{self.api_url}/monitors/{monitor_id}",
+                json=payload,
+                headers={'Authorization': f'Bearer {self.token}'},
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                logger.info(f"✅ Updated monitor: {monitor_config.get('name')}")
+                return True
+            else:
+                logger.error(f"Failed to update monitor '{monitor_config.get('name')}': {response.status_code}")
+                return False
+        except Exception as e:
+            logger.error(f"Error updating monitor '{monitor_config.get('name')}': {e}")
+            return False
 
 
 def load_config(config_file: Path) -> Optional[Dict]:
