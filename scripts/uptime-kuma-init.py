@@ -8,6 +8,7 @@ import os
 import time
 import yaml
 import requests
+import socketio
 import logging
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -29,23 +30,34 @@ RETRY_INTERVAL = 5
 
 
 class UptimeKumaClient:
-    """Client for Uptime Kuma API"""
+    """Client for Uptime Kuma API using Socket.IO"""
     
     def __init__(self, base_url: str, username: str, password: str):
         self.base_url = base_url.rstrip('/')
-        self.api_url = f"{self.base_url}/api"
-        self.session = requests.Session()
+        # Extract hostname and port from URL
+        if self.base_url.startswith('http://'):
+            socket_url = self.base_url.replace('http://', 'ws://')
+        elif self.base_url.startswith('https://'):
+            socket_url = self.base_url.replace('https://', 'wss://')
+        else:
+            socket_url = f"ws://{self.base_url}"
+        
+        self.sio = socketio.Client()
         self.username = username
         self.password = password
-        self.token = None
+        self.connected = False
+        self.logged_in = False
+        self.monitors_cache = []
+        self.login_event = None
     
     def wait_for_service(self, max_retries: int = MAX_RETRIES, retry_interval: int = RETRY_INTERVAL):
         """Wait for Uptime Kuma service to be ready"""
         logger.info(f"Waiting for Uptime Kuma at {self.base_url}...")
         
+        session = requests.Session()
         for i in range(max_retries):
             try:
-                response = self.session.get(f"{self.base_url}/", timeout=5)
+                response = session.get(f"{self.base_url}/", timeout=5)
                 if response.status_code == 200:
                     logger.info("✅ Uptime Kuma is ready")
                     return True
@@ -59,45 +71,91 @@ class UptimeKumaClient:
         return False
     
     def login(self) -> bool:
-        """Login to Uptime Kuma"""
+        """Login to Uptime Kuma using Socket.IO"""
+        if not self.username:
+            logger.error("UPTIME_KUMA_USERNAME is not set")
+            return False
+        
+        if not self.password:
+            logger.error("UPTIME_KUMA_PASSWORD is not set - please set it in Portainer environment variables")
+            return False
+        
         try:
-            response = self.session.post(
-                f"{self.api_url}/login",
-                json={
-                    'username': self.username,
-                    'password': self.password
-                },
-                timeout=10
-            )
+            # Connect to Socket.IO server
+            socket_url = self.base_url.replace('http://', 'ws://').replace('https://', 'wss://')
+            logger.info(f"Connecting to Uptime Kuma Socket.IO at {socket_url}...")
             
-            if response.status_code == 200:
-                data = response.json()
-                if data.get('ok'):
-                    self.token = data.get('token')
+            self.login_event = None
+            
+            @self.sio.event
+            def connect():
+                logger.info("✅ Connected to Uptime Kuma Socket.IO")
+                self.connected = True
+            
+            @self.sio.event
+            def disconnect():
+                logger.warning("Disconnected from Uptime Kuma Socket.IO")
+                self.connected = False
+            
+            @self.sio.on('login')
+            def on_login(data):
+                self.login_event = data
+            
+            self.sio.connect(socket_url, wait_timeout=10)
+            
+            # Wait for connection
+            time.sleep(1)
+            
+            if not self.connected:
+                logger.error("Failed to connect to Uptime Kuma Socket.IO")
+                return False
+            
+            # Send login event
+            logger.info(f"Attempting to login as user: {self.username}")
+            self.sio.emit('login', {
+                'username': self.username,
+                'password': self.password
+            })
+            
+            # Wait for login response
+            time.sleep(2)
+            
+            if self.login_event:
+                if self.login_event.get('ok'):
+                    self.logged_in = True
                     logger.info("✅ Logged in to Uptime Kuma")
                     return True
                 else:
-                    logger.error(f"Login failed: {data.get('msg', 'Unknown error')}")
+                    error_msg = self.login_event.get('msg', 'Unknown error')
+                    logger.error(f"Login failed: {error_msg}")
                     return False
             else:
-                logger.error(f"Login failed with status {response.status_code}")
+                logger.error("No response from login event")
                 return False
+                
         except Exception as e:
-            logger.error(f"Error during login: {e}")
+            logger.error(f"Error during login: {e}", exc_info=True)
             return False
     
     def get_monitors(self) -> List[Dict]:
         """Get all existing monitors"""
+        if not self.logged_in:
+            logger.error("Not logged in to Uptime Kuma")
+            return []
+        
         try:
-            response = self.session.get(
-                f"{self.api_url}/monitors",
-                headers={'Authorization': f'Bearer {self.token}'},
-                timeout=10
-            )
+            monitors_event = None
             
-            if response.status_code == 200:
-                data = response.json()
-                return data.get('monitors', [])
+            @self.sio.on('monitors')
+            def on_monitors(data):
+                nonlocal monitors_event
+                monitors_event = data
+            
+            self.sio.emit('getMonitorsList')
+            time.sleep(1)
+            
+            if monitors_event:
+                return monitors_event.get('monitors', [])
             return []
         except Exception as e:
             logger.error(f"Error fetching monitors: {e}")
@@ -110,6 +168,10 @@ class UptimeKumaClient:
     
     def create_monitor(self, monitor_config: Dict) -> bool:
         """Create a monitor in Uptime Kuma"""
+        if not self.logged_in:
+            logger.error("Not logged in to Uptime Kuma")
+            return False
+        
         if self.monitor_exists(monitor_config.get('name')):
             logger.debug(f"Monitor '{monitor_config['name']}' already exists, skipping")
             return False
@@ -124,18 +186,26 @@ class UptimeKumaClient:
                 'timeout': monitor_config.get('timeout', 10),
             }
             
-            response = self.session.post(
-                f"{self.api_url}/monitors",
-                json=payload,
-                headers={'Authorization': f'Bearer {self.token}'},
-                timeout=10
-            )
+            # Add TCP-specific fields if needed
+            if monitor_config.get('type') == 'tcp':
+                payload['port'] = monitor_config.get('port', 3306)
             
-            if response.status_code == 200:
+            add_result = None
+            
+            @self.sio.on('addMonitor')
+            def on_add_monitor(data):
+                nonlocal add_result
+                add_result = data
+            
+            self.sio.emit('addMonitor', payload)
+            time.sleep(1)
+            
+            if add_result and add_result.get('ok'):
                 logger.info(f"✅ Created monitor: {monitor_config['name']}")
                 return True
             else:
-                logger.error(f"Failed to create monitor '{monitor_config['name']}': {response.status_code}")
+                error_msg = add_result.get('msg', 'Unknown error') if add_result else 'No response'
+                logger.error(f"Failed to create monitor '{monitor_config['name']}': {error_msg}")
                 return False
         except Exception as e:
             logger.error(f"Error creating monitor '{monitor_config.get('name')}': {e}")
@@ -143,8 +213,13 @@ class UptimeKumaClient:
     
     def update_monitor(self, monitor_id: int, monitor_config: Dict) -> bool:
         """Update an existing monitor"""
+        if not self.logged_in:
+            logger.error("Not logged in to Uptime Kuma")
+            return False
+        
         try:
             payload = {
+                'id': monitor_id,
                 'name': monitor_config.get('name'),
                 'type': monitor_config.get('type', 'http'),
                 'url': monitor_config.get('url'),
@@ -157,18 +232,22 @@ class UptimeKumaClient:
             if monitor_config.get('type') == 'tcp':
                 payload['port'] = monitor_config.get('port', 3306)
             
-            response = self.session.put(
-                f"{self.api_url}/monitors/{monitor_id}",
-                json=payload,
-                headers={'Authorization': f'Bearer {self.token}'},
-                timeout=10
-            )
+            update_result = None
             
-            if response.status_code == 200:
+            @self.sio.on('editMonitor')
+            def on_edit_monitor(data):
+                nonlocal update_result
+                update_result = data
+            
+            self.sio.emit('editMonitor', payload)
+            time.sleep(1)
+            
+            if update_result and update_result.get('ok'):
                 logger.info(f"✅ Updated monitor: {monitor_config.get('name')}")
                 return True
             else:
-                logger.error(f"Failed to update monitor '{monitor_config.get('name')}': {response.status_code}")
+                error_msg = update_result.get('msg', 'Unknown error') if update_result else 'No response'
+                logger.error(f"Failed to update monitor '{monitor_config.get('name')}': {error_msg}")
                 return False
         except Exception as e:
             logger.error(f"Error updating monitor '{monitor_config.get('name')}': {e}")
