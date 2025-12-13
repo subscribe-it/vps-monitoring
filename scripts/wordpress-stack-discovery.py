@@ -71,7 +71,17 @@ class UptimeKumaClient:
     
     def login(self) -> bool:
         """Login to Uptime Kuma"""
+        # Check if credentials are set
+        if not self.username:
+            logger.error("UPTIME_KUMA_USERNAME is not set")
+            return False
+        
+        if not self.password:
+            logger.error("UPTIME_KUMA_PASSWORD is not set - please set it in Portainer environment variables")
+            return False
+        
         try:
+            logger.info(f"Attempting to login to Uptime Kuma as user: {self.username}")
             response = self.session.post(
                 f"{self.api_url}/login",
                 json={
@@ -81,18 +91,33 @@ class UptimeKumaClient:
                 timeout=10
             )
             
+            logger.debug(f"Login response status: {response.status_code}")
+            
             if response.status_code == 200:
                 data = response.json()
+                logger.debug(f"Login response data: {data}")
                 if data.get('ok'):
                     self.token = data.get('token')
                     logger.info("✅ Logged in to Uptime Kuma")
                     return True
                 else:
-                    logger.error(f"Login failed: {data.get('msg', 'Unknown error')}")
+                    error_msg = data.get('msg', 'Unknown error')
+                    logger.error(f"Login failed: {error_msg}")
+                    logger.error(f"Response: {data}")
                     return False
+            else:
+                logger.error(f"Login failed with status {response.status_code}")
+                try:
+                    error_data = response.json()
+                    logger.error(f"Error response: {error_data}")
+                except:
+                    logger.error(f"Error response text: {response.text}")
+                return False
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Network error during login: {e}")
             return False
         except Exception as e:
-            logger.error(f"Error during login: {e}")
+            logger.error(f"Unexpected error during login: {e}", exc_info=True)
             return False
     
     def get_monitors(self) -> List[Dict]:
@@ -502,6 +527,8 @@ class WordPressStackDiscovery:
         logger.info(f"Stack pattern: {STACK_PATTERN}")
         logger.info(f"Check interval: {CHECK_INTERVAL}s")
         logger.info(f"Uptime Kuma URL: {UPTIME_KUMA_URL}")
+        logger.info(f"Uptime Kuma Username: {UPTIME_KUMA_USERNAME}")
+        logger.info(f"Uptime Kuma Password: {'***' if UPTIME_KUMA_PASSWORD else 'NOT SET'}")
         logger.info(f"Grafana URL: {GRAFANA_URL}")
         
         # Wait for Uptime Kuma
@@ -512,6 +539,10 @@ class WordPressStackDiscovery:
         # Login to Uptime Kuma
         if not self.uptime_kuma.login():
             logger.error("Failed to login to Uptime Kuma, exiting")
+            logger.error("Please check:")
+            logger.error("1. UPTIME_KUMA_USERNAME is set in Portainer environment variables")
+            logger.error("2. UPTIME_KUMA_PASSWORD is set in Portainer environment variables")
+            logger.error("3. Credentials match the Uptime Kuma admin account")
             return
         
         # Run discovery loop
