@@ -1,11 +1,10 @@
 global:
-  scrape_interval: 30s
+  scrape_interval: 15s
   evaluation_interval: 15s
   external_labels:
     cluster: 'vps-monitoring'
     environment: 'production'
 
-# Alertmanager configuration
 alerting:
   alertmanagers:
     - static_configs:
@@ -15,49 +14,132 @@ alerting:
 rule_files:
   - "alerts/*.yml"
 
-# Remote write configuration (optional)
-# Uncomment and configure to send metrics to external systems (Thanos, Cortex, VictoriaMetrics, etc.)
-# Example configuration:
-# remote_write:
-#   - url: "http://thanos-receive:10908/api/v1/receive"
-#     queue_config:
-#       max_samples_per_send: 1000
-#       batch_send_deadline: 5s
-#       max_retries: 3
-#     write_relabel_configs:
-#       - source_labels: [__name__]
-#         regex: '.*'
-#         action: keep
-
 scrape_configs:
-  # Prometheus self-monitoring
+
+  # ---------- MONITORING STACK SELF-MONITORING ----------
+
   - job_name: 'prometheus'
     static_configs:
       - targets: ['localhost:9090']
     metrics_path: '/metrics'
 
-  # Node Exporter - system metrics
+  - job_name: 'alertmanager'
+    static_configs:
+      - targets: ['alertmanager:9093']
+    metrics_path: '/metrics'
+
+  - job_name: 'loki'
+    static_configs:
+      - targets: ['loki:3100']
+    metrics_path: '/metrics'
+
+  # ---------- HOST METRICS ----------
+
   - job_name: 'node-exporter'
     static_configs:
       - targets: ['node-exporter:9100']
     metrics_path: '/metrics'
 
-  # cAdvisor - container metrics
+  # ---------- ALL DOCKER CONTAINERS (OOTB - no labels needed) ----------
+  # cAdvisor automatically discovers and scrapes metrics from ALL running containers
+
   - job_name: 'cadvisor'
     static_configs:
       - targets: ['cadvisor:8081']
     metrics_path: '/metrics'
+    scrape_interval: 15s
+    metric_relabel_configs:
+      # Normalize container name from Docker name field
+      - source_labels: [name]
+        target_label: container_name
+        regex: '/?(.+)'
+        replacement: '${1}'
+      # Enrich with Docker Compose service name if available
+      - source_labels: [container_label_com_docker_compose_service]
+        target_label: compose_service
+        regex: '(.+)'
+        replacement: '${1}'
+      # Enrich with Docker Swarm service name if available
+      - source_labels: [container_label_com_docker_swarm_service_name]
+        target_label: swarm_service
+        regex: '(.+)'
+        replacement: '${1}'
+      # Enrich with Swarm stack name
+      - source_labels: [container_label_com_docker_stack_namespace]
+        target_label: swarm_stack
+        regex: '(.+)'
+        replacement: '${1}'
+      # Drop noisy/useless cAdvisor internal metrics
+      - source_labels: [__name__]
+        regex: 'container_tasks_state|container_memory_failures_total|container_blkio_device_usage_total'
+        action: drop
+      # Drop pause/POD containers
+      - source_labels: [container_label_io_kubernetes_container_name]
+        regex: 'POD'
+        action: drop
 
-  # Blackbox Exporter - HTTP/HTTPS monitoring
-  - job_name: 'blackbox'
+  # ---------- TRAEFIK METRICS ----------
+
+  - job_name: 'traefik'
+    static_configs:
+      - targets: ['portainer-edge-gateway_traefik.1:8080']
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+    # Traefik must have --metrics.prometheus=true in its config
+    # This scrapes: request counts, durations, open connections per router/service
+
+  # ---------- CROWDSEC METRICS ----------
+
+  - job_name: 'crowdsec'
+    static_configs:
+      - targets: ['portainer-edge-gateway_crowdsec.1:6060']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+
+  # ---------- MARIADB METRICS (per stack) ----------
+  # mysqld_exporter sidecar scrapes MariaDB from each stack
+
+  - job_name: 'mariadb-jpolski'
+    static_configs:
+      - targets: ['mariadb-exporter-jpolski:9104']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+    relabel_configs:
+      - target_label: stack
+        replacement: 'jpolski_na6_pl_prod'
+      - target_label: db_type
+        replacement: 'mariadb'
+
+  - job_name: 'mariadb-kosmetix'
+    static_configs:
+      - targets: ['mariadb-exporter-kosmetix:9104']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+    relabel_configs:
+      - target_label: stack
+        replacement: 'kosmetix-staging'
+      - target_label: db_type
+        replacement: 'mariadb'
+
+  # ---------- BLACKBOX - HTTP HEALTH CHECKS ----------
+  # Probes ALL important HTTP endpoints, no labels needed
+
+  - job_name: 'blackbox-http'
     metrics_path: /probe
     params:
       module: [http_2xx]
     static_configs:
       - targets:
-          - http://prometheus:9090
-          - http://grafana:3000
+          # Monitoring stack health
+          - http://prometheus:9090/-/healthy
+          - http://grafana:3000/api/health
           - http://loki:3100/ready
+          - http://alertmanager:9093/-/healthy
+          - http://cadvisor:8081/healthz
+          # Application health checks
+          - http://jpolski_na6_pl_prod_wordpress.1:80
+          - http://kosmetix-staging_wordpress.1:80
+          - http://lgd-demo_lgd-map.1:80
     relabel_configs:
       - source_labels: [__address__]
         target_label: __param_target
@@ -66,77 +148,62 @@ scrape_configs:
       - target_label: __address__
         replacement: blackbox-exporter:9115
 
-  # Traefik Metrics - Reverse Proxy monitoring
-  - job_name: 'traefik'
+  # ---------- BLACKBOX - TCP CHECKS ----------
+  # Check TCP connectivity for non-HTTP services (Redis, MariaDB)
+
+  - job_name: 'blackbox-tcp'
+    metrics_path: /probe
+    params:
+      module: [tcp_connect]
     static_configs:
       - targets:
-          - 'traefik:8080'
-    metrics_path: '/metrics'
-    scrape_interval: 30s
-    scrape_timeout: 10s
+          - jpolski_na6_pl_prod_mariadb.1:3306
+          - jpolski_na6_pl_prod_redis.1:6379
+          - kosmetix-staging_mariadb.1:3306
+          - kosmetix-staging_redis.1:6379
+          - node-exporter:9100
     relabel_configs:
-      - target_label: job
-        replacement: 'traefik'
-      - target_label: instance
-        replacement: 'traefik:8080'
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
 
-  # Docker Swarm Service Discovery - automatic container discovery
-  - job_name: 'dockerswarm'
+  # ---------- DOCKER SWARM SERVICE DISCOVERY ----------
+  # OPTIONAL: For containers that expose /metrics endpoint
+  # Add label prometheus.io/scrape=true to any container to auto-register it
+
+  - job_name: 'dockerswarm-custom'
     dockerswarm_sd_configs:
       - host: unix:///var/run/docker.sock
         role: tasks
-        port: 9090
         filters:
           - name: "label"
             values: ["prometheus.io/scrape=true"]
     relabel_configs:
-      # Only scrape containers with prometheus.io/scrape=true label
       - source_labels: [__meta_dockerswarm_service_label_prometheus_io_scrape]
         action: keep
         regex: true
-      
-      # Use custom port from label if specified
-      - source_labels: [__meta_dockerswarm_service_label_prometheus_io_port]
+      - source_labels: [__address__, __meta_dockerswarm_service_label_prometheus_io_port]
+        regex: '([^:]+)(?::\d+)?;(\d+)'
+        replacement: '${1}:${2}'
         target_label: __address__
-        replacement: '${1}:${__meta_dockerswarm_service_label_prometheus_io_port}'
-      
-      # Use custom path from label if specified
       - source_labels: [__meta_dockerswarm_service_label_prometheus_io_path]
         target_label: __metrics_path__
         regex: (.+)
-        replacement: ${1}
-        # Default to /metrics if not specified
-        action: replace
-      
-      # Set job name from label or use service name
-      - source_labels: [__meta_dockerswarm_service_label_prometheus_io_job]
-        target_label: job
-        regex: (.+)
-        replacement: ${1}
+        replacement: '${1}'
       - source_labels: [__meta_dockerswarm_service_name]
         target_label: job
-        regex: (.+)
-        replacement: ${1}
-      
-      # Copy useful labels
       - source_labels: [__meta_dockerswarm_service_label_app_name]
         target_label: app_name
       - source_labels: [__meta_dockerswarm_service_label_app_type]
         target_label: app_type
-      - source_labels: [__meta_dockerswarm_service_label_com_docker_swarm_service_name]
-        target_label: service_name
       - source_labels: [__meta_dockerswarm_task_name]
         target_label: container_name
-      - source_labels: [__meta_dockerswarm_node_id]
-        target_label: node_id
-      
-      # Set instance label
+      - source_labels: [__meta_dockerswarm_node_hostname]
+        target_label: node
+      - source_labels: [__meta_dockerswarm_service_label_com_docker_stack_namespace]
+        target_label: swarm_stack
       - source_labels: [__address__]
         target_label: instance
-      
-      # Add common labels
-      - target_label: monitored_by
-        replacement: prometheus
-      - target_label: discovery_method
-        replacement: dockerswarm
-

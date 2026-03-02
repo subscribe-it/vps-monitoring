@@ -1,92 +1,218 @@
 groups:
-  - name: system_alerts
-    interval: 30s
+  - name: host_alerts
+    interval: 15s
     rules:
-      # Critical CPU Usage
-      - alert: HighCPUUsage
+
+      # ===== HOST CPU =====
+
+      - alert: HostHighCPUUsage
         expr: |
-          rate(container_cpu_usage_seconds_total[5m]) * 100 > 90
-        for: 5m
+          100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[2m])) * 100) > 85
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage on {{ $labels.instance }}"
+          description: "CPU usage is {{ $value | printf \"%.1f\" }}% (threshold: 85%) for more than 2 minutes."
+
+      - alert: HostCriticalCPUUsage
+        expr: |
+          100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[2m])) * 100) > 95
+        for: 1m
         labels:
           severity: critical
         annotations:
-          summary: "High CPU usage detected"
-          description: "Container {{ $labels.container_name }} ({{ $labels.job }}) has CPU usage above 90% for more than 5 minutes. Current value: {{ $value }}%"
+          summary: "CRITICAL CPU usage on {{ $labels.instance }}"
+          description: "CPU usage is {{ $value | printf \"%.1f\" }}% - server may be unresponsive!"
 
-      # Critical Memory Usage
-      - alert: HighMemoryUsage
+      # ===== HOST MEMORY =====
+
+      - alert: HostHighMemoryUsage
         expr: |
-          (container_memory_usage_bytes{container_name!=""} / container_spec_memory_limit_bytes{container_name!=""}) > 0.90
-        for: 5m
+          100 * (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) > 85
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage on {{ $labels.instance }}"
+          description: "Memory usage is {{ $value | printf \"%.1f\" }}%. Available: {{ with query \"node_memory_MemAvailable_bytes\" }}{{ . | first | value | humanize1024 }}{{ end }}B"
+
+      - alert: HostCriticalMemoryUsage
+        expr: |
+          100 * (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) > 95
+        for: 1m
         labels:
           severity: critical
         annotations:
-          summary: "High memory usage detected"
-          description: "Container {{ $labels.container_name }} ({{ $labels.job }}) is using more than 90% of its memory limit for more than 5 minutes. Current usage: {{ $value | humanizePercentage }}"
+          summary: "CRITICAL memory usage on {{ $labels.instance }}"
+          description: "Memory usage is {{ $value | printf \"%.1f\" }}% - OOM killer may trigger!"
 
-      # Critical Memory Usage (alternative - without limit)
-      - alert: HighMemoryUsageAbsolute
+      # ===== HOST DISK =====
+
+      - alert: HostDiskSpaceWarning
         expr: |
-          container_memory_usage_bytes{container_name!="", container_spec_memory_limit_bytes=""} > 2147483648
+          100 - (node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|overlay"}
+          / node_filesystem_size_bytes{mountpoint="/",fstype!~"tmpfs|overlay"} * 100) > 75
         for: 5m
         labels:
           severity: warning
         annotations:
-          summary: "High absolute memory usage detected"
-          description: "Container {{ $labels.container_name }} ({{ $labels.job }}) is using more than 2GB of memory: {{ $value | humanize }}"
+          summary: "Disk usage warning on {{ $labels.instance }}"
+          description: "Disk {{ $labels.mountpoint }} is {{ $value | printf \"%.1f\" }}% full."
 
-      # Critical Disk Usage (Node Exporter)
-      - alert: HighDiskUsage
+      - alert: HostDiskSpaceCritical
         expr: |
-          (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) < 0.10
-        for: 5m
-        labels:
-          severity: critical
-        annotations:
-          summary: "High disk usage detected"
-          description: "Disk usage on {{ $labels.instance }} is above 90%. Available space: {{ $value | humanizePercentage }}"
-
-      # Service Down
-      - alert: ServiceDown
-        expr: |
-          up == 0
-        for: 1m
-        labels:
-          severity: critical
-        annotations:
-          summary: "Service is down"
-          description: "Service {{ $labels.job }} on {{ $labels.instance }} has been down for more than 1 minute"
-
-      # Container Not Responding
-      - alert: ContainerNotResponding
-        expr: |
-          time() - container_last_seen > 60
-        for: 1m
-        labels:
-          severity: critical
-        annotations:
-          summary: "Container not responding"
-          description: "Container {{ $labels.container_name }} ({{ $labels.job }}) has not been seen for more than 60 seconds"
-
-      # Container Memory Limit Exceeded
-      - alert: ContainerMemoryLimitExceeded
-        expr: |
-          container_memory_usage_bytes{container_name!="", container_spec_memory_limit_bytes!=""} / container_spec_memory_limit_bytes{container_name!="", container_spec_memory_limit_bytes!=""} > 1.0
+          100 - (node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|overlay"}
+          / node_filesystem_size_bytes{mountpoint="/",fstype!~"tmpfs|overlay"} * 100) > 90
         for: 2m
         labels:
           severity: critical
         annotations:
-          summary: "Container memory limit exceeded"
-          description: "Container {{ $labels.container_name }} ({{ $labels.job }}) has exceeded its memory limit. Usage: {{ $value | humanizePercentage }} of {{ $labels.container_spec_memory_limit_bytes | humanize }} limit"
+          summary: "CRITICAL disk space on {{ $labels.instance }}"
+          description: "Disk {{ $labels.mountpoint }} is {{ $value | printf \"%.1f\" }}% full - URGENT!"
 
-      # Container CPU Limit Exceeded
-      - alert: ContainerCPULimitExceeded
+      - alert: HostDiskWillFillIn24h
         expr: |
-          rate(container_cpu_usage_seconds_total[5m]) * 100 > 100
+          predict_linear(node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|overlay"}[6h], 24 * 3600) < 0
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Disk will fill in 24h on {{ $labels.instance }}"
+          description: "Based on current write rate, disk {{ $labels.mountpoint }} will be full within 24 hours."
+
+      # ===== HOST NETWORK =====
+
+      - alert: HostHighNetworkTraffic
+        expr: |
+          rate(node_network_receive_bytes_total{device!~"lo|docker.*|br-.*|veth.*|overlay.*"}[5m]) > 104857600
         for: 5m
         labels:
           severity: warning
         annotations:
-          summary: "Container CPU usage exceeds 100%"
-          description: "Container {{ $labels.container_name }} ({{ $labels.job }}) is using more than 100% CPU ({{ $value }}%). This may indicate throttling or need for higher CPU limit."
+          summary: "High inbound network on {{ $labels.instance }}"
+          description: "Interface {{ $labels.device }} receives {{ $value | humanize1024 }}B/s (>100MB/s)."
 
+      # ===== HOST LOAD =====
+
+      - alert: HostSystemLoadHigh
+        expr: |
+          node_load1 > on(instance) count by(instance)(node_cpu_seconds_total{mode="idle"}) * 1.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High system load on {{ $labels.instance }}"
+          description: "Load average (1m) is {{ $value | printf \"%.2f\" }} which is >1.5x number of CPUs."
+
+      # ===== SERVICE UP/DOWN =====
+
+      - alert: ServiceDown
+        expr: up == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Service DOWN: {{ $labels.job }}"
+          description: "Service '{{ $labels.job }}' on {{ $labels.instance }} has been DOWN for more than 30 seconds!"
+
+      - alert: MonitoringServiceDown
+        expr: |
+          up{job=~"prometheus|alertmanager|loki|cadvisor|node-exporter"} == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Monitoring service DOWN: {{ $labels.job }}"
+          description: "Critical monitoring component '{{ $labels.job }}' is DOWN!"
+
+  # ===== CONTAINER ALERTS (via cAdvisor - ALL containers, no labels needed) =====
+
+  - name: container_alerts
+    interval: 15s
+    rules:
+
+      - alert: ContainerDown
+        expr: |
+          (time() - container_last_seen{name!~"",name!~".*_POD_.*|.*pause.*"}) > 30
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Container DOWN: {{ $labels.name }}"
+          description: "Container '{{ $labels.name }}' (stack: {{ $labels.swarm_stack }}) has not been seen for more than 30 seconds!"
+
+      - alert: ContainerHighCPU
+        expr: |
+          rate(container_cpu_usage_seconds_total{name!~"",image!="",name!~".*_POD_.*"}[2m]) * 100 > 80
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container high CPU: {{ $labels.name }}"
+          description: "Container '{{ $labels.name }}' is using {{ $value | printf \"%.1f\" }}% CPU for more than 3 minutes."
+
+      - alert: ContainerHighMemoryAbsolute
+        expr: |
+          container_memory_working_set_bytes{name!~"",image!="",name!~".*_POD_.*"} > 1073741824
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container using >1GB RAM: {{ $labels.name }}"
+          description: "Container '{{ $labels.name }}' is using {{ $value | humanize1024 }}B of memory."
+
+      - alert: ContainerMemoryLimitNear
+        expr: |
+          container_memory_working_set_bytes{name!~"",image!=""}
+          / container_spec_memory_limit_bytes{name!~"",image!=""} > 0.85
+          and container_spec_memory_limit_bytes{name!~"",image!=""} > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container near memory limit: {{ $labels.name }}"
+          description: "Container '{{ $labels.name }}' is using {{ $value | humanizePercentage }} of its memory limit."
+
+      - alert: ContainerMemoryLimitCritical
+        expr: |
+          container_memory_working_set_bytes{name!~"",image!=""}
+          / container_spec_memory_limit_bytes{name!~"",image!=""} > 0.98
+          and container_spec_memory_limit_bytes{name!~"",image!=""} > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Container OOM imminent: {{ $labels.name }}"
+          description: "Container '{{ $labels.name }}' exceeded 98% of memory limit - OOM kill imminent!"
+
+      - alert: ContainerRestarting
+        expr: |
+          rate(container_start_time_seconds{name!~"",image!="",name!~".*_POD_.*"}[15m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container restarting: {{ $labels.name }}"
+          description: "Container '{{ $labels.name }}' has been restarting frequently in the last 15 minutes."
+
+      - alert: ContainerCPUThrottling
+        expr: |
+          rate(container_cpu_cfs_throttled_seconds_total{name!~"",image!=""}[5m])
+          / rate(container_cpu_cfs_periods_total{name!~"",image!=""}[5m]) > 0.25
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container CPU throttled: {{ $labels.name }}"
+          description: "Container '{{ $labels.name }}' is CPU throttled {{ $value | humanizePercentage }} of the time."
+
+      - alert: ContainerHighDiskWrite
+        expr: |
+          rate(container_fs_writes_bytes_total{name!~"",image!=""}[5m]) > 52428800
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container high disk write: {{ $labels.name }}"
+          description: "Container '{{ $labels.name }}' is writing {{ $value | humanize1024 }}B/s (>50MB/s)."
