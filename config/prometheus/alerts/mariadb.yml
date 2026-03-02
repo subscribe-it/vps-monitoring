@@ -1,0 +1,61 @@
+groups:
+  - name: mariadb_alerts
+    interval: 30s
+    rules:
+
+      # MariaDB exporter down
+      - alert: MariaDBExporterDown
+        expr: up{job=~"mariadb-.*"} == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "MariaDB exporter DOWN: {{ $labels.job }}"
+          description: "Cannot reach MariaDB exporter for stack '{{ $labels.stack }}'. Database may be down!"
+
+      # Too many connections
+      - alert: MariaDBTooManyConnections
+        expr: |
+          mysql_global_status_threads_connected{job=~"mariadb-.*"}
+          / mysql_global_variables_max_connections{job=~"mariadb-.*"} > 0.80
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "MariaDB high connections: {{ $labels.stack }}"
+          description: "MariaDB ({{ $labels.stack }}) is using {{ $value | humanizePercentage }} of max connections."
+
+      # Slow queries
+      - alert: MariaDBHighSlowQueries
+        expr: |
+          rate(mysql_global_status_slow_queries{job=~"mariadb-.*"}[5m]) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "MariaDB slow queries: {{ $labels.stack }}"
+          description: "MariaDB ({{ $labels.stack }}) has {{ $value | printf \"%.1f\" }} slow queries/sec."
+
+      # InnoDB buffer pool usage high
+      - alert: MariaDBBufferPoolHighUsage
+        expr: |
+          (mysql_global_status_innodb_buffer_pool_pages_total{job=~"mariadb-.*"}
+          - mysql_global_status_innodb_buffer_pool_pages_free{job=~"mariadb-.*"})
+          / mysql_global_status_innodb_buffer_pool_pages_total{job=~"mariadb-.*"} > 0.90
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "MariaDB buffer pool almost full: {{ $labels.stack }}"
+          description: "MariaDB ({{ $labels.stack }}) InnoDB buffer pool is {{ $value | humanizePercentage }} full."
+
+      # Replication lag (if replication is configured)
+      - alert: MariaDBReplicationLag
+        expr: |
+          mysql_slave_status_seconds_behind_master{job=~"mariadb-.*"} > 30
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "MariaDB replication lag: {{ $labels.stack }}"
+          description: "MariaDB ({{ $labels.stack }}) replication is lagging by {{ $value }}s."

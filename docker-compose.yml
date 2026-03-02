@@ -5,7 +5,7 @@ networks:
     driver: overlay
     attachable: true
   traefik-public:
-    external: true  # Istniejąca sieć Traefik
+    external: true
 
 volumes:
   prometheus_data: {}
@@ -16,14 +16,14 @@ volumes:
   duplicati_backups: {}
   alertmanager_data: {}
 
-# Docker Swarm Configs - pliki konfiguracyjne (muszą być utworzone przed deployem)
-# Zobacz: docs/DEPLOYMENT.md - sekcja "Creating Docker Configs"
 configs:
   prometheus_config:
     external: true
   prometheus_alerts_system:
     external: true
   prometheus_alerts_http:
+    external: true
+  prometheus_alerts_mariadb:
     external: true
   prometheus_alerts_monitoring:
     external: true
@@ -59,6 +59,10 @@ configs:
     file: ./scripts/uptime-kuma-init.py
 
 services:
+
+  # ============================================================
+  # NODE EXPORTER - Host system metrics (CPU, RAM, Disk, Network)
+  # ============================================================
   node-exporter:
     image: prom/node-exporter:latest
     deploy:
@@ -77,7 +81,10 @@ services:
       - '--path.procfs=/host/proc'
       - '--path.rootfs=/rootfs'
       - '--path.sysfs=/host/sys'
-      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc|$$)'  # Escaped $$
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+      - '--collector.filesystem.fs-types-exclude=^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|iso9660|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tracefs)$$'
+      - '--no-collector.wifi'
+      - '--no-collector.hwmon'
     volumes:
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
@@ -90,9 +97,13 @@ services:
         protocol: tcp
         mode: host
 
+  # ============================================================
+  # CADVISOR - ALL Docker containers metrics (OOTB, no labels needed)
+  # Scrapes every running container automatically
+  # ============================================================
   cadvisor:
-    image: gcr.io/cadvisor/cadvisor:v0.47.0
-    hostname: cadvisor
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    hostname: '{{.Node.Hostname}}-cadvisor'
     deploy:
       mode: global
       restart_policy:
@@ -106,16 +117,20 @@ services:
           cpus: '0.1'
           memory: 128M
     command:
-      - --docker_only=true
-      - --housekeeping_interval=30s
-      - --disable_metrics=percpu,sched,tcp,udp,disk,diskIO,hugetlb
-      - --store_container_labels=false
+      - --docker_only=false
+      - --housekeeping_interval=15s
+      - --max_housekeeping_interval=30s
+      - --event_storage_event_limit=default=0
+      - --event_storage_age_limit=default=0
+      - --disable_metrics=percpu,sched,hugetlb
+      - --store_container_labels=true
+      - --whitelisted_container_labels=com.docker.swarm.service.name,com.docker.stack.namespace,com.docker.compose.service
     volumes:
       - /:/rootfs:ro
       - /var/run:/var/run:ro
       - /sys:/sys:ro
-      - /var/lib/docker/:/var/lib/docker:ro
-      - /dev/disk/:/dev/disk:ro
+      - /var/lib/docker:/var/lib/docker:ro
+      - /dev/disk:/dev/disk:ro
     networks:
       - monitoring
     ports:
@@ -124,6 +139,82 @@ services:
         protocol: tcp
         mode: host
 
+  # ============================================================
+  # MARIADB EXPORTER - jpolski stack
+  # Requires DATA_SOURCE_NAME env var with MariaDB credentials
+  # ============================================================
+  mariadb-exporter-jpolski:
+    image: prom/mysqld-exporter:latest
+    hostname: mariadb-exporter-jpolski
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: any
+        delay: 10s
+      resources:
+        limits:
+          cpus: '0.1'
+          memory: 64M
+        reservations:
+          cpus: '0.05'
+          memory: 16M
+    command:
+      - '--collect.info_schema.innodb_metrics'
+      - '--collect.info_schema.processlist'
+      - '--collect.perf_schema.eventsstatements'
+      - '--collect.perf_schema.eventsstatementssum'
+      - '--collect.perf_schema.file_instances'
+      - '--collect.global_status'
+      - '--collect.global_variables'
+      - '--collect.slave_status'
+    environment:
+      # Format: user:password@tcp(host:port)/
+      # Set in Portainer stack env vars: JPOLSKI_MARIADB_DSN
+      - DATA_SOURCE_NAME=${JPOLSKI_MARIADB_DSN:-exporter:password@tcp(jpolski_na6_pl_prod_mariadb.1:3306)/}
+    networks:
+      - monitoring
+    ports:
+      - "9104:9104"
+
+  # ============================================================
+  # MARIADB EXPORTER - kosmetix stack
+  # ============================================================
+  mariadb-exporter-kosmetix:
+    image: prom/mysqld-exporter:latest
+    hostname: mariadb-exporter-kosmetix
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: any
+        delay: 10s
+      resources:
+        limits:
+          cpus: '0.1'
+          memory: 64M
+        reservations:
+          cpus: '0.05'
+          memory: 16M
+    command:
+      - '--collect.info_schema.innodb_metrics'
+      - '--collect.info_schema.processlist'
+      - '--collect.global_status'
+      - '--collect.global_variables'
+    environment:
+      - DATA_SOURCE_NAME=${KOSMETIX_MARIADB_DSN:-exporter:password@tcp(kosmetix-staging_mariadb.1:3306)/}
+    networks:
+      - monitoring
+    ports:
+      - "9105:9104"
+
+  # ============================================================
+  # PROMETHEUS - Metrics storage & alerting engine
+  # ============================================================
   prometheus:
     image: prom/prometheus:latest
     deploy:
@@ -154,6 +245,8 @@ services:
         target: /etc/prometheus/alerts/system.yml
       - source: prometheus_alerts_http
         target: /etc/prometheus/alerts/http.yml
+      - source: prometheus_alerts_mariadb
+        target: /etc/prometheus/alerts/mariadb.yml
       - source: prometheus_alerts_monitoring
         target: /etc/prometheus/alerts/monitoring.yml
       - source: prometheus_alerts_prometheus
@@ -168,6 +261,7 @@ services:
       - '--web.console.libraries=/etc/prometheus/console_libraries'
       - '--web.console.templates=/etc/prometheus/consoles'
       - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
     ports:
       - "9090:9090"
     networks:
@@ -181,11 +275,14 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.services.prometheus.loadbalancer.server.port=9090"
-      - "traefik.http.routers.prometheus.rule=Host(`${MONITORING_HOST:-57.129.41.248}`) && PathPrefix(`/prometheus`)"
+      - "traefik.http.routers.prometheus.rule=Host(`${MONITORING_HOST}`) && PathPrefix(`/prometheus`)"
       - "traefik.http.routers.prometheus.entrypoints=websecure"
       - "traefik.http.routers.prometheus.middlewares=prometheus-stripprefix"
       - "traefik.http.middlewares.prometheus-stripprefix.stripprefix.prefixes=/prometheus"
 
+  # ============================================================
+  # LOKI - Log aggregation
+  # ============================================================
   loki:
     image: grafana/loki:latest
     deploy:
@@ -203,8 +300,6 @@ services:
         reservations:
           cpus: '0.25'
           memory: 256M
-    # Note: Healthcheck removed - Loki image is minimal (scratch-based) and doesn't include
-    # wget, curl, bash, or sh. Docker Swarm will monitor the container process status instead.
     configs:
       - source: loki_config
         target: /etc/loki/local-config.yaml
@@ -216,16 +311,17 @@ services:
     networks:
       - monitoring
       - traefik-public
-    depends_on:
-      - node-exporter
     labels:
       - "traefik.enable=true"
       - "traefik.http.services.loki.loadbalancer.server.port=3100"
-      - "traefik.http.routers.loki.rule=Host(`${MONITORING_HOST:-57.129.41.248}`) && PathPrefix(`/loki`)"
+      - "traefik.http.routers.loki.rule=Host(`${MONITORING_HOST}`) && PathPrefix(`/loki`)"
       - "traefik.http.routers.loki.entrypoints=websecure"
       - "traefik.http.routers.loki.middlewares=loki-stripprefix"
       - "traefik.http.middlewares.loki-stripprefix.stripprefix.prefixes=/loki"
 
+  # ============================================================
+  # PROMTAIL - Log collector from ALL Docker containers (OOTB)
+  # ============================================================
   promtail:
     image: grafana/promtail:latest
     deploy:
@@ -254,6 +350,9 @@ services:
     depends_on:
       - loki
 
+  # ============================================================
+  # GRAFANA - Visualization & dashboards
+  # ============================================================
   grafana:
     image: grafana/grafana:latest
     deploy:
@@ -284,16 +383,16 @@ services:
         target: /etc/grafana/provisioning/dashboards/dashboards.yml
     volumes:
       - grafana_data:/var/lib/grafana
-      # Templates directory - opcjonalny bind mount (katalog)
-      # Jeśli chcesz użyć templates, odkomentuj poniższą linię i zmień ścieżkę na właściwą lokalizację gdzie Portainer klonuje repo
-      # W Portainer: sprawdź ścieżkę w Stack → Editor → gdzie jest docker-compose.yml (zwykle /data/compose/ID/)
-      # - /data/compose/25/config/grafana/provisioning/dashboards/templates:/var/lib/grafana/dashboards/templates:ro
     environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
       - GF_USERS_ALLOW_SIGN_UP=false
       - GF_AUTH_ANONYMOUS_ENABLED=false
-      - GF_SERVER_ROOT_URL=http://${MONITORING_HOST:-57.129.41.248}:3000
-      - GF_INSTALL_PLUGINS=
+      - GF_SERVER_ROOT_URL=https://${MONITORING_HOST}/grafana
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel
+      - GF_ALERTING_ENABLED=false
+      - GF_UNIFIED_ALERTING_ENABLED=true
     ports:
       - "3000:3000"
     networks:
@@ -305,11 +404,14 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.services.grafana.loadbalancer.server.port=3000"
-      - "traefik.http.routers.grafana.rule=Host(`${MONITORING_HOST:-57.129.41.248}`) && PathPrefix(`/grafana`)"
+      - "traefik.http.routers.grafana.rule=Host(`${MONITORING_HOST}`) && PathPrefix(`/grafana`)"
       - "traefik.http.routers.grafana.entrypoints=websecure"
       - "traefik.http.routers.grafana.middlewares=grafana-stripprefix"
       - "traefik.http.middlewares.grafana-stripprefix.stripprefix.prefixes=/grafana"
 
+  # ============================================================
+  # UPTIME KUMA - Service uptime monitoring
+  # ============================================================
   uptime-kuma:
     image: louislam/uptime-kuma:latest
     hostname: uptime-kuma
@@ -328,8 +430,6 @@ services:
         reservations:
           cpus: '0.1'
           memory: 128M
-    # Note: Healthcheck removed - Uptime Kuma image doesn't include wget/curl.
-    # Docker Swarm will monitor the container process status instead.
     volumes:
       - uptime_kuma_data:/app/data
     ports:
@@ -340,11 +440,14 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.services.uptime-kuma.loadbalancer.server.port=3001"
-      - "traefik.http.routers.uptime-kuma.rule=Host(`${MONITORING_HOST:-57.129.41.248}`) && PathPrefix(`/uptime-kuma`)"
+      - "traefik.http.routers.uptime-kuma.rule=Host(`${MONITORING_HOST}`) && PathPrefix(`/uptime-kuma`)"
       - "traefik.http.routers.uptime-kuma.entrypoints=websecure"
       - "traefik.http.routers.uptime-kuma.middlewares=uptime-kuma-stripprefix"
       - "traefik.http.middlewares.uptime-kuma-stripprefix.stripprefix.prefixes=/uptime-kuma"
 
+  # ============================================================
+  # DUPLICATI - Backup of monitoring data
+  # ============================================================
   duplicati:
     image: lscr.io/linuxserver/duplicati:latest
     hostname: duplicati
@@ -383,11 +486,14 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.services.duplicati.loadbalancer.server.port=8200"
-      - "traefik.http.routers.duplicati.rule=Host(`${MONITORING_HOST:-57.129.41.248}`) && PathPrefix(`/duplicati`)"
+      - "traefik.http.routers.duplicati.rule=Host(`${MONITORING_HOST}`) && PathPrefix(`/duplicati`)"
       - "traefik.http.routers.duplicati.entrypoints=websecure"
       - "traefik.http.routers.duplicati.middlewares=duplicati-stripprefix"
       - "traefik.http.middlewares.duplicati-stripprefix.stripprefix.prefixes=/duplicati"
 
+  # ============================================================
+  # ALERTMANAGER - Alert routing to Telegram
+  # ============================================================
   alertmanager:
     image: prom/alertmanager:latest
     hostname: alertmanager
@@ -420,7 +526,8 @@ services:
     command:
       - '--config.file=/etc/alertmanager/alertmanager.yml'
       - '--storage.path=/alertmanager'
-      - '--web.external-url=http://${MONITORING_HOST:-57.129.41.248}:9093'
+      - '--web.external-url=https://${MONITORING_HOST}/alertmanager'
+      - '--cluster.advertise-address=0.0.0.0:9093'
     ports:
       - "9093:9093"
     networks:
@@ -429,11 +536,14 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.services.alertmanager.loadbalancer.server.port=9093"
-      - "traefik.http.routers.alertmanager.rule=Host(`${MONITORING_HOST:-57.129.41.248}`) && PathPrefix(`/alertmanager`)"
+      - "traefik.http.routers.alertmanager.rule=Host(`${MONITORING_HOST}`) && PathPrefix(`/alertmanager`)"
       - "traefik.http.routers.alertmanager.entrypoints=websecure"
       - "traefik.http.routers.alertmanager.middlewares=alertmanager-stripprefix"
       - "traefik.http.middlewares.alertmanager-stripprefix.stripprefix.prefixes=/alertmanager"
 
+  # ============================================================
+  # BLACKBOX EXPORTER - HTTP/TCP probing
+  # ============================================================
   blackbox-exporter:
     image: prom/blackbox-exporter:latest
     hostname: blackbox-exporter
@@ -462,6 +572,9 @@ services:
     networks:
       - monitoring
 
+  # ============================================================
+  # TELEGRAM WEBHOOK - Alert notifications
+  # ============================================================
   telegram-webhook:
     image: ghcr.io/subscribe-it/vps-monitoring-telegram-webhook:latest
     hostname: telegram-webhook
@@ -504,6 +617,9 @@ services:
     depends_on:
       - alertmanager
 
+  # ============================================================
+  # DASHBOARD AUTOMATION - Auto-create Grafana dashboards
+  # ============================================================
   dashboard-automation:
     image: ghcr.io/subscribe-it/vps-monitoring-dashboard-automation:latest
     hostname: dashboard-automation
@@ -551,6 +667,9 @@ services:
       - grafana
       - prometheus
 
+  # ============================================================
+  # UPTIME KUMA INIT - Auto-configure monitors from YAML
+  # ============================================================
   uptime-kuma-init:
     image: ghcr.io/subscribe-it/vps-monitoring-uptime-kuma-init:latest
     hostname: uptime-kuma-init
@@ -588,6 +707,9 @@ services:
     depends_on:
       - uptime-kuma
 
+  # ============================================================
+  # WORDPRESS STACK DISCOVERY - Auto-discover WordPress stacks
+  # ============================================================
   wordpress-stack-discovery:
     image: ghcr.io/subscribe-it/vps-monitoring-wordpress-stack-discovery:latest
     hostname: wordpress-stack-discovery
@@ -623,7 +745,7 @@ services:
       - GRAFANA_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
       - GRAFANA_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
       - CHECK_INTERVAL=300
-      - STACK_PATTERN=jpolski_.*_prod_.*
+      - STACK_PATTERN=${WORDPRESS_STACK_PATTERN:-.*wordpress.*|.*_prod_.*}
     networks:
       - monitoring
     depends_on:
