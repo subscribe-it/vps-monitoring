@@ -1,0 +1,41 @@
+# Automatyczne aktualizacje zależności.
+# Obrazy są pinowane do konkretnych wersji (celowo — brak `:latest`),
+# więc bez tego kota zostałyby zamrożone na zawsze.
+version: 2
+updates:
+  # Obrazy w Dockerfile'ach i docker-compose.yml
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      obrazy-monitoringu:
+        patterns: ["*"]
+
+  # Zależności panelu (Astro, Tailwind, DaisyUI)
+  - package-ecosystem: npm
+    directory: /panel
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      panel:
+        patterns: ["*"]
+
+  # Akcje w workflow'ach
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "chore(ci)"
+    groups:
+      akcje:
+        patterns: ["*"]

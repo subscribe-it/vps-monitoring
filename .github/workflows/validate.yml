@@ -59,6 +59,31 @@ jobs:
           sys.exit(1 if errors else 0)
           PY
 
+
+      - name: Lint flag boolowskich (klasa błędu: --flaga=false)
+        run: |
+          # Prometheus (kingpin) NIE przyjmuje --flaga=false — kończy się
+          # "Error parsing command line arguments: unexpected false" i pętlą restartów.
+          # Ten lint złapał realny błąd, który wysadzał Prometheusa.
+          python3 - <<'PY'
+          import re, sys, yaml
+          d = yaml.safe_load(open('docker-compose.yml'))
+          zle = []
+          for name, svc in d['services'].items():
+              cmd = svc.get('command')
+              elementy = cmd if isinstance(cmd, list) else ([cmd] if isinstance(cmd, str) else [])
+              for el in elementy:
+                  if isinstance(el, str):
+                      for m in re.finditer(r'--[\w.\-]+=false\b', el):
+                          zle.append(f'{name}: {m.group(0)}')
+          if zle:
+              print('  ✗ flagi boolowskie z =false (użyj samej flagi lub --no-…):')
+              for z in zle:
+                  print('     ', z)
+              sys.exit(1)
+          print('  ✓ brak flag boolowskich z =false')
+          PY
+
   prometheus:
     name: Prometheus (config + reguły)
     runs-on: ubuntu-latest

@@ -209,7 +209,6 @@ services:
       - '--web.external-url=https://${MONITORING_DOMAIN:-monitoring.subscribeit.pl}/prometheus'
       - '--web.route-prefix=/'
       - '--web.enable-lifecycle'
-      - '--web.enable-admin-api=false'
       - '--query.max-concurrency=4'
     <<: *common
     deploy:

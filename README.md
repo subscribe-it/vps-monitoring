@@ -51,6 +51,24 @@ Adresy i logowanie: [`ACCESS.md`](ACCESS.md).
 | [`docs/BASELINE.md`](docs/BASELINE.md) | stan hosta i aplikacji z dnia rozpoznania |
 | [`env.portainer.example`](env.portainer.example) | komplet zmiennych do wklejenia w Portainera |
 
+## Test lokalny (przed pushem)
+
+Cały stack można podnieść na własnym komputerze — **tak został znaleziony realny błąd**
+(`--web.enable-admin-api=false` wysadzał Prometheusa w pętli restartów, czego nie widzi
+żadna walidacja statyczna).
+
+```bash
+make validate   # compose, promtool (config + reguły + testy reguł), Loki, Grafana, testy Pythona
+make build      # zbuduj wszystkie 10 obrazów lokalnie
+make up         # podnieś stack (projekt monlocal, wymaga /tmp/mon-local)
+make ps         # stan usług
+make down       # sprzątanie
+```
+
+Uwagi do środowiska lokalnego: `discovery` potrzebuje **menedżera Swarma** (na zwykłym
+demonie `/services` zwraca 503 → `discovery_up 0`, co jest poprawne), a sondy
+`blackbox-monitoring` będą `down`, bo domena monitoringu nie ma tam jeszcze routingu.
+
 ## Struktura
 
 ```
