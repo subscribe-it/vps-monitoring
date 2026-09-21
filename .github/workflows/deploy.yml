@@ -34,10 +34,24 @@ jobs:
             -X POST "${{ secrets.PORTAINER_MONITORING_WEBHOOK }}")
           echo "HTTP $code"
           head -c 500 /tmp/hook.out || true
-          if [ "$code" != "200" ] && [ "$code" != "204" ]; then
-            echo "❌ Webhook nie przyjął wdrożenia"
+          if [ "$code" = "200" ] || [ "$code" = "204" ]; then
+            exit 0
+          fi
+
+          if grep -q "Unable to find the stack by webhook ID" /tmp/hook.out 2>/dev/null; then
+            echo "::error::Portainer nie zna tego webhooka — stack \`monitoring\` nie istnieje albo webhook jest nieaktualny."
+            echo "Co zrobić:"
+            echo "  1. Portainer → Stacks → Add stack → nazwa: monitoring → Repository (Git)"
+            echo "     URL: https://github.com/subscribe-it/vps-monitoring, branch main, compose: docker-compose.yml"
+            echo "     + wklej komplet zmiennych z env.portainer.example i kliknij Deploy."
+            echo "  2. Portainer → stack monitoring → Webhooks → Add webhook → skopiuj URL."
+            echo "  3. GitHub → Settings → Secrets and variables → Actions →"
+            echo "     zaktualizuj PORTAINER_MONITORING_WEBHOOK na nowy URL."
             exit 1
           fi
+
+          echo "❌ Webhook nie przyjął wdrożenia (HTTP $code)"
+          exit 1
 
       - name: Smoke test łańcucha publicznego (oczekujemy 401 = usługa żyje, wymaga logowania)
         if: steps.check.outputs.ready == 'true'
