@@ -30,12 +30,12 @@ jobs:
           - { name: promtail,     dockerfile: dockerfiles/promtail/Dockerfile,     context: . }
           - { name: grafana,      dockerfile: dockerfiles/grafana/Dockerfile,      context: . }
           - { name: auth,         dockerfile: dockerfiles/auth/Dockerfile,         context: . }
-          # serwisy Pythona mają własny kontekst (obraz kopiuje tylko swój katalog)
-          - { name: discovery,    dockerfile: Dockerfile,                          context: services/discovery }
-          - { name: notifier,     dockerfile: Dockerfile,                          context: services/notifier }
-          - { name: health-ping,  dockerfile: Dockerfile,                          context: services/health-ping }
-          # panel ma własny kontekst i własny .dockerignore
-          - { name: panel,        dockerfile: Dockerfile,                          context: panel }
+          # te obrazy mają własny kontekst (kopiują tylko swój katalog),
+          # ale `file` w buildx jest liczony od katalogu repo, nie od kontekstu
+          - { name: discovery,    dockerfile: services/discovery/Dockerfile,       context: services/discovery }
+          - { name: notifier,     dockerfile: services/notifier/Dockerfile,        context: services/notifier }
+          - { name: health-ping,  dockerfile: services/health-ping/Dockerfile,     context: services/health-ping }
+          - { name: panel,        dockerfile: panel/Dockerfile,                    context: panel }
     steps:
       - uses: actions/checkout@v4
 
