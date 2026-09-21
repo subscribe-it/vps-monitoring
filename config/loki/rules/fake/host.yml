@@ -7,7 +7,7 @@ groups:
       # to logi jądra są jedynym sygnałem problemów sprzętowych.
       - alert: KernelDiskErrors
         expr: |
-          sum(count_over_time({job="journald", transport="kernel"}
+          sum by (transport) (count_over_time({job="journald", transport="kernel"}
             |~ "(?i)I/O error|blk_update_request|EXT4-fs error|nvme.*(error|I/O)|medium error|Buffer I/O error|ata[0-9]+\\.[0-9]+:|failed command" [10m])) > 0
         for: 0m
         labels:
@@ -19,7 +19,7 @@ groups:
 
       - alert: KernelOomKill
         expr: |
-          sum(count_over_time({job="journald", transport="kernel"} |~ "(?i)Out of memory: Killed process" [10m])) > 0
+          sum by (transport) (count_over_time({job="journald", transport="kernel"} |~ "(?i)Out of memory: Killed process" [10m])) > 0
         for: 0m
         labels:
           severity: critical

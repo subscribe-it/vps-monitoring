@@ -69,7 +69,7 @@ jobs:
 
       - name: Reguły alertów logowych (YAML + komplet pól)
         run: |
-          python3 -c "import glob, sys, yaml; pliki = glob.glob('config/loki/rules/*.yml'); zle = [f'{f}: {r.get(\"alert\")}' for f in pliki for g in yaml.safe_load(open(f))['groups'] for r in g['rules'] if not r.get('expr') or not r.get('alert')]; print(f'  OK: {len(pliki)} plików reguł'); sys.exit(1 if zle else 0)"
+          python3 -c "import glob, sys, yaml; pliki = glob.glob('config/loki/rules/**/*.yml', recursive=True); zle = [f'{f}: {r.get(\"alert\")}' for f in pliki for g in yaml.safe_load(open(f))['groups'] for r in g['rules'] if not r.get('expr') or not r.get('alert')]; print(f'  OK: {len(pliki)} plików reguł'); sys.exit(1 if zle else 0)"
 
   grafana:
     name: Grafana (provisioning + dashboardy)

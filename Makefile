@@ -19,6 +19,7 @@ validate-workflows:
 	@python3 scripts/ci/check_workflows.py
 
 validate-compose:
+	@python3 scripts/ci/check_config_used.py
 	@$(DUMMY_ENV) $(COMPOSE) config > /dev/null && echo "✓ compose"
 	@$(DUMMY_ENV) $(COMPOSE) config | grep -qE '^\s+ports:' && { echo "✗ stack publikuje porty!"; exit 1; } || echo "✓ zero publikowanych portów"
 

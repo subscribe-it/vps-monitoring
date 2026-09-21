@@ -6,7 +6,7 @@ groups:
       # ALERT, KTÓREGO BRAKOWAŁO 21.09.2026: uszkodzenie stron/WAL w logach bazy.
       - alert: PgPageVerificationFailed
         expr: |
-          sum(count_over_time({stack="ventiplan-prod", service="postgres"}
+          sum by (stack, service) (count_over_time({stack="ventiplan-prod", service="postgres"}
             |~ "(?i)page verification failed|invalid checkpoint|could not locate a valid checkpoint|WAL.*(corrupt|invalid)|incorrect resource manager" [5m])) > 0
         for: 0m
         labels:
@@ -18,7 +18,7 @@ groups:
 
       - alert: PgPanic
         expr: |
-          sum(count_over_time({stack="ventiplan-prod", service="postgres"}
+          sum by (stack, service) (count_over_time({stack="ventiplan-prod", service="postgres"}
             |~ "(?i)PANIC:|database system was interrupted|server process .* was terminated by signal|terminating any other active server processes" [5m])) > 0
         for: 0m
         labels:
@@ -30,7 +30,7 @@ groups:
 
       - alert: PgStorageProblem
         expr: |
-          sum(count_over_time({stack="ventiplan-prod", service="postgres"}
+          sum by (stack, service) (count_over_time({stack="ventiplan-prod", service="postgres"}
             |~ "(?i)no space left on device|could not extend file|out of memory|could not resize shared memory|disk full" [10m])) > 0
         for: 0m
         labels:
@@ -42,7 +42,7 @@ groups:
 
       - alert: PgConnectionRefused
         expr: |
-          sum(count_over_time({stack="ventiplan-prod", service="postgres"}
+          sum by (stack, service) (count_over_time({stack="ventiplan-prod", service="postgres"}
             |~ "(?i)FATAL:.*(too many clients|remaining connection slots|database system is in recovery mode)" [10m])) > 0
         for: 0m
         labels:

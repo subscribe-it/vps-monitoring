@@ -468,7 +468,7 @@ services:
   # blackbox-exporter — sondy HTTP/TCP + wygasanie certyfikatów TLS
   # ---------------------------------------------------------------------------
   blackbox-exporter:
-    image: prom/blackbox-exporter:v0.28.0
+    image: ghcr.io/subscribe-it/vps-monitoring-blackbox:main
     hostname: blackbox-exporter
     command:
       - '--config.file=/etc/blackbox_exporter/config.yml'

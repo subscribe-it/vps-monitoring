@@ -30,6 +30,7 @@ jobs:
           - { name: promtail,     dockerfile: dockerfiles/promtail/Dockerfile,     context: . }
           - { name: grafana,      dockerfile: dockerfiles/grafana/Dockerfile,      context: . }
           - { name: auth,         dockerfile: dockerfiles/auth/Dockerfile,         context: . }
+          - { name: blackbox,     dockerfile: dockerfiles/blackbox/Dockerfile,     context: . }
           # te obrazy mają własny kontekst (kopiują tylko swój katalog),
           # ale `file` w buildx jest liczony od katalogu repo, nie od kontekstu
           - { name: discovery,    dockerfile: services/discovery/Dockerfile,       context: services/discovery }

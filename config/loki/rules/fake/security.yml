@@ -6,7 +6,7 @@ groups:
       # Każde udane logowanie do hosta jest zdarzeniem wartym odnotowania.
       - alert: SshLoginAccepted
         expr: |
-          sum(count_over_time({job="journald", unit="ssh.service"} |~ "Accepted (publickey|password) for" [5m])) > 0
+          sum by (unit) (count_over_time({job="journald", unit="ssh.service"} |~ "Accepted (publickey|password) for" [5m])) > 0
         for: 0m
         labels:
           severity: info
@@ -17,7 +17,7 @@ groups:
 
       - alert: SshAuthFailuresSpike
         expr: |
-          sum(count_over_time({job="journald", unit="ssh.service"}
+          sum by (unit) (count_over_time({job="journald", unit="ssh.service"}
             |~ "(?i)Failed password|Invalid user|Connection closed by authenticating user" [5m])) > 50
         for: 0m
         labels:
@@ -29,7 +29,7 @@ groups:
 
       - alert: Fail2banBanSpike
         expr: |
-          sum(count_over_time({job="journald", unit="fail2ban.service"} |~ "Ban " [15m])) > 5
+          sum by (unit) (count_over_time({job="journald", unit="fail2ban.service"} |~ "Ban " [15m])) > 5
         for: 0m
         labels:
           severity: info
@@ -41,7 +41,7 @@ groups:
       # Cockpit to panel z uprawnieniami roota wystawiony do internetu (9090).
       - alert: CockpitLogin
         expr: |
-          sum(count_over_time({job="journald"} |~ "(?i)cockpit.*(logged in|session opened|new session|authentication)" [10m])) > 0
+          sum(count_over_time({job="journald", unit=~"cockpit.+"} |~ "(?i)logged in|session opened|new session|authentication" [10m])) > 0
         for: 0m
         labels:
           severity: warning

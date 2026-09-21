@@ -28,7 +28,7 @@ groups:
 
       - alert: AcmeCertificateRenewalFailed
         expr: |
-          sum(count_over_time({stack="portainer-edge-gateway", service="traefik"}
+          sum by (stack, service) (count_over_time({stack="portainer-edge-gateway", service="traefik"}
             |~ "(?i)unable to obtain ACME certificate|error.*acme|acme.*error|cannot obtain certificate|rateLimited" [30m])) > 0
         for: 0m
         labels:
@@ -40,7 +40,7 @@ groups:
 
       - alert: TraefikRouterError
         expr: |
-          sum(count_over_time({stack="portainer-edge-gateway", service="traefik"}
+          sum by (stack, service) (count_over_time({stack="portainer-edge-gateway", service="traefik"}
             |~ "(?i)error while building|cannot find service|no available server|error.*middleware" [15m])) > 0
         for: 0m
         labels:
