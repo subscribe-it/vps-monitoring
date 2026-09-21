@@ -13,7 +13,10 @@ help:
 	@echo "make up / down / ps / logs — lokalny stack (wymaga /tmp/mon-local)"
 	@echo "make validate-promtool — testy reguł alertów (dowód, że progi działają)"
 
-validate: validate-compose validate-prometheus validate-promtool validate-loki validate-grafana test
+validate: validate-workflows validate-compose validate-prometheus validate-promtool validate-loki validate-grafana test
+
+validate-workflows:
+	@python3 scripts/ci/check_workflows.py
 
 validate-compose:
 	@$(DUMMY_ENV) $(COMPOSE) config > /dev/null && echo "✓ compose"

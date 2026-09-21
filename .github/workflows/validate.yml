@@ -1,5 +1,9 @@
 name: Validate
 
+# Uwaga dla przyszłych edycji: wewnątrz bloków `run: |` NIE używaj heredoców
+# (terminator musiałby stać w kolumnie 0 i rozerwałby YAML — dokładnie tak raz
+# zepsułem ten plik). Logikę trzymaj w scripts/ci/*.py i wywołuj ją jednym poleceniem.
+
 on:
   push:
     branches: [main]
@@ -8,7 +12,7 @@ on:
 
 jobs:
   compose:
-    name: Compose / zasady bezpieczeństwa
+    name: Compose / zasady stacku
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,139 +23,81 @@ jobs:
           GRAFANA_ADMIN_PASSWORD: 'placeholder-password'
         run: docker compose -f docker-compose.yml config > /dev/null
 
-      - name: Zasady stacku (zero portów, zero configów external, limity)
+      - name: "Zasady stacku: zero portów, zero configów, cudze montowania tylko :ro, limity"
         env:
           PANEL_AUTH_PASSWORD_HTPASSWD: 'admin:$apr1$abcdefgh$0123456789abcdefghij'
           GRAFANA_ADMIN_PASSWORD: 'placeholder-password'
         run: |
           docker compose -f docker-compose.yml config > /tmp/rendered.yml
-          python3 - <<'PY'
-          import sys, yaml
-          d = yaml.safe_load(open('/tmp/rendered.yml'))
-          svc = d['services']
-          errors = []
+          python3 scripts/ci/check_compose_rules.py
 
-          published = [(n, s['ports']) for n, s in svc.items() if s.get('ports')]
-          if published:
-              errors.append(f'publikowane porty w: {published}')
-
-          if d.get('configs'):
-              errors.append('użyto Docker Swarm configs (mają być w obrazach)')
-
-          ext_ro = {'/var/run/docker.sock': True}
-          for name, s in svc.items():
-              for vol in s.get('volumes') or []:
-                  src = vol.get('source') if isinstance(vol, dict) else str(vol).split(':')[0]
-                  if isinstance(vol, dict) and vol.get('type') == 'bind' and src in ext_ro:
-                      if not vol.get('read_only'):
-                          errors.append(f'{name}: {src} zamontowany bez :ro')
-
-          for name, s in svc.items():
-              if name in ('auth', 'panel'):
-                  continue
-              if not (s.get('deploy') or {}).get('resources', {}).get('limits'):
-                  errors.append(f'{name}: brak limitów zasobów')
-
-          if svc['auth'].get('image', '').endswith(':latest'):
-              errors.append('auth używa :latest')
-
-          print('\n'.join(f'  ✗ {e}' for e in errors) if errors else '  ✓ wszystkie zasady stacku spełnione')
-          sys.exit(1 if errors else 0)
-          PY
-
-
-      - name: Lint flag boolowskich (klasa błędu: --flaga=false)
-        run: |
-          # Prometheus (kingpin) NIE przyjmuje --flaga=false — kończy się
-          # "Error parsing command line arguments: unexpected false" i pętlą restartów.
-          # Ten lint złapał realny błąd, który wysadzał Prometheusa.
-          python3 - <<'PY'
-          import re, sys, yaml
-          d = yaml.safe_load(open('docker-compose.yml'))
-          zle = []
-          for name, svc in d['services'].items():
-              cmd = svc.get('command')
-              elementy = cmd if isinstance(cmd, list) else ([cmd] if isinstance(cmd, str) else [])
-              for el in elementy:
-                  if isinstance(el, str):
-                      for m in re.finditer(r'--[\w.\-]+=false\b', el):
-                          zle.append(f'{name}: {m.group(0)}')
-          if zle:
-              print('  ✗ flagi boolowskie z =false (użyj samej flagi lub --no-…):')
-              for z in zle:
-                  print('     ', z)
-              sys.exit(1)
-          print('  ✓ brak flag boolowskich z =false')
-          PY
+      - name: "Lint flag (klasa błędu: --flaga=false wysadza Prometheusa)"
+        run: python3 scripts/ci/lint_shell_flags.py
 
   prometheus:
-    name: Prometheus (config + reguły)
+    name: Prometheus (config + reguły + testy reguł)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: promtool check config
         run: |
           docker run --rm -v "$PWD/config/prometheus:/p:ro" --entrypoint /bin/promtool \
             prom/prometheus:v3.14.0 check config /p/prometheus.yml
+
       - name: promtool check rules
         run: |
           docker run --rm -v "$PWD/config/prometheus:/p:ro" --entrypoint /bin/sh \
             prom/prometheus:v3.14.0 -c '/bin/promtool check rules /p/alerts/*.yml'
-      - name: Testy reguł (promtool test rules) — dowód, że alerty faktycznie się zapalają
+
+      - name: Testy reguł — dowód, że progi faktycznie się zapalają
         run: |
           docker run --rm -v "$PWD/config/prometheus:/p:ro" --entrypoint /bin/sh \
             prom/prometheus:v3.14.0 \
             -c 'for f in /p/tests/*.yml; do echo "--- $f"; /bin/promtool test rules "$f" || exit 1; done'
 
   loki:
-    name: Loki (config + reguły)
+    name: Loki (config + reguły logowe)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Weryfikacja konfiguracji Loki
         run: |
           docker run --rm -v "$PWD/config/loki:/l:ro" -e LOKI_RETENTION=720h \
             grafana/loki:3.6.17 -config.file=/l/loki-config.yaml -config.expand-env=true -verify-config=true
-      - name: Reguły alertów logowych (YAML)
+
+      - name: Reguły alertów logowych (YAML + komplet pól)
         run: |
-          python3 -c "
-          import glob, yaml, sys
-          bad = []
-          for f in glob.glob('config/loki/rules/*.yml'):
-              d = yaml.safe_load(open(f))
-              for g in d.get('groups', []):
-                  for r in g.get('rules', []):
-                      if not r.get('expr') or not r.get('alert'):
-                          bad.append(f + ': ' + str(r.get('alert')))
-          print('OK:', len(glob.glob('config/loki/rules/*.yml')), 'plików reguł')
-          sys.exit(1 if bad else 0)
-          "
+          python3 -c "import glob, sys, yaml; pliki = glob.glob('config/loki/rules/*.yml'); zle = [f'{f}: {r.get(\"alert\")}' for f in pliki for g in yaml.safe_load(open(f))['groups'] for r in g['rules'] if not r.get('expr') or not r.get('alert')]; print(f'  OK: {len(pliki)} plików reguł'); sys.exit(1 if zle else 0)"
 
   grafana:
     name: Grafana (provisioning + dashboardy)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: |
-          python3 - <<'PY'
-          import glob, json, yaml, sys
-          errors = []
-          for f in glob.glob('config/grafana/provisioning/**/*.yml', recursive=True) + \
-                   glob.glob('config/grafana/provisioning/**/*.yaml', recursive=True):
-              try:
-                  yaml.safe_load(open(f))
-              except Exception as e:
-                  errors.append(f'{f}: {e}')
-          for f in glob.glob('config/grafana/dashboards/*.json'):
-              try:
-                  d = json.load(open(f))
-                  if 'uid' not in d or 'panels' not in d:
-                      errors.append(f'{f}: brak uid lub panels')
-              except Exception as e:
-                  errors.append(f'{f}: {e}')
-          print('\n'.join('  ✗ ' + e for e in errors) if errors else '  ✓ provisioning i dashboardy poprawne')
-          sys.exit(1 if errors else 0)
-          PY
+      - run: python3 scripts/ci/check_grafana.py
+
+  images:
+    name: Spójność obrazów (compose ↔ macierz buildów)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Każdy własny obraz ma job budujący
+        env:
+          PANEL_AUTH_PASSWORD_HTPASSWD: 'admin:$apr1$abcdefgh$0123456789abcdefghij'
+          GRAFANA_ADMIN_PASSWORD: 'placeholder-password'
+        run: |
+          docker compose -f docker-compose.yml config > /tmp/rendered.yml
+          python3 scripts/ci/check_images.py
+
+  runbook:
+    name: Spójność alertów z runbookiem
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/ci/check_runbook.py
 
   python:
     name: Serwisy Pythona (testy)
@@ -171,75 +117,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: pnpm/action-setup@v4
         with:
           version: 10
+
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
           cache: pnpm
           cache-dependency-path: panel/pnpm-lock.yaml
+
       - name: Build
         working-directory: panel
         run: |
           pnpm install --frozen-lockfile
           pnpm build
+
       - name: Kontrola artefaktu
         run: test -f panel/dist/index.html
-
-  runbook:
-    name: Spójność alertów z runbookiem
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Każdy alert ma procedurę w docs/RUNBOOK.md
-        run: |
-          python3 - <<'PY'
-          import glob, re, sys, yaml
-          runbook = open('docs/RUNBOOK.md', encoding='utf-8').read()
-          anchors = set(re.findall(r'<a name="([a-z0-9]+)">', runbook))
-          missing = []
-          for pattern in ('config/prometheus/alerts/*.yml', 'config/loki/rules/*.yml'):
-              for f in glob.glob(pattern):
-                  for m in re.finditer(r'runbook:\s*"#([a-z0-9]+)"', open(f, encoding='utf-8').read()):
-                      if m.group(1) not in anchors:
-                          missing.append(f'{f}: brak sekcji #{m.group(1)}')
-          print('\n'.join('  ✗ ' + m for m in sorted(set(missing))) if missing
-                else f'  ✓ wszystkie alerty mają procedury ({len(anchors)} sekcji runbooka)')
-          sys.exit(1 if missing else 0)
-          PY
-
-  images:
-    name: Spójność obrazów (compose ↔ macierz buildów)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Każdy własny obraz ma job budujący
-        env:
-          PANEL_AUTH_PASSWORD_HTPASSWD: 'admin:$apr1$abcdefgh$0123456789abcdefghij'
-          GRAFANA_ADMIN_PASSWORD: 'placeholder-password'
-        run: |
-          docker compose -f docker-compose.yml config > /tmp/rendered.yml
-          python3 - <<'PY'
-          import re, sys, yaml
-
-          rendered = yaml.safe_load(open('/tmp/rendered.yml'))
-          workflow = yaml.safe_load(open('.github/workflows/build-images.yml'))
-          built = {
-              f"ghcr.io/subscribe-it/vps-monitoring-{i['name']}:main"
-              for i in workflow['jobs']['build']['strategy']['matrix']['include']
-          }
-
-          used = {s['image'] for s in rendered['services'].values() if s.get('image')}
-          own = {i for i in used if i.startswith('ghcr.io/subscribe-it/vps-monitoring-')}
-
-          missing = sorted(own - built)
-          unused = sorted(built - own)
-          if missing:
-              print('  ✗ obrazy bez jobu budującego:', missing)
-          if unused:
-              print('  ✗ macierz buduje obrazy, których nikt nie używa:', unused)
-          if not missing and not unused:
-              print(f'  ✓ {len(own)} własnych obrazów, każdy z jobem budującym')
-          sys.exit(1 if (missing or unused) else 0)
-          PY
