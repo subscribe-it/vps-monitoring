@@ -1,0 +1,70 @@
+---
+/**
+ * Nagłówek panelu: duży wskaźnik stanu ogólnego (`overall`), mini-statystyki
+ * hosta oraz znacznik „ostatnia aktualizacja” z informacją o auto-odświeżaniu.
+ *
+ * Skrypt klienta ustawia `data-state` na `[data-section="header"]` oraz na
+ * `[data-role="overall"]` — kolor wskaźnika wynika wprost ze stanu.
+ */
+import { Icon } from 'astro-icon/components';
+import HostStat from './HostStat.astro';
+---
+
+<header class="card-ops" data-section="header" data-state="unknown">
+  <div class="grid gap-5 p-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.9fr)] lg:p-5">
+    <div class="flex flex-col justify-between gap-4">
+      <div
+        class="flex items-start gap-3"
+        data-role="overall"
+        data-state="unknown"
+        role="img"
+        aria-label="Stan ogólny: oczekiwanie na dane"
+      >
+        <span class="state-dot state-dot-lg mt-2" aria-hidden="true" data-role="overall-dot"></span>
+        <div class="min-w-0">
+          <p class="card-title">Stan ogólny</p>
+          <p class="state-text text-[26px] font-semibold leading-tight" data-role="overall-label">
+            —
+          </p>
+          <p class="muted mt-1 text-xs" data-role="overall-note">Oczekiwanie na dane…</p>
+        </div>
+      </div>
+
+      <div class="flex flex-col gap-2">
+        <div class="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs">
+          <span class="flex items-center gap-1.5" data-role="fresh" data-state="unknown">
+            <span class="state-dot" aria-hidden="true"></span>
+            <span class="muted">Ostatnia aktualizacja:</span>
+            <span class="num font-medium" data-role="updated">—</span>
+            <span class="subtle" data-role="updated-ago"></span>
+          </span>
+          <span class="flex items-center gap-1.5">
+            <span class="muted">Znacznik danych:</span>
+            <span class="num" data-role="generated">—</span>
+          </span>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2">
+          <button type="button" class="btn-ops" data-action="refresh">
+            <Icon name="lucide:refresh-cw" size={14} aria-hidden="true" />
+            <span>Odśwież</span>
+          </button>
+          <span class="subtle text-[11px]">
+            Auto-odświeżanie co <span class="num" data-role="refresh-seconds">30</span> s
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-4">
+      <HostStat stat="cpu" label="CPU" icon="lucide:cpu" meter />
+      <HostStat stat="ram" label="RAM" icon="lucide:memory-stick" meter />
+      <HostStat stat="disk" label="Dysk" icon="lucide:hard-drive" meter />
+      <HostStat stat="uptime" label="Uptime" icon="lucide:clock" />
+      <HostStat stat="load" label="Load" icon="lucide:activity" />
+      <HostStat stat="inodes" label="Inody" icon="lucide:hash" />
+      <HostStat stat="swap" label="Swap" icon="lucide:layers" />
+      <HostStat stat="time" label="Czas UTC" icon="lucide:globe" />
+    </div>
+  </div>
+</header>

@@ -1,0 +1,38 @@
+---
+/**
+ * Sprite SVG budowany raz, na etapie build, z lokalnego zestawu
+ * `@iconify-json/lucide`. Pokrywa ikony narzędzi (`tools[].icon`), które
+ * przychodzą dopiero w danych runtime — tych nie da się wyrenderować
+ * komponentem `astro-icon`, bo ten pracuje wyłącznie w czasie budowania.
+ */
+import lucide from '@iconify-json/lucide/icons.json';
+import { TOOL_ICONS } from '../lib/icons';
+
+interface LucideIcon {
+  body: string;
+}
+
+const data = lucide as unknown as { icons: Record<string, LucideIcon> };
+
+const symbols = TOOL_ICONS.map((name) => {
+  const icon = data.icons[name];
+  return icon ? { id: `i-${name}`, body: icon.body } : null;
+}).filter((symbol): symbol is { id: string; body: string } => symbol !== null);
+---
+
+<svg class="icon-sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+  {
+    symbols.map((symbol) => (
+      <symbol
+        id={symbol.id}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        set:html={symbol.body}
+      />
+    ))
+  }
+</svg>

@@ -1,0 +1,37 @@
+---
+/**
+ * Sekcja (f): aktywne alerty z `alerts[]`. Gdy lista jest pusta, pokazujemy
+ * jednoznaczny, spokojny stan „brak aktywnych alertów” zamiast pustej tabeli.
+ */
+import { Icon } from 'astro-icon/components';
+import SectionCard from './SectionCard.astro';
+---
+
+<SectionCard section="alerts" title="Aktywne alerty" icon="lucide:siren">
+  <div data-role="list"></div>
+  <div class="empty-ops" data-role="empty-clear" hidden>
+    <span class="state-dot" data-state="ok" aria-hidden="true"></span>
+    <span>Brak aktywnych alertów.</span>
+  </div>
+  <div class="empty-ops" data-role="empty" hidden>
+    <Icon name="lucide:inbox" size={16} aria-hidden="true" />
+    <span>Brak danych o alertach.</span>
+  </div>
+</SectionCard>
+
+<template id="tpl-alert-row">
+  <article class="row-ops" data-role="alert" data-state="unknown">
+    <Icon name="lucide:triangle-alert" size={16} class="state-text mt-px shrink-0" aria-hidden="true" />
+    <div class="min-w-0 flex-1">
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="text-sm font-semibold" data-role="name"></span>
+        <span class="state-pill" data-role="severity-pill">
+          <span data-role="severity"></span>
+        </span>
+        <span class="subtle text-[11px]" data-role="alert-stack"></span>
+      </div>
+      <p class="muted mt-0.5 text-xs" data-role="summary"></p>
+    </div>
+    <span class="subtle text-[11px]" data-role="since"></span>
+  </article>
+</template>

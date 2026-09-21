@@ -1,101 +1,62 @@
-name: Build and Push Docker Images
+name: Build Images
 
 on:
   push:
     branches: [main]
     paths:
+      - 'docker-compose.yml'
+      - 'config/**'
       - 'dockerfiles/**'
-      - 'scripts/**'
+      - 'services/**'
+      - 'panel/**'
       - '.github/workflows/build-images.yml'
-  pull_request:
-    branches: [main]
-    paths:
-      - 'dockerfiles/**'
-      - 'scripts/**'
   workflow_dispatch:
 
-env:
-  REGISTRY: ghcr.io
-  IMAGE_PREFIX: ${{ github.repository_owner }}/vps-monitoring
+permissions:
+  contents: read
+  packages: write
 
 jobs:
-  build-and-push:
-    name: Build and Push Images
+  build:
+    name: ${{ matrix.name }}
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-
     strategy:
+      fail-fast: false
       matrix:
-        service:
-          - name: telegram-webhook
-            dockerfile: dockerfiles/telegram-webhook/Dockerfile
-            context: .
-          - name: dashboard-automation
-            dockerfile: dockerfiles/dashboard-automation/Dockerfile
-            context: .
-          - name: uptime-kuma-init
-            dockerfile: dockerfiles/uptime-kuma-init/Dockerfile
-            context: .
-          - name: wordpress-stack-discovery
-            dockerfile: dockerfiles/wordpress-stack-discovery/Dockerfile
-            context: .
-
+        include:
+          - { name: prometheus,   dockerfile: dockerfiles/prometheus/Dockerfile,   context: . }
+          - { name: alertmanager, dockerfile: dockerfiles/alertmanager/Dockerfile, context: . }
+          - { name: loki,         dockerfile: dockerfiles/loki/Dockerfile,         context: . }
+          - { name: promtail,     dockerfile: dockerfiles/promtail/Dockerfile,     context: . }
+          - { name: grafana,      dockerfile: dockerfiles/grafana/Dockerfile,      context: . }
+          - { name: auth,         dockerfile: dockerfiles/auth/Dockerfile,         context: . }
+          # serwisy Pythona mają własny kontekst (obraz kopiuje tylko swój katalog)
+          - { name: discovery,    dockerfile: Dockerfile,                          context: services/discovery }
+          - { name: notifier,     dockerfile: Dockerfile,                          context: services/notifier }
+          - { name: health-ping,  dockerfile: Dockerfile,                          context: services/health-ping }
+          # panel ma własny kontekst i własny .dockerignore
+          - { name: panel,        dockerfile: Dockerfile,                          context: panel }
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v3
 
-      - name: Log in to GitHub Container Registry
+      - name: Logowanie do ghcr.io
         uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata (tags, labels) for Docker
-        id: meta
-        uses: docker/metadata-action@v5
+      - name: Budowa i wysyłka
+        uses: docker/build-push-action@v6
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-${{ matrix.service.name }}
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
           tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=sha,prefix={{branch}}-
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
-
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: ${{ matrix.service.context }}
-          file: ${{ matrix.service.dockerfile }}
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          platforms: linux/amd64,linux/arm64
-
-  summary:
-    name: Build Summary
-    runs-on: ubuntu-latest
-    needs: build-and-push
-    if: always()
-    steps:
-      - name: Build Summary
-        run: |
-          echo "## 🐳 Docker Images Build Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "✅ All Docker images have been built and pushed to GitHub Container Registry" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Built Images:" >> $GITHUB_STEP_SUMMARY
-          echo "- \`${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-telegram-webhook:latest\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-dashboard-automation:latest\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-uptime-kuma-init:latest\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-wordpress-stack-discovery:latest\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "📦 Images are ready to be used in docker-compose.yml" >> $GITHUB_STEP_SUMMARY
-
+            ghcr.io/subscribe-it/vps-monitoring-${{ matrix.name }}:main
+            ghcr.io/subscribe-it/vps-monitoring-${{ matrix.name }}:sha-${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+          provenance: false

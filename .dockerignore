@@ -1,39 +1,35 @@
-# Git
+# Kontekstem budowania jest katalog główny repo — obrazy kopiują z config/,
+# services/ i dockerfiles/, więc te katalogi MUSZĄ zostać w kontekście.
+
+# Git i CI
 .git
 .gitignore
 .github
 
-# Documentation
+# Dokumentacja i testy (nie są potrzebne w obrazach)
 *.md
 docs/
+tests/
 
-# Docker
-docker-compose.yml
-.dockerignore
-
-# Configs (will be mounted via Docker Swarm Configs)
-config/
-
-# Environment files
+# Pliki środowiskowe i sekrety
 .env
 .env.*
 env.*
+!env.portainer.example
 
-# IDE
+# Zależności i artefakty panelu (panel ma własny .dockerignore)
+panel/node_modules
+panel/dist
+panel/.astro
+
+# IDE / OS / logi
 .vscode
 .idea
 *.swp
 *.swo
-
-# OS
 .DS_Store
 Thumbs.db
-
-# Logs
 *.log
-
-# Temporary files
 tmp/
 temp/
 *.tmp
-

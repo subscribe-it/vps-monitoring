@@ -1,220 +1,63 @@
-name: Deploy VPS Monitoring Stack
+name: Deploy to Portainer
 
 on:
-  push:
+  workflow_run:
+    workflows: ["Build Images"]
+    types: [completed]
     branches: [main]
-    paths:
-      - 'docker-compose.yml'
-      - 'config/**'
-      - 'dockerfiles/**'
-      - 'scripts/**'
-      - '.github/workflows/deploy.yml'
-      - '.github/workflows/build-images.yml'
-  pull_request:
-    branches: [main]
-    paths:
-      - 'docker-compose.yml'
-      - 'config/**'
+  workflow_dispatch:
 
-env:
-  STACK_NAME: monitoring
+permissions:
+  contents: read
 
 jobs:
-  validate:
-    name: Validate Stack Configuration
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Validate docker-compose.yml syntax
-        run: |
-          echo "🔍 Validating docker-compose.yml syntax..."
-          
-          # Check if docker-compose.yml exists
-          if [ ! -f "docker-compose.yml" ]; then
-            echo "❌ docker-compose.yml not found!"
-            exit 1
-          fi
-          
-          # Validate YAML syntax using Python
-          python3 -c "
-          import yaml
-          import sys
-          
-          try:
-              with open('docker-compose.yml', 'r') as f:
-                  yaml.safe_load(f)
-              print('✅ docker-compose.yml syntax is valid')
-          except yaml.YAMLError as e:
-              print(f'❌ YAML syntax error: {e}')
-              sys.exit(1)
-          except Exception as e:
-              print(f'❌ Error reading file: {e}')
-              sys.exit(1)
-          " || {
-            echo "⚠️  Python YAML validation failed, trying alternative method..."
-            # Alternative: use docker-compose config (if available)
-            docker compose config --quiet 2>&1 || {
-              echo "❌ docker-compose.yml validation failed!"
-              exit 1
-            }
-          }
-
-      - name: Check required files
-        run: |
-          echo "🔍 Checking required configuration files..."
-          
-          REQUIRED_FILES=(
-            "config/prometheus/prometheus.yml"
-            "config/loki/loki-config.yaml"
-            "config/promtail/promtail-config.yaml"
-            "config/grafana/provisioning/datasources/datasources.yml"
-            "config/grafana/provisioning/dashboards/dashboards.yml"
-          )
-          
-          MISSING_FILES=()
-          for file in "${REQUIRED_FILES[@]}"; do
-            if [ ! -f "$file" ]; then
-              MISSING_FILES+=("$file")
-            fi
-          done
-          
-          if [ ${#MISSING_FILES[@]} -gt 0 ]; then
-            echo "❌ Missing required files:"
-            printf '  - %s\n' "${MISSING_FILES[@]}"
-            exit 1
-          fi
-          
-          echo "✅ All required configuration files present"
-
-      - name: Validate Prometheus config
-        run: |
-          echo "🔍 Validating Prometheus configuration..."
-          python3 -c "
-          import yaml
-          import sys
-          
-          try:
-              with open('config/prometheus/prometheus.yml', 'r') as f:
-                  config = yaml.safe_load(f)
-              
-              # Check required sections
-              required = ['global', 'scrape_configs']
-              for section in required:
-                  if section not in config:
-                      print(f'❌ Missing required section: {section}')
-                      sys.exit(1)
-              
-              print('✅ Prometheus configuration is valid')
-          except Exception as e:
-              print(f'❌ Error validating Prometheus config: {e}')
-              sys.exit(1)
-          "
-
-      - name: Validate Loki config
-        run: |
-          echo "🔍 Validating Loki configuration..."
-          python3 -c "
-          import yaml
-          import sys
-          
-          try:
-              with open('config/loki/loki-config.yaml', 'r') as f:
-                  yaml.safe_load(f)
-              print('✅ Loki configuration is valid')
-          except Exception as e:
-              print(f'❌ Error validating Loki config: {e}')
-              sys.exit(1)
-          "
-
-      - name: Validate Grafana datasources
-        run: |
-          echo "🔍 Validating Grafana datasources configuration..."
-          python3 -c "
-          import yaml
-          import sys
-          
-          try:
-              with open('config/grafana/provisioning/datasources/datasources.yml', 'r') as f:
-                  config = yaml.safe_load(f)
-              
-              if 'datasources' not in config:
-                  print('❌ Missing datasources section')
-                  sys.exit(1)
-              
-              print('✅ Grafana datasources configuration is valid')
-          except Exception as e:
-              print(f'❌ Error validating Grafana datasources: {e}')
-              sys.exit(1)
-          "
-
-      - name: Validation Summary
-        if: always()
-        run: |
-          echo "✅ Stack validation completed"
-          echo "📋 All configuration files are valid"
-
   deploy:
-    name: Deploy to Portainer
+    name: Wywołanie webhooka Portainera
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
-    needs: [validate]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    permissions:
-      contents: read
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Trigger Portainer Webhook
-        env:
-          PORTAINER_WEBHOOK_URL: ${{ secrets.PORTAINER_MONITORING_WEBHOOK }}
+      - name: Sprawdzenie sekretu
+        id: check
         run: |
-          echo "🚀 Triggering Portainer webhook for monitoring stack deployment..."
-          
-          if [ -z "$PORTAINER_WEBHOOK_URL" ]; then
-            echo "⚠️  PORTAINER_MONITORING_WEBHOOK secret not configured"
-            echo "ℹ️  Skipping deployment webhook"
-            echo "ℹ️  To enable automatic deployment, add PORTAINER_MONITORING_WEBHOOK secret"
-            exit 0
-          fi
-          
-          echo "📡 Calling Portainer webhook..."
-          curl -X POST -f -s -w "\nHTTP Status: %{http_code}\n" \
-            "$PORTAINER_WEBHOOK_URL" || {
-            echo "⚠️  Webhook failed but workflow continues"
-            echo "ℹ️  You may need to manually update the stack in Portainer"
-            exit 0  # Non-blocking - don't fail the workflow
-          }
-          
-          echo "✅ Portainer webhook triggered successfully"
-          echo "📦 Stack should be updating in Portainer..."
-
-      - name: Deployment Summary
-        if: always()
-        run: |
-          echo "🚀 Deployment workflow completed"
-          echo ""
-          echo "📋 Summary:"
-          echo "  - Stack: ${{ env.STACK_NAME }}"
-          echo "  - Branch: ${{ github.ref_name }}"
-          echo "  - Commit: ${{ github.sha }}"
-          echo ""
-          if [ -n "${{ secrets.PORTAINER_MONITORING_WEBHOOK }}" ]; then
-            echo "✅ Webhook triggered - Portainer should update the stack automatically"
+          if [ -z "${{ secrets.PORTAINER_MONITORING_WEBHOOK }}" ]; then
+            echo "::warning::Brak sekretu PORTAINER_MONITORING_WEBHOOK — pomijam wdrożenie. Dodaj go w Settings → Secrets and variables → Actions, aby włączyć automatyczny redeploy."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
           else
-            echo "⚠️  Webhook not configured - manual deployment required"
-            echo "   1. Go to Portainer"
-            echo "   2. Navigate to Stacks"
-            echo "   3. Select '${{ env.STACK_NAME }}' stack"
-            echo "   4. Click 'Editor' tab"
-            echo "   5. Update stack with latest docker-compose.yml"
-            echo "   6. Click 'Update the stack'"
+            echo "ready=true" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Wywołanie webhooka (pull + redeploy stacku)
+        id: hook
+        if: steps.check.outputs.ready == 'true'
+        run: |
+          code=$(curl -s -o /tmp/hook.out -w '%{http_code}' --max-time 180 \
+            -X POST "${{ secrets.PORTAINER_MONITORING_WEBHOOK }}")
+          echo "HTTP $code"
+          head -c 500 /tmp/hook.out || true
+          if [ "$code" != "200" ] && [ "$code" != "204" ]; then
+            echo "❌ Webhook nie przyjął wdrożenia"
+            exit 1
+          fi
 
+      - name: Smoke test łańcucha publicznego (oczekujemy 401 = usługa żyje, wymaga logowania)
+        if: steps.check.outputs.ready == 'true'
+        run: |
+          for i in $(seq 1 24); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 https://monitoring.subscribeit.pl/ || true)
+            echo "próba $i: HTTP $code"
+            [ "$code" = "401" ] && { echo "✅ stack odpowiada za ForwardAuth"; exit 0; }
+            sleep 15
+          done
+          echo "❌ Po 6 minutach brak oczekiwanej odpowiedzi 401"
+          exit 1
 
+      - name: Powiadomienie o niepowodzeniu
+        if: failure() && steps.check.outputs.ready == 'true'
+        run: |
+          if [ -n "${{ secrets.NOTIFIER_TOKEN }}" ]; then
+            curl -s --max-time 15 -X POST "https://monitoring.subscribeit.pl/status/alert" \
+              -H "Content-Type: application/json" \
+              -H "X-Auth-Token: ${{ secrets.NOTIFIER_TOKEN }}" \
+              -d '{"title":"Nieudany deploy monitoringu","severity":"warning","message":"Workflow Deploy to Portainer zakończył się błędem. Sprawdź Actions → Deploy.","url":"https://github.com/subscribe-it/vps-monitoring/actions"}' \
+              || true
+          fi

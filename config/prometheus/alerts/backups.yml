@@ -1,0 +1,64 @@
+groups:
+  - name: backups
+    interval: 60s
+    rules:
+
+      - alert: BackupTooOld
+        expr: monitoring_backup_age_seconds > 26 * 3600
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Backup bazy jest starszy niż 26 godzin"
+          description: "Ostatni poprawny backup ma {{ $value | printf \"%.1f\" }} h. Każda godzina zwłoki zwiększa okno utraty danych."
+          runbook: "#backup"
+
+      - alert: BackupNeverSucceeded
+        expr: monitoring_backup_age_seconds < 0
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Nie udało się ustalić żadnego poprawnego backupu"
+          description: "Watchdog nie znalazł w logach znacznika udanego backupu. Sprawdź usługę db-backup i dopasowanie BACKUP_SUCCESS_REGEX."
+          runbook: "#backup"
+
+      - alert: RestoreTestOverdue
+        expr: monitoring_restore_test_age_days > 45 or monitoring_restore_test_age_days < 0
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Zaległy test odtworzenia backupu"
+          description: "Kopia, której nie odtworzono, nie jest kopią. Wykonaj procedurę z RUNBOOK (miesięczny drill) i zapisz wynik."
+          runbook: "#restoretest"
+
+      - alert: MonitoringAllOkFailing
+        expr: monitoring_all_ok == 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Watchdog zgłasza, że coś nie jest zielone"
+          description: "Co najmniej jeden warunek ({{ $labels.check }}) nie przechodzi. Zewnętrzny heartbeat jest wysyłany jako /fail z powodem."
+          runbook: "#allok"
+
+      - alert: HealthchecksPingFailing
+        expr: increase(monitoring_hc_ping_failures_total[30m]) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Nie udaje się pingować healthchecks.io"
+          description: "Zewnętrzny watchdog uzna, że VPS padł, mimo że działa. Sprawdź łączność wychodzącą i poprawność URL-i ping."
+          runbook: "#allok"
+
+      - alert: NotificationDeliveryFailing
+        expr: increase(notifier_notifications_total{status="failed"}[15m]) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Powiadomienia nie są dostarczane"
+          description: "{{ $value | printf \"%.0f\" }} nieudanych wysyłek w 15 minut (kanał {{ $labels.channel }}). Alerty istnieją, ale do Ciebie nie docierają."
+          runbook: "#notifications"

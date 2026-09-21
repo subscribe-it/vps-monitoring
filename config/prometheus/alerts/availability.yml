@@ -1,0 +1,58 @@
+groups:
+  - name: availability
+    interval: 30s
+    rules:
+
+      # Aplikacja (wykryta automatycznie) nie odpowiada oczekiwanym kodem.
+      # UWAGA: celowo BRAK etykiety severity — poziom istotności dziedziczymy
+      # z serii (discovery nadaje ją na podstawie stacka i labeli).
+      - alert: AppDown
+        expr: probe_success{job="blackbox-public"} == 0
+        for: 2m
+        annotations:
+          summary: "Aplikacja nie odpowiada: {{ $labels.instance }}"
+          description: "Sonda HTTP nie przeszła dla {{ $labels.instance }} (stack: {{ $labels.stack }}, usługa: {{ $labels.service }}) od ponad 2 minut."
+          runbook: "#appdown"
+
+      - alert: AppSlow
+        expr: probe_duration_seconds{job="blackbox-public"} > 3
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Aplikacja odpowiada wolno: {{ $labels.instance }}"
+          description: "Czas odpowiedzi {{ $value | printf \"%.2f\" }} s utrzymuje się powyżej 3 s przez 10 minut."
+          runbook: "#appslow"
+
+      # Cały łańcuch publiczny monitoringu (DNS → cert → Traefik → auth → usługa).
+      - alert: MonitoringChainBroken
+        expr: probe_success{job="blackbox-monitoring"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Ścieżka monitoringu nie działa: {{ $labels.instance }}"
+          description: "Oczekiwano kodu 401 (usługa żyje, wymaga logowania), a sonda nie przeszła. Traefik, certyfikat, DNS lub sam panel nie odpowiadają."
+          runbook: "#monitoringchainbroken"
+
+      # Edge nie przyjmuje ruchu na 443 — to awaria WSZYSTKICH domen.
+      - alert: EdgeNotAcceptingTraffic
+        expr: probe_success{job="blackbox-edge-tcp"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Traefik nie przyjmuje ruchu na 443"
+          description: "Połączenie TCP do {{ $labels.instance }} nie udaje się. Przy takim stanie każda domena na tym hoście jest niedostępna."
+          runbook: "#edgedown"
+
+      # Wiele publicznych adresów padło naraz — to prawie zawsze edge, nie aplikacje.
+      - alert: ManyPublicAppsDown
+        expr: sum(probe_success{job="blackbox-public"}) == 0 and count(probe_success{job="blackbox-public"}) > 2
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Wszystkie monitorowane aplikacje są niedostępne"
+          description: "Żadna z {{ $value }} sond nie przechodzi. Sprawdź Traefika i host, zanim zaczniesz sprawdzać aplikacje."
+          runbook: "#edgedown"

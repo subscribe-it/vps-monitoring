@@ -1,58 +1,73 @@
+# =============================================================================
+#  Alertmanager — routing alertów.
+#  Ten plik NIE ZAWIERA ŻADNYCH SEKRETÓW: wszystkie powiadomienia przechodzą
+#  przez wewnętrzny serwis `notifier`, który sam zna temat ntfy, SMTP i adresy
+#  healthchecks.io (czyta je ze zmiennych środowiskowych).
+# =============================================================================
 global:
   resolve_timeout: 5m
 
 route:
-  receiver: 'telegram-default'
-  group_by: ['alertname', 'cluster', 'service']
-  group_wait: 10s
-  group_interval: 10s
+  receiver: 'notifier-default'
+  group_by: ['alertname', 'stack']
+  group_wait: 30s
+  group_interval: 5m
   repeat_interval: 12h
+
   routes:
-    # Critical alerts - immediate notification, repeat every 1 hour
-    - match:
-        severity: critical
-      receiver: 'telegram-critical'
+    # 1) Watchdog — dowód życia stacku, pinguje healthchecks.io co 5 minut.
+    #    Musi być pierwszy, bo nie ma etykiety severity.
+    - matchers:
+        - alertname="Watchdog"
+      receiver: 'watchdog'
+      group_wait: 0s
+      group_interval: 1m
+      repeat_interval: 5m
+
+    # 2) Info — tylko e-mail, bez pusha (deploy, logowania, wykryte usługi).
+    - matchers:
+        - severity="info"
+      receiver: 'notifier-default'
+      group_wait: 30s
+      group_interval: 30m
+      repeat_interval: 24h
+      continue: true
+
+    # 3) Krytyczne — natychmiast, push + e-mail, przypominane co godzinę.
+    - matchers:
+        - severity="critical"
+      receiver: 'notifier-default'
       group_wait: 10s
-      group_interval: 5m
+      group_interval: 2m
       repeat_interval: 1h
       continue: true
-    # Warning alerts - repeat every 6 hours
-    - match:
-        severity: warning
-      receiver: 'telegram-warning'
-      group_wait: 30s
-      group_interval: 10m
-      repeat_interval: 6h
-      continue: true
-    # Default - all other alerts, repeat every 12 hours
-    - receiver: 'telegram-default'
+
+    # 4) Ostrzeżenia — e-mail, bez budzenia w nocy.
+    - matchers:
+        - severity="warning"
+      receiver: 'notifier-default'
+      group_wait: 1m
+      group_interval: 15m
+      repeat_interval: 8h
 
 receivers:
-  - name: 'telegram-default'
+  - name: 'notifier-default'
     webhook_configs:
-      - url: 'http://telegram-webhook:8088/webhook'
+      - url: 'http://notifier:8080/webhook'
         send_resolved: true
-        http_config:
-          follow_redirects: true
+        max_alerts: 0
 
-  - name: 'telegram-critical'
+  - name: 'watchdog'
     webhook_configs:
-      - url: 'http://telegram-webhook:8088/webhook'
-        send_resolved: true
-        http_config:
-          follow_redirects: true
-
-  - name: 'telegram-warning'
-    webhook_configs:
-      - url: 'http://telegram-webhook:8088/webhook'
-        send_resolved: true
-        http_config:
-          follow_redirects: true
+      - url: 'http://notifier:8080/watchdog'
+        send_resolved: false
 
 inhibit_rules:
-  # Inhibit any warning-level notification if the same alert is already firing critical
-  - source_match:
-      severity: 'critical'
-    target_match:
-      severity: 'warning'
-    equal: ['alertname', 'cluster', 'service']
+  # Krytyczny wycisza ostrzeżenie o tym samym problemie.
+  - source_matchers: ['severity="critical"']
+    target_matchers: ['severity="warning"']
+    equal: ['alertname', 'stack']
+  # Gdy padł cały host (brak metryk), nie zasypuj powiadomieniami o każdej usłudze.
+  - source_matchers: ['alertname="NodeExporterDown"']
+    target_matchers: ['alertname=~"Host.*"']
+    equal: ['instance']

@@ -1,0 +1,49 @@
+---
+/**
+ * Podgląd narzędzia w iframe (ten sam origin, `#/tool/<id>`).
+ *
+ * Ramka wypełnia całą dostępną wysokość: w widoku podglądu `#app` przechodzi
+ * w układ `100dvh` z kolumną flex, a `.frame-wrap` zabiera resztę miejsca.
+ * Sam element `<iframe>` tworzy skrypt klienta — dzięki temu nie ładujemy
+ * narzędzia, dopóki użytkownik go nie wybierze.
+ */
+import { Icon } from 'astro-icon/components';
+---
+
+<section class="frame-wrap" data-role="frame-wrap" aria-labelledby="frame-title" hidden>
+  <div class="flex flex-wrap items-center gap-2 border-b border-base-300 bg-base-200 px-4 py-2.5">
+    <a class="btn-ops" href="#/" data-role="back">
+      <Icon name="lucide:arrow-left" size={14} aria-hidden="true" />
+      <span>Wróć do stanu</span>
+    </a>
+    <h2 class="text-sm font-semibold" id="frame-title" data-role="frame-title">—</h2>
+    <span class="state-pill" data-role="frame-state" data-state="unknown">
+      <span class="state-dot" aria-hidden="true"></span>
+      <span data-role="frame-state-label">Nieznany</span>
+    </span>
+    <a
+      class="btn-ops ml-auto"
+      data-role="frame-open"
+      target="_blank"
+      rel="noopener"
+      hidden
+    >
+      <Icon name="lucide:external-link" size={14} aria-hidden="true" />
+      <span>Otwórz w nowej karcie</span>
+    </a>
+  </div>
+
+  <p class="muted border-b border-base-300 px-4 py-2 text-[11px] md:hidden">
+    Wąski ekran — podgląd może być niewygodny.
+    <a class="link-ops" data-role="frame-open-mobile" target="_blank" rel="noopener" hidden>
+      Otwórz w nowej karcie
+    </a>
+  </p>
+
+  <div class="frame-holder flex min-h-0 flex-1 flex-col" data-role="frame-holder"></div>
+
+  <div class="empty-ops" data-role="frame-message" hidden>
+    <Icon name="lucide:info" size={16} aria-hidden="true" />
+    <span data-role="frame-message-text"></span>
+  </div>
+</section>

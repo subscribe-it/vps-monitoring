@@ -1,0 +1,66 @@
+groups:
+  - name: swarm
+    interval: 30s
+    rules:
+
+      # Dokładnie scenariusz z 21.09.2026: usługa zeszła z N/N i nikt tego nie zauważył.
+      # Brak etykiety severity — dziedziczymy ją z serii (discovery nadaje wg stacka).
+      - alert: SwarmServiceReplicasMismatch
+        expr: swarm_service_running_replicas < swarm_service_desired_replicas
+        for: 5m
+        annotations:
+          summary: "Usługa {{ $labels.stack }}/{{ $labels.service }} nie ma pełnych replik"
+          description: "Działa {{ $value | printf \"%.0f\" }} replik w usłudze {{ $labels.stack }}/{{ $labels.service }}, mniej niż zakładano. Sprawdź, czy zadania nie są odrzucane (rejected) i czy polityka restartu się nie wyczerpała."
+          runbook: "#replicas"
+
+      - alert: SwarmServiceTasksFailing
+        expr: swarm_service_failed_tasks_1h > 3
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Usługa {{ $labels.stack }}/{{ $labels.service }} zapętla zadania"
+          description: "{{ $value | printf \"%.0f\" }} nieudanych zadań w ostatniej godzinie — to pętla restartów, nie jednorazowy wybuch."
+          runbook: "#replicas"
+
+      - alert: SwarmContainerUnhealthy
+        expr: swarm_container_health{health="unhealthy"} == 1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Kontener {{ $labels.container }} jest unhealthy"
+          description: "Healthcheck kontenera zgłasza awarię od ponad 5 minut (stack {{ $labels.stack }}/{{ $labels.service }})."
+          runbook: "#unhealthy"
+
+      - alert: SwarmContainerHighMemory
+        expr: |
+          (swarm_container_memory_bytes / swarm_container_memory_limit_bytes) > 0.9
+          and swarm_container_memory_limit_bytes > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Kontener {{ $labels.container }} zużywa >90% limitu pamięci"
+          description: "Przekroczenie limitu kończy się zabiciem kontenera (OOM)."
+          runbook: "#memory"
+
+      - alert: SwarmServiceUpdated
+        expr: changes(swarm_service_updated_at{severity="critical"}[10m]) > 0
+        for: 0m
+        labels:
+          severity: info
+        annotations:
+          summary: "Wdrożono nową wersję: {{ $labels.stack }}/{{ $labels.service }}"
+          description: "Usługa została zaktualizowana w ciągu ostatnich 10 minut. To potwierdzenie deployu, nie awaria."
+          runbook: "#deploy"
+
+      - alert: SwarmNewServiceDiscovered
+        expr: increase(discovery_new_services_total[10m]) > 0
+        for: 0m
+        labels:
+          severity: info
+        annotations:
+          summary: "Wykryto nową usługę i objęto ją monitoringiem"
+          description: "Auto-discovery znalazło {{ $value | printf \"%.0f\" }} nowych usług w ostatnich 10 minutach. Sondy i metryki działają od tej chwili automatycznie."
+          runbook: "#onboarding"

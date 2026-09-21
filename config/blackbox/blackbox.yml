@@ -1,31 +1,54 @@
+# Moduły sond dla blackbox_exporter.
+# Sondy są WYŁĄCZNIE odczytowe (GET) i nie modyfikują monitorowanych aplikacji.
 modules:
+
+  # Domyślny: oczekujemy 2xx. Używany przez auto-discovery dla nowych aplikacji.
   http_2xx:
     prober: http
-    timeout: 5s
+    timeout: 10s
     http:
       valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
-      valid_status_codes: [200, 201, 202, 204]
+      valid_status_codes: [200, 201, 202, 203, 204, 205, 206]
       method: GET
       follow_redirects: true
-      preferred_ip_protocol: "ip4"
+      preferred_ip_protocol: ip4
 
-  http_post_2xx:
+  # Aplikacje, które świadomie przekierowują na "/" (np. panel logowania).
+  http_2xx_3xx:
     prober: http
-    timeout: 5s
+    timeout: 10s
     http:
-      method: POST
-      valid_status_codes: [200, 201, 202, 204]
-      follow_redirects: true
+      valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+      valid_status_codes: [200, 201, 202, 204, 301, 302, 303, 307, 308]
+      method: GET
+      follow_redirects: false
+      preferred_ip_protocol: ip4
+
+  # Nasze własne panele: 401 jest DOWODEM POPRAWNOŚCI całego łańcucha
+  # (DNS → certyfikat → Traefik → ForwardAuth → usługa). Bez poświadczeń.
+  http_expect_auth:
+    prober: http
+    timeout: 10s
+    http:
+      valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+      valid_status_codes: [401]
+      method: GET
+      follow_redirects: false
+      preferred_ip_protocol: ip4
+
+  # Endpointy wymagające logowania, ale odpowiadające również 2xx/3xx.
+  http_alive:
+    prober: http
+    timeout: 10s
+    http:
+      valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+      valid_status_codes: [200, 201, 204, 301, 302, 401, 403]
+      method: GET
+      follow_redirects: false
+      preferred_ip_protocol: ip4
 
   tcp_connect:
     prober: tcp
     timeout: 5s
-
-  icmp:
-    prober: icmp
-    timeout: 5s
-    icmp:
-      preferred_ip_protocol: "ip4"
-
-
-
+    tcp:
+      preferred_ip_protocol: ip4

@@ -1,0 +1,28 @@
+---
+/**
+ * Pasek kafelków narzędzi. Kafelek z `"embed": true` otwiera podgląd w tym
+ * samym widoku (`#/tool/<id>`), pozostałe — nową kartę. Sekcja zostaje na
+ * ekranie również w widoku podglądu, żeby dało się przełączać narzędzia bez
+ * opuszczania panelu.
+ */
+import { Icon } from 'astro-icon/components';
+import ToolTile from './ToolTile.astro';
+---
+
+<section class="card-ops" data-section="tools" data-state="unknown" aria-labelledby="tools-heading">
+  <header class="card-head">
+    <Icon name="lucide:layout-dashboard" size={17} class="state-text" aria-hidden="true" />
+    <h2 class="card-title" id="tools-heading">Narzędzia</h2>
+    <span class="count-chip" data-role="count">—</span>
+    <span class="subtle ml-auto hidden text-[11px] sm:block" data-role="hint">
+      Kafelki z podglądem otwierają się w panelu, pozostałe w nowej karcie
+    </span>
+  </header>
+  <div class="tools-grid" data-role="tiles"></div>
+  <div class="empty-ops" data-role="empty" hidden>
+    <Icon name="lucide:inbox" size={16} aria-hidden="true" />
+    <span>Brak danych o narzędziach.</span>
+  </div>
+</section>
+
+<ToolTile />

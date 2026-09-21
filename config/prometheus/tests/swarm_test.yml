@@ -1,0 +1,73 @@
+rule_files:
+  - ../alerts/swarm.yml
+evaluation_interval: 1m
+
+tests:
+  - name: usługa z 1/3 replik dzwoni po 5 minutach (scenariusz z 21.09.2026)
+    interval: 1m
+    input_series:
+      - series: 'swarm_service_desired_replicas{stack="ventiplan-prod",service="api"}'
+        values: '3+0x25'
+      - series: 'swarm_service_running_replicas{stack="ventiplan-prod",service="api"}'
+        values: '1+0x25'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: SwarmServiceReplicasMismatch
+        exp_alerts:
+          - exp_labels:
+              stack: ventiplan-prod
+              service: api
+            exp_annotations:
+              summary: 'Usługa ventiplan-prod/api nie ma pełnych replik'
+              description: 'Działa 1 replik w usłudze ventiplan-prod/api, mniej niż zakładano. Sprawdź, czy zadania nie są odrzucane (rejected) i czy polityka restartu się nie wyczerpała.'
+              runbook: '#replicas'
+
+  - name: pełne repliki nie generują alertu
+    interval: 1m
+    input_series:
+      - series: 'swarm_service_desired_replicas{stack="star-sign",service="api"}'
+        values: '1+0x25'
+      - series: 'swarm_service_running_replicas{stack="star-sign",service="api"}'
+        values: '1+0x25'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: SwarmServiceReplicasMismatch
+        exp_alerts: []
+
+  - name: pętla restartów jest wykrywana
+    interval: 1m
+    input_series:
+      - series: 'swarm_service_failed_tasks_1h{stack="jpolski_na6_pl_prod",service="wp-cron"}'
+        values: '0+1x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: SwarmServiceTasksFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              stack: jpolski_na6_pl_prod
+              service: wp-cron
+            exp_annotations:
+              summary: 'Usługa jpolski_na6_pl_prod/wp-cron zapętla zadania'
+              description: '20 nieudanych zadań w ostatniej godzinie — to pętla restartów, nie jednorazowy wybuch.'
+              runbook: '#replicas'
+
+  - name: kontener unhealthy jest krytyczny
+    interval: 1m
+    input_series:
+      - series: 'swarm_container_health{stack="ventiplan-prod",service="api",container="ventiplan-prod_api.1",health="unhealthy"}'
+        values: '1+0x25'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: SwarmContainerUnhealthy
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              stack: ventiplan-prod
+              service: api
+              container: ventiplan-prod_api.1
+              health: unhealthy
+            exp_annotations:
+              summary: 'Kontener ventiplan-prod_api.1 jest unhealthy'
+              description: 'Healthcheck kontenera zgłasza awarię od ponad 5 minut (stack ventiplan-prod/api).'
+              runbook: '#unhealthy'

@@ -1,27 +1,27 @@
+# =============================================================================
+#  Grafana — provisioning dashboardow (jako kod, bez klikania w UI)
+#
+#  Pliki JSON leza w config/grafana/dashboards/ i sa wypalane w obrazie
+#  (dockerfiles/grafana: COPY config/grafana/dashboards /var/lib/grafana/dashboards),
+#  dlatego provider czyta wlasnie ten katalog.
+#
+#  foldersFromFilesStructure: false — wszystkie dashboardy ladują w jednym
+#  folderze "Monitoring" (kluczowe dla dashboardu aplikacji: jeden dashboard
+#  obsluguje wszystkie aplikacje, lista wyboru pochodzi ze zmiennych).
+#  allowUiUpdates: false — dashboardy sa wylacznie kodem; zmiany z UI nie
+#  przetrwaja restartu, wiec nie udajemy, ze mozna je zapisac.
+# =============================================================================
 apiVersion: 1
 
 providers:
-  - name: 'Default'
+  - name: monitoring
     orgId: 1
-    folder: 'Default'
+    folder: Monitoring
+    folderUid: monitoring
     type: file
     disableDeletion: false
-    updateIntervalSeconds: 10
-    allowUiUpdates: true
-    options:
-      path: /var/lib/grafana/dashboards/default
-      foldersFromFilesStructure: true
-
-  - name: 'Templates'
-    orgId: 1
-    folder: 'Templates'
-    type: file
-    disableDeletion: true
-    updateIntervalSeconds: 10
+    updateIntervalSeconds: 30
     allowUiUpdates: false
     options:
-      path: /var/lib/grafana/dashboards/templates
+      path: /var/lib/grafana/dashboards
       foldersFromFilesStructure: false
-
-
-

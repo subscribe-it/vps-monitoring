@@ -1,1 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+.netlify/
+
+# Node / panel
+node_modules/
+panel/node_modules/
+panel/dist/
+panel/.astro/
+*.tsbuildinfo
+
+# Środowisko i sekrety
 .env
+.env.*
+!.env.example
+*.local
+
+# Edytory i systemy
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Logi i pliki tymczasowe
+*.log
+tmp/

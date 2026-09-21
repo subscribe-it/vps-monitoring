@@ -1,6 +1,6 @@
-# Authentication is handled by Traefik HTTPS reverse proxy
-# Set LOKI_AUTH_ENABLED=true to enable basic HTTP auth (requires additional config)
-auth_enabled: ${LOKI_AUTH_ENABLED:-false}
+# Loki 3.x — pojedynczy proces, magazyn lokalny, retencja z compactor-em,
+# ruler wysyłający alerty logowe do Alertmanagera.
+auth_enabled: false
 
 server:
   http_listen_port: 3100
@@ -8,68 +8,66 @@ server:
   log_level: info
 
 common:
+  instance_addr: 127.0.0.1
   path_prefix: /loki
   storage:
     filesystem:
       chunks_directory: /loki/chunks
-      rules_directory: /loki/rules
+      rules_directory: /etc/loki/rules
   replication_factor: 1
   ring:
-    instance_addr: 127.0.0.1
     kvstore:
       store: inmemory
 
 schema_config:
   configs:
-    - from: 2020-10-24
-      store: boltdb-shipper
+    - from: 2025-01-01
+      store: tsdb
       object_store: filesystem
-      schema: v11
+      schema: v13
       index:
         prefix: index_
         period: 24h
 
-storage_config:
-  boltdb_shipper:
-    active_index_directory: /loki/boltdb-shipper-active
-    cache_location: /loki/boltdb-shipper-cache
-    cache_ttl: 24h
-  filesystem:
-    directory: /loki/chunks
+limits_config:
+  retention_period: ${LOKI_RETENTION}
+  allow_structured_metadata: true
+  reject_old_samples: true
+  reject_old_samples_max_age: 168h
+  ingestion_rate_mb: 8
+  ingestion_burst_size_mb: 16
+  max_query_series: 5000
+  max_query_parallelism: 8
+  max_streams_per_user: 0
+  split_queries_by_interval: 30m
 
 compactor:
-  working_directory: /loki/boltdb-shipper-compactor
-  compaction_interval: 10m
+  working_directory: /loki/compactor
   retention_enabled: true
-  retention_delete_delay: 2h
-  retention_delete_worker_count: 150
   delete_request_store: filesystem
-
-limits_config:
-  allow_structured_metadata: false
-  retention_period: ${LOKI_RETENTION_DAYS:-720}h  # 30 days default
-  ingestion_rate_mb: 16
-  ingestion_burst_size_mb: 32
-  max_query_parallelism: 32
-  max_query_length: 721h
-  max_streams_per_user: 10000
-  max_line_size: 256KB
-
-table_manager:
-  retention_deletes_enabled: true
-  retention_period: ${LOKI_RETENTION_DAYS:-720}h  # 30 days default
+  compaction_interval: 10m
+  retention_delete_delay: 2h
 
 ruler:
   storage:
     type: local
     local:
-      directory: /loki/rules
-  rule_path: /loki/rules
-  alertmanager_url: http://localhost:9093
+      directory: /etc/loki/rules
+  rule_path: /loki/rules-temp
+  alertmanager_url: http://alertmanager:9093
+  enable_api: true
+  enable_alertmanager_v2: true
   ring:
     kvstore:
       store: inmemory
-  enable_api: true
 
+analytics:
+  reporting_enabled: false
 
+querier:
+  max_concurrent: 4
 
+ingester:
+  chunk_idle_period: 30m
+  chunk_target_size: 1572864
+  max_chunk_age: 2h

@@ -1,0 +1,925 @@
+---
+/**
+ * Strona główna panelu.
+ *
+ * Statyczny HTML (Astro) + jeden mały skrypt klienta. Skrypt pobiera
+ * `/status/api.json` co 30 s, wypełnia znaczniki i obsługuje routing po hashu:
+ *   `#/`            → widok stanu
+ *   `#/tool/<id>`   → podgląd narzędzia w iframe (ten sam origin)
+ *
+ * Skrypt nigdy nie rzuca wyjątkiem na zewnątrz: błąd pobrania pokazuje banner
+ * i pozostawia ostatnie znane dane na ekranie.
+ */
+import Base from '../layouts/Base.astro';
+import AlertsSection from '../components/AlertsSection.astro';
+import BackupSection from '../components/BackupSection.astro';
+import CertsSection from '../components/CertsSection.astro';
+import ChecksSection from '../components/ChecksSection.astro';
+import ErrorBanner from '../components/ErrorBanner.astro';
+import IframeView from '../components/IframeView.astro';
+import SecuritySection from '../components/SecuritySection.astro';
+import StacksSection from '../components/StacksSection.astro';
+import StatusHeader from '../components/StatusHeader.astro';
+import ToolGrid from '../components/ToolGrid.astro';
+---
+
+<Base title="Panel monitoringu — stan usług">
+  <div id="app" class="flex min-h-dvh flex-col" data-view="status" data-endpoint="/status/api.json" data-refresh-ms="30000">
+    <main
+      id="main"
+      class="mx-auto flex w-full max-w-[1700px] min-h-0 flex-1 flex-col gap-3 px-3 py-4 sm:px-5 lg:px-8"
+    >
+      <ErrorBanner />
+      <StatusHeader />
+      <ToolGrid />
+
+      <div class="flex flex-col gap-3" data-role="status-view">
+        <AlertsSection />
+        <ChecksSection />
+        <StacksSection />
+        <div class="grid gap-3 xl:grid-cols-3">
+          <CertsSection />
+          <BackupSection />
+          <SecuritySection />
+        </div>
+      </div>
+
+      <IframeView />
+    </main>
+
+    <footer
+      class="border-t border-base-300 px-3 py-3 sm:px-5 lg:px-8"
+      data-role="footer"
+    >
+      <p class="subtle mx-auto max-w-[1700px] text-[11px]">
+        Źródło danych: <span class="num">/status/api.json</span> · odświeżanie co 30 s ·
+        panel statyczny, bez zależności zewnętrznych
+      </p>
+    </footer>
+  </div>
+</Base>
+
+<script>
+  import {
+    DASH,
+    certDaysState,
+    deriveOverall,
+    fmtAgo,
+    fmtBytes,
+    fmtDateUTC,
+    fmtDateTimeUTC,
+    fmtDays,
+    fmtDuration,
+    fmtHours,
+    fmtInt,
+    fmtNumber,
+    fmtPercent,
+    fmtTimeUTC,
+    groupChecks,
+    isStatusSnapshot,
+    overallLabel,
+    parseStatus,
+    severityLabel,
+    stateLabel,
+    usageState,
+    worstState,
+    type Alert,
+    type Backup,
+    type Cert,
+    type Check,
+    type HostSnapshot,
+    type Security,
+    type Stack,
+    type State,
+    type StatusSnapshot,
+    type Tool,
+  } from '../lib/status';
+  import { spriteHref } from '../lib/icons';
+
+  function bootstrap(app: HTMLElement): void {
+    const endpoint = app.dataset.endpoint ?? '/status/api.json';
+    const refreshMs = Number(app.dataset.refreshMs) || 30_000;
+    const refreshSeconds = Math.max(1, Math.round(refreshMs / 1000));
+    const requestTimeoutMs = 12_000;
+
+    /* ---------------- stan aplikacji ---------------- */
+
+    let snapshot: StatusSnapshot | null = null;
+    let lastGoodAt: Date | null = null;
+    let inFlight = false;
+    let mountedToolId: string | null = null;
+    let frame: HTMLIFrameElement | null = null;
+
+    /** Sygnatury sekcji — zapobiegają zbędnemu przebudowywaniu DOM (i gubieniu fokusu). */
+    const signatures = new Map<string, string>();
+
+    /* ---------------- pomocnicze DOM ---------------- */
+
+    const q = <T extends Element>(root: ParentNode, selector: string): T | null =>
+      root.querySelector<T>(selector);
+
+    const qa = <T extends Element>(root: ParentNode, selector: string): T[] =>
+      Array.from(root.querySelectorAll<T>(selector));
+
+    function setText(root: ParentNode, selector: string, value: string): void {
+      const node = q<HTMLElement>(root, selector);
+      if (node && node.textContent !== value) node.textContent = value;
+    }
+
+    function setState(root: ParentNode, selector: string, state: State): void {
+      const node = q<HTMLElement>(root, selector);
+      if (node) node.dataset.state = state;
+    }
+
+    function instantiate(templateId: string): HTMLElement | null {
+      const template = document.getElementById(templateId);
+      if (!(template instanceof HTMLTemplateElement)) return null;
+      const first = template.content.firstElementChild;
+      return first ? (first.cloneNode(true) as HTMLElement) : null;
+    }
+
+    function section(key: string): HTMLElement | null {
+      return q<HTMLElement>(app, `[data-section="${key}"]`);
+    }
+
+    /** Przebudowuj sekcję tylko wtedy, gdy jej dane faktycznie się zmieniły. */
+    function stale(key: string, value: unknown): boolean {
+      const next = JSON.stringify(value);
+      if (signatures.get(key) === next) return false;
+      signatures.set(key, next);
+      return true;
+    }
+
+    function plural(n: number, one: string, few: string, many: string): string {
+      const abs = Math.abs(n);
+      if (abs === 1) return one;
+      const mod10 = abs % 10;
+      const mod100 = abs % 100;
+      return mod10 >= 2 && mod10 <= 4 && !(mod100 >= 12 && mod100 <= 14) ? few : many;
+    }
+
+    /** Nagłówek sekcji: licznik + zbiorczy stan. */
+    function updateSection(key: string, states: State[], count: string): void {
+      const el = section(key);
+      if (!el) return;
+      const state = worstState(states);
+      el.dataset.state = state;
+      setText(el, '[data-role="count"]', count);
+      setText(el, '[data-role="rollup-label"]', stateLabel(state));
+      const rollup = q<HTMLElement>(el, '[data-role="rollup"]');
+      if (rollup) rollup.setAttribute('aria-label', `Stan sekcji: ${stateLabel(state)}`);
+    }
+
+    function emptyState(key: string, isEmpty: boolean): void {
+      const el = section(key);
+      if (!el) return;
+      const empty = q<HTMLElement>(el, '[data-role="empty"]');
+      if (empty) empty.hidden = !isEmpty;
+    }
+
+    /* ---------------- render: nagłówek ---------------- */
+
+    function overallNote(s: StatusSnapshot): string {
+      const issues = (states: State[]): number =>
+        states.filter((state) => state !== 'ok' && state !== 'disabled').length;
+
+      const parts: string[] = [];
+      const nChecks = issues(s.checks.map((item) => item.state));
+      const nStacks = issues(s.stacks.map((item) => item.state));
+      const nCerts = issues(s.certs.map((item) => item.state));
+      if (nChecks > 0)
+        parts.push(`${nChecks} ${plural(nChecks, 'endpoint', 'endpointy', 'endpointów')}`);
+      if (nStacks > 0) parts.push(`${nStacks} ${plural(nStacks, 'stack', 'stacki', 'stacków')}`);
+      if (nCerts > 0)
+        parts.push(`${nCerts} ${plural(nCerts, 'certyfikat', 'certyfikaty', 'certyfikatów')}`);
+      if (s.alerts.length > 0)
+        parts.push(`${s.alerts.length} ${plural(s.alerts.length, 'alert', 'alerty', 'alertów')}`);
+
+      if (parts.length > 0) return `Wymaga uwagi: ${parts.join(', ')}.`;
+      if (s.checks.length === 0 && s.stacks.length === 0) return 'Brak danych do podsumowania.';
+      const n = s.checks.length;
+      return `${n} ${plural(n, 'endpoint', 'endpointy', 'endpointów')} bez zastrzeżeń.`;
+    }
+
+    function renderHeader(s: StatusSnapshot, overall: State): void {
+      const header = section('header');
+      if (!header) return;
+      header.dataset.state = overall;
+
+      const overallBox = q<HTMLElement>(header, '[data-role="overall"]');
+      if (overallBox) {
+        overallBox.dataset.state = overall;
+        overallBox.setAttribute('aria-label', `Stan ogólny: ${overallLabel(overall)}`);
+      }
+      const dot = q<HTMLElement>(header, '[data-role="overall-dot"]');
+      if (dot) dot.classList.toggle('state-pulse', overall === 'warning' || overall === 'critical');
+
+      setText(header, '[data-role="overall-label"]', overallLabel(overall));
+      setText(header, '[data-role="overall-note"]', overallNote(s));
+      setText(header, '[data-role="generated"]', fmtDateTimeUTC(s.generated_at));
+    }
+
+    function renderHost(host: HostSnapshot | null): void {
+      interface StatOptions {
+        value: string;
+        sub: string;
+        state?: State;
+        percent?: number | null;
+      }
+
+      const put = (key: string, options: StatOptions): void => {
+        const tile = q<HTMLElement>(app, `[data-stat="${key}"]`);
+        if (!tile) return;
+        tile.dataset.state = options.state ?? 'unknown';
+        setText(tile, '[data-role="value"]', options.value);
+        setText(tile, '[data-role="sub"]', options.sub);
+
+        const meter = q<HTMLElement>(tile, '[data-role="meter"]');
+        if (!meter) return;
+        const percent = options.percent ?? null;
+        const bar = meter.firstElementChild;
+        if (bar instanceof HTMLElement) {
+          bar.style.width = `${percent === null ? 0 : Math.max(0, Math.min(100, percent))}%`;
+        }
+        meter.setAttribute('aria-valuenow', String(percent === null ? 0 : Math.round(percent)));
+        meter.setAttribute('aria-valuetext', options.value);
+      };
+
+      if (!host) {
+        for (const key of ['cpu', 'ram', 'disk', 'uptime', 'load', 'inodes', 'swap', 'time']) {
+          put(key, { value: DASH, sub: 'brak danych' });
+        }
+        return;
+      }
+
+      put('cpu', {
+        value: fmtPercent(host.cpu_percent),
+        sub: `load ${fmtNumber(host.load1, 2)} / ${fmtNumber(host.load5, 2)} / ${fmtNumber(host.load15, 2)}`,
+        state: usageState(host.cpu_percent),
+        percent: host.cpu_percent,
+      });
+      put('ram', {
+        value: fmtPercent(host.mem_used_percent),
+        sub: `${fmtBytes(host.mem_used_bytes)} / ${fmtBytes(host.mem_total_bytes)}`,
+        state: usageState(host.mem_used_percent),
+        percent: host.mem_used_percent,
+      });
+      put('disk', {
+        value: fmtPercent(host.disk_used_percent),
+        sub: `${fmtBytes(host.disk_used_bytes)} / ${fmtBytes(host.disk_total_bytes)} · inody ${fmtPercent(host.inodes_used_percent)}`,
+        state: usageState(host.disk_used_percent),
+        percent: host.disk_used_percent,
+      });
+
+      const uptimeDays =
+        host.uptime_seconds === null ? null : Math.floor(host.uptime_seconds / 86_400);
+      const referenceDate = host.time_utc ? new Date(host.time_utc) : null;
+      const bootAt =
+        referenceDate && host.uptime_seconds !== null
+          ? new Date(referenceDate.getTime() - host.uptime_seconds * 1000)
+          : null;
+      put('uptime', {
+        value: uptimeDays === null ? DASH : fmtDays(uptimeDays),
+        sub: bootAt ? `start ${fmtDateUTC(bootAt)}` : fmtDuration(host.uptime_seconds),
+      });
+
+      put('load', {
+        value: fmtNumber(host.load1, 2),
+        sub: `5 min ${fmtNumber(host.load5, 2)} · 15 min ${fmtNumber(host.load15, 2)}`,
+      });
+      put('inodes', {
+        value: fmtPercent(host.inodes_used_percent),
+        sub: 'użycie inodów',
+        state: usageState(host.inodes_used_percent),
+      });
+      put('swap', {
+        value: host.swap_total_bytes === null ? DASH : fmtBytes(host.swap_total_bytes),
+        sub:
+          host.swap_total_bytes === null
+            ? 'brak danych'
+            : host.swap_total_bytes > 0
+              ? 'swap skonfigurowany'
+              : 'brak skonfigurowanego swapu',
+        state:
+          host.swap_total_bytes === null ? 'unknown' : host.swap_total_bytes > 0 ? 'ok' : 'disabled',
+      });
+      put('time', {
+        value: fmtTimeUTC(host.time_utc),
+        sub: fmtDateUTC(host.time_utc),
+        state: host.time_utc ? 'ok' : 'unknown',
+      });
+    }
+
+    /* ---------------- render: narzędzia ---------------- */
+
+    function toolHref(tool: Tool): string {
+      if (tool.embed && tool.url) return `#/tool/${encodeURIComponent(tool.id)}`;
+      if (tool.url) return tool.url;
+      return '#/';
+    }
+
+    function toolAriaLabel(tool: Tool): string {
+      const parts = [tool.name];
+      if (tool.description) parts.push(tool.description);
+      parts.push(`stan: ${stateLabel(tool.state)}`);
+      if (tool.embed && tool.url) parts.push('otwiera podgląd w panelu');
+      else if (tool.url) parts.push('otwiera się w nowej karcie');
+      else parts.push('widok stanu');
+      return parts.join(' — ');
+    }
+
+    function renderTools(tools: Tool[]): void {
+      const grid = section('tools');
+      if (!grid) return;
+      const holder = q<HTMLElement>(grid, '[data-role="tiles"]');
+      const empty = q<HTMLElement>(grid, '[data-role="empty"]');
+      setText(grid, '[data-role="count"]', String(tools.length));
+
+      const state = worstState(tools.map((tool) => tool.state));
+      grid.dataset.state = state;
+
+      if (!holder) return;
+      holder.replaceChildren();
+
+      for (const tool of tools) {
+        const tile = instantiate('tpl-tool-tile');
+        if (!(tile instanceof HTMLAnchorElement)) continue;
+
+        tile.dataset.state = tool.state;
+        tile.href = toolHref(tool);
+        tile.setAttribute('aria-label', toolAriaLabel(tool));
+
+        if (!tool.embed && tool.url) {
+          tile.target = '_blank';
+          tile.rel = 'noopener';
+        }
+
+        const use = q<SVGUseElement>(tile, 'use');
+        if (use) use.setAttribute('href', spriteHref(tool.icon));
+
+        setText(tile, '[data-role="name"]', tool.name);
+        setText(tile, '[data-role="description"]', tool.description ?? '');
+        setText(tile, '[data-role="state-label"]', stateLabel(tool.state));
+        setText(
+          tile,
+          '[data-role="kind"]',
+          tool.kind === 'internal' ? 'wewnętrzne' : tool.kind === 'external' ? 'zewnętrzne' : tool.kind,
+        );
+
+        const marker = q<SVGElement>(tile, '[data-role="marker"]');
+        if (marker) marker.toggleAttribute('hidden', tool.embed || !tool.url);
+
+        holder.append(tile);
+      }
+
+      if (empty) empty.hidden = tools.length > 0;
+    }
+
+    function highlightActiveTool(activeId: string | null): void {
+      for (const tile of qa<HTMLElement>(app, '[data-role="tile"]')) {
+        const isActive = activeId !== null && tile.getAttribute('href') === `#/tool/${encodeURIComponent(activeId)}`;
+        tile.setAttribute('aria-current', isActive ? 'true' : 'false');
+      }
+    }
+
+    /* ---------------- render: sekcje stanu ---------------- */
+
+    function renderChecks(checks: Check[]): void {
+      const grid = section('checks');
+      if (!grid) return;
+      updateSection('checks', checks.map((check) => check.state), String(checks.length));
+      emptyState('checks', checks.length === 0);
+
+      if (!stale('checks', checks)) return;
+      const holder = q<HTMLElement>(grid, '[data-role="groups"]');
+      if (!holder) return;
+      holder.replaceChildren();
+
+      for (const { group, items } of groupChecks(checks)) {
+        const block = instantiate('tpl-check-group');
+        if (!block) continue;
+
+        const groupState = worstState(items.map((item) => item.state));
+        block.dataset.state = groupState;
+        setText(block, '[data-role="group-name"]', group);
+        setText(block, '[data-role="group-count"]', String(items.length));
+        setText(block, '[data-role="group-rollup-label"]', stateLabel(groupState));
+        const rollup = q<HTMLElement>(block, '[data-role="group-rollup"]');
+        rollup?.setAttribute('aria-label', `Stan grupy ${group}: ${stateLabel(groupState)}`);
+
+        const rows = q<HTMLElement>(block, '[data-role="rows"]');
+        for (const check of items) {
+          const row = instantiate('tpl-check-row');
+          if (!row || !rows) continue;
+          row.dataset.state = check.state;
+          setText(row, '[data-role="name"]', check.name);
+          setText(row, '[data-role="detail"]', check.detail ?? stateLabel(check.state));
+          setText(
+            row,
+            '[data-role="latency"]',
+            check.latency_ms === null ? '' : `${fmtInt(check.latency_ms)} ms`,
+          );
+          setText(row, '[data-role="since"]', check.since ? `od ${fmtTimeUTC(check.since)}` : '');
+
+          const link = q<HTMLAnchorElement>(row, '[data-role="link"]');
+          if (link) {
+            if (check.url) {
+              link.href = check.url;
+              link.hidden = false;
+              link.setAttribute('aria-label', `${check.name} — otwórz w nowej karcie`);
+            } else {
+              link.hidden = true;
+              link.removeAttribute('href');
+            }
+          }
+          rows.append(row);
+        }
+        holder.append(block);
+      }
+    }
+
+    function renderStacks(stacks: Stack[]): void {
+      const grid = section('stacks');
+      if (!grid) return;
+      updateSection('stacks', stacks.map((stack) => stack.state), String(stacks.length));
+      emptyState('stacks', stacks.length === 0);
+
+      if (!stale('stacks', stacks)) return;
+      const holder = q<HTMLElement>(grid, '[data-role="list"]');
+      if (!holder) return;
+      holder.replaceChildren();
+
+      for (const stack of stacks) {
+        const block = instantiate('tpl-stack');
+        if (!block) continue;
+
+        block.dataset.state = stack.state;
+        setText(block, '[data-role="stack-name"]', stack.name);
+        setText(block, '[data-role="stack-rollup-label"]', stateLabel(stack.state));
+        const rollup = q<HTMLElement>(block, '[data-role="stack-rollup"]');
+        rollup?.setAttribute('aria-label', `Stan stacka ${stack.name}: ${stateLabel(stack.state)}`);
+
+        const replicas =
+          stack.services_running === null || stack.services_desired === null
+            ? `${stack.services.length}`
+            : `${stack.services_running}/${stack.services_desired}`;
+        setText(block, '[data-role="stack-services"]', `${replicas} usług`);
+        setText(
+          block,
+          '[data-role="table-caption"]',
+          `Usługi w stacku ${stack.name} — ${replicas} uruchomionych`,
+        );
+
+        const body = q<HTMLElement>(block, '[data-role="services"]');
+        for (const service of stack.services) {
+          const row = instantiate('tpl-service-row');
+          if (!row || !body) continue;
+          row.dataset.state = service.state;
+          setText(row, '[data-role="name"]', service.name);
+          setText(row, '[data-role="full-name"]', service.full_name ?? '');
+          setText(row, '[data-role="state-label"]', stateLabel(service.state));
+          setText(
+            row,
+            '[data-role="replicas"]',
+            service.replicas_text ??
+              (service.running === null || service.desired === null
+                ? DASH
+                : `${service.running}/${service.desired}`),
+          );
+          setText(
+            row,
+            '[data-role="cpu"]',
+            service.cpu_percent === null ? DASH : fmtPercent(service.cpu_percent),
+          );
+          setText(row, '[data-role="ram"]', fmtBytes(service.mem_bytes));
+          setText(row, '[data-role="restarts"]', fmtInt(service.restarts_1h));
+          setText(row, '[data-role="image"]', service.image ?? '');
+          body.append(row);
+        }
+        holder.append(block);
+      }
+    }
+
+    function renderCerts(certs: Cert[]): void {
+      const grid = section('certs');
+      if (!grid) return;
+      updateSection('certs', certs.map((cert) => cert.state), String(certs.length));
+      emptyState('certs', certs.length === 0);
+
+      if (!stale('certs', certs)) return;
+      const holder = q<HTMLElement>(grid, '[data-role="list"]');
+      if (!holder) return;
+      holder.replaceChildren();
+
+      for (const cert of certs) {
+        const row = instantiate('tpl-cert-row');
+        if (!row) continue;
+
+        row.dataset.state = cert.state;
+        setState(row, '[data-role="days-wrap"]', certDaysState(cert.days_left));
+        setText(row, '[data-role="host"]', cert.host);
+        setText(row, '[data-role="expires"]', cert.expires_at ? fmtDateUTC(cert.expires_at) : '');
+        setText(row, '[data-role="days"]', `${fmtDays(cert.days_left)}`);
+        setText(row, '[data-role="state-label"]', stateLabel(cert.state));
+        holder.append(row);
+      }
+    }
+
+    function setField(field: string, value: string, sub: string, state: State): void {
+      const block = q<HTMLElement>(app, `[data-field="${field}"]`);
+      if (!block) return;
+      block.dataset.state = state;
+      setText(block, '[data-role="value"]', value);
+      setText(block, '[data-role="sub"]', sub);
+    }
+
+    function renderBackup(backup: Backup | null): void {
+      const grid = section('backup');
+      if (!grid) return;
+      updateSection('backup', backup ? [backup.state] : [], backup ? '1' : '0');
+      emptyState('backup', backup === null);
+
+      if (!backup) {
+        setField('backup-state', DASH, 'brak danych', 'unknown');
+        setField('backup-last', DASH, '', 'unknown');
+        setField('backup-age', DASH, '', 'unknown');
+        setField('backup-size', DASH, '', 'unknown');
+        setField('backup-objects', DASH, '', 'unknown');
+        setField('backup-restore', DASH, '', 'unknown');
+        return;
+      }
+
+      setField('backup-state', stateLabel(backup.state), 'stan z /status/api.json', backup.state);
+      setField(
+        'backup-last',
+        fmtDateTimeUTC(backup.last_success_at),
+        backup.last_success_at ? fmtAgo(backup.last_success_at) : 'brak danych',
+        backup.state,
+      );
+      setField(
+        'backup-age',
+        fmtHours(backup.age_hours),
+        'od ostatniej udanej kopii',
+        backup.state,
+      );
+      setField('backup-size', fmtBytes(backup.size_bytes), 'rozmiar archiwum', 'unknown');
+      setField(
+        'backup-objects',
+        fmtInt(backup.objects_in_r2),
+        'obiekty w R2',
+        'unknown',
+      );
+      setField(
+        'backup-restore',
+        backup.restore_test_days === null ? DASH : fmtDays(backup.restore_test_days),
+        'od testu odtworzenia',
+        'unknown',
+      );
+    }
+
+    function renderSecurity(security: Security | null): void {
+      const grid = section('security');
+      if (!grid) return;
+      updateSection('security', security ? [security.state] : [], security ? '1' : '0');
+      emptyState('security', security === null);
+
+      if (!security) {
+        setField('security-state', DASH, 'brak danych', 'unknown');
+        setField('security-failed', DASH, '', 'unknown');
+        setField('security-bans', DASH, '', 'unknown');
+      } else {
+        setField('security-state', stateLabel(security.state), 'stan z /status/api.json', security.state);
+        setField('security-failed', fmtInt(security.ssh_failed_24h), 'nieudane próby SSH', security.state);
+        setField('security-bans', fmtInt(security.ssh_bans_24h), 'zablokowane adresy', security.state);
+      }
+
+      const logins = security?.logins_24h ?? [];
+      setText(grid, '[data-role="logins-count"]', String(logins.length));
+      const emptyLogins = q<HTMLElement>(grid, '[data-role="logins-empty"]');
+      if (emptyLogins) emptyLogins.hidden = logins.length > 0;
+
+      if (!stale('logins', logins)) return;
+      const holder = q<HTMLElement>(grid, '[data-role="logins"]');
+      if (!holder) return;
+      holder.replaceChildren();
+
+      for (const login of logins) {
+        const row = instantiate('tpl-login-row');
+        if (!row) continue;
+        setText(row, '[data-role="service"]', login.service);
+        setText(row, '[data-role="ip"]', login.ip);
+        setText(row, '[data-role="at"]', fmtDateTimeUTC(login.at));
+        holder.append(row);
+      }
+    }
+
+    function renderAlerts(alerts: Alert[]): void {
+      const grid = section('alerts');
+      if (!grid) return;
+      updateSection(
+        'alerts',
+        alerts.length > 0 ? alerts.map((alert) => alert.severity) : [],
+        String(alerts.length),
+      );
+      if (alerts.length === 0) {
+        // Brak alertów to dobry stan — sekcja jest zielona, nie „nieznana”.
+        grid.dataset.state = 'ok';
+        setText(grid, '[data-role="rollup-label"]', 'Brak alertów');
+        const rollup = q<HTMLElement>(grid, '[data-role="rollup"]');
+        rollup?.setAttribute('aria-label', 'Stan sekcji: brak aktywnych alertów');
+      }
+
+      const clear = q<HTMLElement>(grid, '[data-role="empty-clear"]');
+      if (clear) clear.hidden = alerts.length > 0;
+      const empty = q<HTMLElement>(grid, '[data-role="empty"]');
+      if (empty) empty.hidden = true;
+
+      if (!stale('alerts', alerts)) return;
+      const holder = q<HTMLElement>(grid, '[data-role="list"]');
+      if (!holder) return;
+      holder.replaceChildren();
+
+      for (const alert of alerts) {
+        const row = instantiate('tpl-alert-row');
+        if (!row) continue;
+        row.dataset.state = alert.severity;
+        setText(row, '[data-role="name"]', alert.name);
+        setText(row, '[data-role="severity"]', severityLabel(alert.severity));
+        setText(row, '[data-role="alert-stack"]', alert.stack ?? '');
+        setText(row, '[data-role="summary"]', alert.summary ?? '');
+        setText(row, '[data-role="since"]', alert.since ? `od ${fmtTimeUTC(alert.since)}` : '');
+        holder.append(row);
+      }
+    }
+
+    /* ---------------- banner + znacznik czasu ---------------- */
+
+    function renderBanner(): void {
+      const banner = q<HTMLElement>(app, '[data-role="banner"]');
+      if (!banner || banner.hidden) return;
+      banner.dataset.state = lastGoodAt ? 'warning' : 'critical';
+      setText(banner, '[data-role="banner-title"]', lastGoodAt ? 'Brak danych' : 'Brak danych — nic nie pobrano');
+      setText(
+        banner,
+        '[data-role="banner-text"]',
+        lastGoodAt
+          ? `Ostatnia udana aktualizacja o ${fmtDateTimeUTC(lastGoodAt)} (${fmtAgo(lastGoodAt)}). Pokazuję ostatni znany stan i ponawiam co ${refreshSeconds} s.`
+          : `Nie udało się pobrać ${endpoint}. Ponawiam co ${refreshSeconds} s.`,
+      );
+    }
+
+    function showBanner(): void {
+      const banner = q<HTMLElement>(app, '[data-role="banner"]');
+      if (!banner) return;
+      banner.hidden = false;
+      renderBanner();
+    }
+
+    function hideBanner(): void {
+      const banner = q<HTMLElement>(app, '[data-role="banner"]');
+      if (banner) banner.hidden = true;
+    }
+
+    function renderMeta(): void {
+      const header = section('header');
+      if (!header) return;
+
+      const age = lastGoodAt ? Date.now() - lastGoodAt.getTime() : null;
+      const isStale = age === null || age > refreshMs * 3;
+      setState(header, '[data-role="fresh"]', lastGoodAt ? (isStale ? 'warning' : 'ok') : 'unknown');
+      setText(header, '[data-role="updated"]', lastGoodAt ? fmtTimeUTC(lastGoodAt) : DASH);
+      setText(header, '[data-role="updated-ago"]', lastGoodAt ? `(${fmtAgo(lastGoodAt)})` : '');
+      setText(app, '[data-role="refresh-seconds"]', String(refreshSeconds));
+    }
+
+    /* ---------------- pobieranie danych ---------------- */
+
+    async function fetchWithTimeout(url: string): Promise<Response> {
+      const controller = new AbortController();
+      const timer = window.setTimeout(() => controller.abort(), requestTimeoutMs);
+      try {
+        return await fetch(url, {
+          signal: controller.signal,
+          credentials: 'same-origin',
+          cache: 'no-store',
+          headers: { accept: 'application/json' },
+        });
+      } finally {
+        window.clearTimeout(timer);
+      }
+    }
+
+    /*
+     * Stan „nigdy nie pobrano danych”: każda sekcja dostaje jawny komunikat
+     * „brak danych”, a nie pustą kartę. Wołane tylko wtedy, gdy nie mamy
+     * jeszcze żadnego udanego odczytu (inaczej trzymamy ostatnie dane).
+     */
+    function renderNoData(): void {
+      for (const key of ['checks', 'stacks', 'certs', 'backup', 'security', 'alerts', 'tools']) {
+        const el = section(key);
+        if (!el) continue;
+        el.dataset.state = 'unknown';
+        setText(el, '[data-role="count"]', DASH);
+        setText(el, '[data-role="rollup-label"]', 'Nieznany');
+        const rollup = q<HTMLElement>(el, '[data-role="rollup"]');
+        rollup?.setAttribute('aria-label', 'Stan sekcji: brak danych');
+        const empty = q<HTMLElement>(el, '[data-role="empty"]');
+        if (empty) empty.hidden = false;
+      }
+      // „Brak aktywnych alertów” byłoby nieprawdą — nie wiemy, czy są.
+      const clear = q<HTMLElement>(app, '[data-section="alerts"] [data-role="empty-clear"]');
+      if (clear) clear.hidden = true;
+    }
+
+    async function load(): Promise<void> {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const response = await fetchWithTimeout(endpoint);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload: unknown = await response.json();
+        const parsed = parseStatus(payload);
+        // Odpowiedź 200 z treścią, która nie jest snapshotem (np. JSON błędu),
+        // musi być potraktowana jak awaria — inaczej skasowałaby ostatnie dane.
+        if (!isStatusSnapshot(parsed)) throw new Error('nieoczekiwany kształt odpowiedzi');
+
+        snapshot = parsed;
+        lastGoodAt = new Date();
+        hideBanner();
+        renderAll();
+      } catch {
+        // Świadomie bez `console.error`: awaria sieci nie może zaśmiecać konsoli
+        // ani czyścić widoku. Ostatnie dane zostają na ekranie.
+        if (!snapshot) renderNoData();
+        showBanner();
+      } finally {
+        inFlight = false;
+        renderMeta();
+      }
+    }
+
+    function renderAll(): void {
+      if (!snapshot) return;
+      const overall = deriveOverall(snapshot);
+      renderHeader(snapshot, overall);
+      renderHost(snapshot.host);
+      renderTools(snapshot.tools);
+      renderChecks(snapshot.checks);
+      renderStacks(snapshot.stacks);
+      renderCerts(snapshot.certs);
+      renderBackup(snapshot.backup);
+      renderSecurity(snapshot.security);
+      renderAlerts(snapshot.alerts);
+      applyRoute();
+    }
+
+    /* ---------------- routing po hashu ---------------- */
+
+    interface RouteStatus {
+      kind: 'status';
+    }
+    interface RouteTool {
+      kind: 'tool';
+      id: string;
+    }
+    type Route = RouteStatus | RouteTool;
+
+    function parseRoute(): Route {
+      const match = /^#\/tool\/(.+)$/.exec(window.location.hash);
+      const id = match?.[1];
+      return id ? { kind: 'tool', id: decodeURIComponent(id) } : { kind: 'status' };
+    }
+
+    function setFrameMessage(text: string | null): void {
+      const holder = q<HTMLElement>(app, '[data-role="frame-message"]');
+      if (!holder) return;
+      setText(holder, '[data-role="frame-message-text"]', text ?? '');
+      holder.hidden = text === null;
+    }
+
+    /*
+     * Widoczność widoków przełączamy atrybutem `hidden` (ma `display: none`
+     * z `!important`), a nie klasami układu — w Tailwind v4 warstwa `utilities`
+     * jest po `components`, więc klasa narzędziowa wygrałaby z regułą widoku.
+     */
+    function setStatusViewVisible(visible: boolean): void {
+      const statusView = q<HTMLElement>(app, '[data-role="status-view"]');
+      if (statusView) statusView.hidden = !visible;
+    }
+
+    function showStatus(): void {
+      app.dataset.view = 'status';
+      setStatusViewVisible(true);
+      const wrap = q<HTMLElement>(app, '[data-role="frame-wrap"]');
+      if (wrap) wrap.hidden = true;
+      highlightActiveTool(null);
+      document.title = 'Panel monitoringu — stan usług';
+    }
+
+    function showTool(id: string): void {
+      const wrap = q<HTMLElement>(app, '[data-role="frame-wrap"]');
+      app.dataset.view = 'tool';
+      setStatusViewVisible(false);
+      if (wrap) wrap.hidden = false;
+      highlightActiveTool(id);
+
+      const tool = snapshot?.tools.find((item) => item.id === id) ?? null;
+      const open = q<HTMLAnchorElement>(app, '[data-role="frame-open"]');
+      const openMobile = q<HTMLAnchorElement>(app, '[data-role="frame-open-mobile"]');
+
+      setText(app, '[data-role="frame-title"]', tool ? tool.name : id);
+      setState(app, '[data-role="frame-state"]', tool ? tool.state : 'unknown');
+      setText(app, '[data-role="frame-state-label"]', tool ? stateLabel(tool.state) : 'Nieznany');
+      document.title = `${tool ? tool.name : id} — panel monitoringu`;
+
+      if (!tool) {
+        setFrameMessage(
+          snapshot
+            ? `Nie znaleziono narzędzia „${id}”. Wróć do widoku stanu, aby zobaczyć listę dostępnych narzędzi.`
+            : 'Wczytywanie danych o narzędziach…',
+        );
+        if (open) open.hidden = true;
+        if (openMobile) openMobile.hidden = true;
+        return;
+      }
+
+      const canOpen = Boolean(tool.url);
+      if (open) {
+        if (canOpen && tool.url) open.href = tool.url;
+        open.hidden = !canOpen;
+      }
+      if (openMobile) {
+        if (canOpen && tool.url) openMobile.href = tool.url;
+        openMobile.hidden = !canOpen;
+      }
+
+      if (!tool.embed || !tool.url) {
+        setFrameMessage(
+          `„${tool.name}” otwiera się w nowej karcie — ten panel nie osadza go w podglądzie.`,
+        );
+        return;
+      }
+
+      setFrameMessage(null);
+      mountFrame(tool);
+    }
+
+    function mountFrame(tool: Tool): void {
+      const holder = q<HTMLElement>(app, '[data-role="frame-holder"]');
+      if (!holder || !tool.url) return;
+      if (mountedToolId === tool.id && frame) return;
+
+      // Trzymamy dokładnie jedną ramkę: przełączenie narzędzia ładuje nowe.
+      holder.replaceChildren();
+      const next = document.createElement('iframe');
+      next.className = 'frame-ops';
+      next.src = tool.url;
+      next.title = `Podgląd narzędzia: ${tool.name}`;
+      next.setAttribute('referrerpolicy', 'same-origin');
+      holder.append(next);
+      frame = next;
+      mountedToolId = tool.id;
+    }
+
+    function applyRoute(): void {
+      const route = parseRoute();
+      if (route.kind === 'tool') showTool(route.id);
+      else showStatus();
+    }
+
+    /* ---------------- zdarzenia ---------------- */
+
+    window.addEventListener('hashchange', applyRoute);
+
+    document.addEventListener('click', (event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const trigger = target.closest('[data-action]');
+      if (!(trigger instanceof HTMLElement)) return;
+      const action = trigger.dataset.action;
+      if (action === 'refresh' || action === 'retry') void load();
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState !== 'visible') return;
+      const isStale = !lastGoodAt || Date.now() - lastGoodAt.getTime() > refreshMs;
+      if (isStale) void load();
+    });
+
+    window.setInterval(() => void load(), refreshMs);
+    // Tani ticker: odświeża „x temu” i wykrywa ciszę w odświeżaniu.
+    window.setInterval(() => {
+      renderMeta();
+      renderBanner();
+    }, 5_000);
+
+    /* ---------------- start ---------------- */
+
+    renderMeta();
+    applyRoute();
+    void load();
+  }
+
+  const root = document.getElementById('app');
+  if (root instanceof HTMLElement) bootstrap(root);
+</script>

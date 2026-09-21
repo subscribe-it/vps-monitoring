@@ -1,0 +1,53 @@
+rule_files:
+  - ../alerts/availability.yml
+evaluation_interval: 1m
+
+tests:
+  - name: sonda aplikacji bez odpowiedzi -> AppDown z etykietami z discovery
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="blackbox-public",instance="https://app.ventiplan.pl/health",stack="ventiplan-prod",service="api",severity="critical",module="http_2xx"}'
+        values: '1 1 0+0x25'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: AppDown
+        exp_alerts:
+          - exp_labels:
+              job: blackbox-public
+              instance: https://app.ventiplan.pl/health
+              stack: ventiplan-prod
+              service: api
+              severity: critical
+              module: http_2xx
+            exp_annotations:
+              summary: 'Aplikacja nie odpowiada: https://app.ventiplan.pl/health'
+              description: 'Sonda HTTP nie przeszła dla https://app.ventiplan.pl/health (stack: ventiplan-prod, usługa: api) od ponad 2 minut.'
+              runbook: '#appdown'
+
+  - name: pojedynczy blip sondy NIE generuje alertu
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="blackbox-public",instance="https://star-sign.pl/",stack="star-sign",service="frontend",severity="critical",module="http_2xx"}'
+        values: '1 0 1+0x25'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: AppDown
+        exp_alerts: []
+
+  - name: cały łańcuch monitoringu padł -> krytyczny
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="blackbox-monitoring",instance="https://monitoring.subscribeit.pl/grafana"}'
+        values: '0+0x25'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: MonitoringChainBroken
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: blackbox-monitoring
+              instance: https://monitoring.subscribeit.pl/grafana
+            exp_annotations:
+              summary: 'Ścieżka monitoringu nie działa: https://monitoring.subscribeit.pl/grafana'
+              description: 'Oczekiwano kodu 401 (usługa żyje, wymaga logowania), a sonda nie przeszła. Traefik, certyfikat, DNS lub sam panel nie odpowiadają.'
+              runbook: '#monitoringchainbroken'

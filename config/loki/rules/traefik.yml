@@ -1,0 +1,51 @@
+groups:
+  - name: traefik-logs
+    interval: 30s
+    rules:
+
+      - alert: Traefik5xxRateHigh
+        expr: |
+          sum by (RequestHost) (
+            rate({job="traefik"} | json | DownstreamStatus >= 500 [5m])
+          ) > 0.2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Wysoki odsetek błędów 5xx na {{ $labels.RequestHost }}"
+          description: "{{ $value | printf \"%.2f\" }} błędów 5xx na sekundę w ciągu 5 minut. Sprawdź usługę za tym adresem."
+          runbook: "#http5xx"
+
+      - alert: TraefikNoAccessLogs
+        expr: absent_over_time({job="traefik"}[15m])
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Brak access logów Traefika"
+          description: "Od 15 minut nie ma nowych wpisów — edge nie loguje albo nie przyjmuje ruchu. Analiza po fakcie będzie niemożliwa."
+          runbook: "#logs"
+
+      - alert: AcmeCertificateRenewalFailed
+        expr: |
+          sum(count_over_time({stack="portainer-edge-gateway", service="traefik"}
+            |~ "(?i)unable to obtain ACME certificate|error.*acme|acme.*error|cannot obtain certificate|rateLimited" [30m])) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Traefik nie może odnowić certyfikatu (ACME)"
+          description: "W logach edge pojawił się błąd ACME. Jeśli nie ustąpi, domeny przestaną działać w dniu wygaśnięcia certyfikatu."
+          runbook: "#tlscert"
+
+      - alert: TraefikRouterError
+        expr: |
+          sum(count_over_time({stack="portainer-edge-gateway", service="traefik"}
+            |~ "(?i)error while building|cannot find service|no available server|error.*middleware" [15m])) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Traefik zgłasza błąd konfiguracji routera"
+          description: "Nowa aplikacja lub zmiana labeli mogła nie zostać wdrożona po stronie edge."
+          runbook: "#edgedown"

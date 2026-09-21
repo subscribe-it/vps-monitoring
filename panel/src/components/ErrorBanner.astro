@@ -1,0 +1,21 @@
+---
+/**
+ * Banner „brak danych”. Domyślnie ukryty; skrypt klienta pokazuje go po
+ * nieudanym pobraniu `/status/api.json` i **nie czyści** ostatnich danych.
+ */
+import { Icon } from 'astro-icon/components';
+---
+
+<div class="banner" data-role="banner" data-state="warning" role="alert" hidden>
+  <Icon name="lucide:wifi-off" size={18} class="state-text mt-px" aria-hidden="true" />
+  <div class="min-w-0 flex-1">
+    <p class="text-sm font-semibold" data-role="banner-title">Brak danych</p>
+    <p class="muted mt-0.5 text-xs" data-role="banner-text">
+      Nie udało się pobrać stanu z <span class="num">/status/api.json</span>.
+    </p>
+  </div>
+  <button type="button" class="btn-ops" data-action="retry">
+    <Icon name="lucide:refresh-cw" size={14} aria-hidden="true" />
+    <span>Spróbuj ponownie</span>
+  </button>
+</div>

@@ -1,32 +1,45 @@
+# =============================================================================
+#  Grafana — provisioning datasource'ow (format provisioning apiVersion: 1)
+#
+#  UID sa ustawione na stale ("prometheus", "loki"), bo dashboardy odwoluja sie
+#  do datasource po UID, a nie po nazwie: {"type": "prometheus", "uid": "prometheus"}.
+#  Dzieki temu zmiana nazwy wyswietlanej nie zepsuje paneli.
+#
+#  deleteDatasources usuwa wpisy o tych nazwach przy starcie Grafany, zeby
+#  zmiana url/uid/jsonData zawsze weszla w zycie (bez tego stara definicja
+#  zostaje w bazie i provisioning jej nie nadpisze).
+# =============================================================================
 apiVersion: 1
 
-datasources:
+deleteDatasources:
   - name: Prometheus
+    orgId: 1
+  - name: Loki
+    orgId: 1
+
+datasources:
+
+  # --- metryki -------------------------------------------------------------
+  - name: Prometheus
+    uid: prometheus
     type: prometheus
     access: proxy
     url: http://prometheus:9090
     isDefault: true
     editable: true
     jsonData:
-      httpMethod: POST
+      # 30 s = scrape_interval z prometheus.yml; Grafana uzywa tego do
+      # wygladzania zapytan range i podpowiadania $__rate_interval.
       timeInterval: 30s
-      queryTimeout: 60s
-      exemplarTraceIdDestinations:
-        - name: trace_id
-          datasourceUid: tempo
+      httpMethod: POST
 
+  # --- logi ----------------------------------------------------------------
   - name: Loki
+    uid: loki
     type: loki
     access: proxy
     url: http://loki:3100
     editable: true
     jsonData:
+      # Gorny limit linii zwracanych do panelu logs (zapytania moga zawezic go nizej).
       maxLines: 1000
-      derivedFields:
-        - datasourceUid: prometheus
-          matcherRegex: "trace_id=(\\w+)"
-          name: TraceID
-          url: '$${__value.raw}'
-
-
-

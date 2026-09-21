@@ -1,0 +1,53 @@
+groups:
+  - name: postgres-logs
+    interval: 30s
+    rules:
+
+      # ALERT, KTÓREGO BRAKOWAŁO 21.09.2026: uszkodzenie stron/WAL w logach bazy.
+      - alert: PgPageVerificationFailed
+        expr: |
+          sum(count_over_time({stack="ventiplan-prod", service="postgres"}
+            |~ "(?i)page verification failed|invalid checkpoint|could not locate a valid checkpoint|WAL.*(corrupt|invalid)|incorrect resource manager" [5m])) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Baza zgłasza uszkodzenie stron lub WAL"
+          description: "W logach postgresa pojawił się komunikat o nieudanej weryfikacji sum kontrolnych. To dokładnie ten sygnał, który 21.09.2026 przeszedł niezauważony. Nie restartuj bazy w pętli — najpierw zabezpiecz wolumen."
+          runbook: "#pgcorruption"
+
+      - alert: PgPanic
+        expr: |
+          sum(count_over_time({stack="ventiplan-prod", service="postgres"}
+            |~ "(?i)PANIC:|database system was interrupted|server process .* was terminated by signal|terminating any other active server processes" [5m])) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Postgres zgłosił PANIC / przerwanie systemu bazy"
+          description: "Baza przeszła przez awaryjne zatrzymanie. Sprawdź, czy klaster wstał i czy nie wymaga odtwarzania."
+          runbook: "#pgcorruption"
+
+      - alert: PgStorageProblem
+        expr: |
+          sum(count_over_time({stack="ventiplan-prod", service="postgres"}
+            |~ "(?i)no space left on device|could not extend file|out of memory|could not resize shared memory|disk full" [10m])) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Postgres nie może pisać (miejsce/pamięć)"
+          description: "Brak miejsca lub pamięci współdzielonej — zapisy do bazy są zagrożone."
+          runbook: "#disk"
+
+      - alert: PgConnectionRefused
+        expr: |
+          sum(count_over_time({stack="ventiplan-prod", service="postgres"}
+            |~ "(?i)FATAL:.*(too many clients|remaining connection slots|database system is in recovery mode)" [10m])) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Postgres odrzuca połączenia"
+          description: "Wyczerpane sloty połączeń albo baza w trybie odtwarzania — aplikacja może zwracać błędy."
+          runbook: "#pgcorruption"

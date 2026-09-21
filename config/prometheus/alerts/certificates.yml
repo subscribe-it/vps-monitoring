@@ -1,0 +1,34 @@
+groups:
+  - name: certificates
+    interval: 60s
+    rules:
+
+      - alert: TlsCertExpiringSoon
+        expr: (probe_ssl_earliest_cert_expiry - time()) / 86400 < 14
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Certyfikat TLS wygasa: {{ $labels.instance }}"
+          description: "Pozostało {{ $value | printf \"%.1f\" }} dni. Odnowienie robi Traefik (Let's Encrypt) — sprawdź logi ACME, jeśli data się nie zmienia."
+          runbook: "#tlscert"
+
+      - alert: TlsCertExpiringCritical
+        expr: (probe_ssl_earliest_cert_expiry - time()) / 86400 < 3
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Certyfikat TLS wygasa w ciągu 3 dni: {{ $labels.instance }}"
+          description: "Pozostało {{ $value | printf \"%.1f\" }} dni. Po wygaśnięciu domena przestanie działać dla użytkowników."
+          runbook: "#tlscert"
+
+      - alert: TlsProbeUnavailable
+        expr: absent(probe_ssl_earliest_cert_expiry)
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Brak danych o certyfikatach TLS"
+          description: "Żadna sonda nie zwraca metryki wygasania certyfikatów — monitoring certyfikatów jest ślepy."
+          runbook: "#tlscert"

@@ -1,0 +1,64 @@
+rule_files:
+  - ../alerts/backups.yml
+evaluation_interval: 1m
+
+tests:
+  - name: backup starszy niż 26 godzin jest krytyczny
+    interval: 1m
+    input_series:
+      - series: 'monitoring_backup_age_seconds'
+        values: '100000+0x40'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: BackupTooOld
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: 'Backup bazy jest starszy niż 26 godzin'
+              description: 'Ostatni poprawny backup ma 100000.0 h. Każda godzina zwłoki zwiększa okno utraty danych.'
+              runbook: '#backup'
+
+  - name: świeży backup nie generuje alertu
+    interval: 1m
+    input_series:
+      - series: 'monitoring_backup_age_seconds'
+        values: '3600+0x40'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: BackupTooOld
+        exp_alerts: []
+
+  - name: brak jakiegokolwiek poprawnego backupu
+    interval: 1m
+    input_series:
+      - series: 'monitoring_backup_age_seconds'
+        values: '-1+0x40'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: BackupNeverSucceeded
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: 'Nie udało się ustalić żadnego poprawnego backupu'
+              description: 'Watchdog nie znalazł w logach znacznika udanego backupu. Sprawdź usługę db-backup i dopasowanie BACKUP_SUCCESS_REGEX.'
+              runbook: '#backup'
+
+  - name: niedostarczone powiadomienia są krytyczne
+    interval: 1m
+    input_series:
+      - series: 'notifier_notifications_total{channel="ntfy",status="failed"}'
+        values: '0+1x40'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: NotificationDeliveryFailing
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              channel: ntfy
+              status: failed
+            exp_annotations:
+              summary: 'Powiadomienia nie są dostarczane'
+              description: '15 nieudanych wysyłek w 15 minut (kanał ntfy). Alerty istnieją, ale do Ciebie nie docierają.'
+              runbook: '#notifications'

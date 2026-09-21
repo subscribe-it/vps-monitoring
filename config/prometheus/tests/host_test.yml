@@ -1,0 +1,92 @@
+# Testy reguł hosta — dowód, że progi faktycznie przechodzą w stan firing.
+rule_files:
+  - ../alerts/host.yml
+evaluation_interval: 1m
+
+tests:
+  - name: dysk poniżej 15% daje ostrzeżenie, poniżej 8% daje krytyczny
+    interval: 1m
+    input_series:
+      - series: 'node_filesystem_avail_bytes{fstype="ext4",mountpoint="/",instance="ovh-vps-1",device="/dev/sda1"}'
+        values: '10+0x40'
+      - series: 'node_filesystem_size_bytes{fstype="ext4",mountpoint="/",instance="ovh-vps-1",device="/dev/sda1"}'
+        values: '100+0x40'
+      - series: 'node_filesystem_files_free{fstype="ext4",mountpoint="/",instance="ovh-vps-1"}'
+        values: '1000+0x40'
+      - series: 'node_filesystem_files{fstype="ext4",mountpoint="/",instance="ovh-vps-1"}'
+        values: '10000+0x40'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: HostDiskSpaceLow
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              fstype: ext4
+              mountpoint: "/"
+              instance: ovh-vps-1
+              device: /dev/sda1
+            exp_annotations:
+              summary: 'Mało miejsca na / (ovh-vps-1)'
+              description: 'Wolne: 10.0%. Przy 8% alert zmieni się w krytyczny.'
+              runbook: '#disk'
+      - eval_time: 20m
+        alertname: HostDiskSpaceCritical
+        exp_alerts: []
+
+  - name: dysk poniżej 8% daje alert krytyczny
+    interval: 1m
+    input_series:
+      - series: 'node_filesystem_avail_bytes{fstype="ext4",mountpoint="/",instance="ovh-vps-1",device="/dev/sda1"}'
+        values: '5+0x30'
+      - series: 'node_filesystem_size_bytes{fstype="ext4",mountpoint="/",instance="ovh-vps-1",device="/dev/sda1"}'
+        values: '100+0x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: HostDiskSpaceCritical
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              fstype: ext4
+              mountpoint: "/"
+              instance: ovh-vps-1
+              device: /dev/sda1
+            exp_annotations:
+              summary: 'Krytycznie mało miejsca na /'
+              description: 'Wolne: 5.0%. Ryzyko zatrzymania zapisów bazy i kontenerów.'
+              runbook: '#disk'
+
+  - name: presja pamięci poniżej 10% jest krytyczna
+    interval: 1m
+    input_series:
+      - series: 'node_memory_MemAvailable_bytes{instance="ovh-vps-1"}'
+        values: '500+0x40'
+      - series: 'node_memory_MemTotal_bytes{instance="ovh-vps-1"}'
+        values: '10000+0x40'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: HostMemoryPressure
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: ovh-vps-1
+            exp_annotations:
+              summary: 'Brakuje pamięci (dostępne 5.0%)'
+              description: 'Swap jest wyłączony (0 B), więc presja pamięci kończy się OOM killerem bez ostrzeżenia. Sprawdź, który kontener rośnie.'
+              runbook: '#memory'
+
+  - name: OOM kill jest wykrywany natychmiast
+    interval: 1m
+    input_series:
+      - series: 'node_vmstat_oom_kill{instance="ovh-vps-1"}'
+        values: '0+1x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: HostOomKill
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: ovh-vps-1
+            exp_annotations:
+              summary: 'OOM killer zabił proces na hoście'
+              description: 'W ciągu 15 minut odnotowano 15 zdarzeń OOM. Sprawdź, która usługa zniknęła z listy działających.'
+              runbook: '#memory'

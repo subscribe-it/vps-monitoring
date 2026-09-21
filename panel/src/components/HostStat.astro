@@ -1,0 +1,48 @@
+---
+/**
+ * Pojedynczy kafelek mini-statystyki hosta (CPU, RAM, dysk, uptime...).
+ * Wartość wpisuje skrypt klienta w `[data-role="value"]`, pasek w
+ * `[data-role="meter"]`, opis w `[data-role="sub"]`.
+ */
+import { Icon } from 'astro-icon/components';
+
+interface Props {
+  /** Klucz statystyki, np. `cpu` — skrypt szuka `[data-stat="cpu"]`. */
+  stat: string;
+  label: string;
+  icon: string;
+  /** Czy pokazywać pasek zużycia (dla wartości procentowych). */
+  meter?: boolean;
+}
+
+const { stat, label, icon, meter = false } = Astro.props;
+---
+
+<div
+  class="rounded-[var(--radius-box)] border border-base-300 bg-base-200 px-3 py-2.5"
+  data-stat={stat}
+  data-state="unknown"
+>
+  <div class="flex items-center gap-1.5">
+    <Icon name={icon} size={13} class="state-text" aria-hidden="true" />
+    <span class="card-title text-[11px]">{label}</span>
+  </div>
+  <div class="num mt-1.5 text-[15px] font-semibold" data-role="value">—</div>
+  {
+    meter && (
+      <div
+        class="meter mt-1.5"
+        role="progressbar"
+        aria-label={label}
+        aria-valuemin="0"
+        aria-valuemax="100"
+        aria-valuenow="0"
+        aria-valuetext="brak danych"
+        data-role="meter"
+      >
+        <span style="width:0%"></span>
+      </div>
+    )
+  }
+  <div class="subtle mt-1 text-[11px] leading-tight" data-role="sub">—</div>
+</div>

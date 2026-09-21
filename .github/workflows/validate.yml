@@ -1,220 +1,220 @@
-name: Validate Stack Configuration
+name: Validate
 
 on:
+  push:
+    branches: [main]
   pull_request:
     branches: [main]
-    paths:
-      - 'docker-compose.yml'
-      - 'config/**'
-      - '.github/workflows/**'
-
-env:
-  STACK_NAME: monitoring
 
 jobs:
-  validate:
-    name: Validate Stack Configuration
+  compose:
+    name: Compose / zasady bezpieczeństwa
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Install Python dependencies
-        run: |
-          python3 -m pip install --upgrade pip
-          pip3 install pyyaml
+      - name: Walidacja compose (z podstawionymi zmiennymi)
+        env:
+          PANEL_AUTH_PASSWORD_HTPASSWD: 'admin:$apr1$abcdefgh$0123456789abcdefghij'
+          GRAFANA_ADMIN_PASSWORD: 'placeholder-password'
+        run: docker compose -f docker-compose.yml config > /dev/null
 
-      - name: Validate docker-compose.yml syntax
+      - name: Zasady stacku (zero portów, zero configów external, limity)
+        env:
+          PANEL_AUTH_PASSWORD_HTPASSWD: 'admin:$apr1$abcdefgh$0123456789abcdefghij'
+          GRAFANA_ADMIN_PASSWORD: 'placeholder-password'
         run: |
-          echo "🔍 Validating docker-compose.yml syntax..."
-          
-          if [ ! -f "docker-compose.yml" ]; then
-            echo "❌ docker-compose.yml not found!"
-            exit 1
-          fi
-          
+          docker compose -f docker-compose.yml config > /tmp/rendered.yml
+          python3 - <<'PY'
+          import sys, yaml
+          d = yaml.safe_load(open('/tmp/rendered.yml'))
+          svc = d['services']
+          errors = []
+
+          published = [(n, s['ports']) for n, s in svc.items() if s.get('ports')]
+          if published:
+              errors.append(f'publikowane porty w: {published}')
+
+          if d.get('configs'):
+              errors.append('użyto Docker Swarm configs (mają być w obrazach)')
+
+          ext_ro = {'/var/run/docker.sock': True}
+          for name, s in svc.items():
+              for vol in s.get('volumes') or []:
+                  src = vol.get('source') if isinstance(vol, dict) else str(vol).split(':')[0]
+                  if isinstance(vol, dict) and vol.get('type') == 'bind' and src in ext_ro:
+                      if not vol.get('read_only'):
+                          errors.append(f'{name}: {src} zamontowany bez :ro')
+
+          for name, s in svc.items():
+              if name in ('auth', 'panel'):
+                  continue
+              if not (s.get('deploy') or {}).get('resources', {}).get('limits'):
+                  errors.append(f'{name}: brak limitów zasobów')
+
+          if svc['auth'].get('image', '').endswith(':latest'):
+              errors.append('auth używa :latest')
+
+          print('\n'.join(f'  ✗ {e}' for e in errors) if errors else '  ✓ wszystkie zasady stacku spełnione')
+          sys.exit(1 if errors else 0)
+          PY
+
+  prometheus:
+    name: Prometheus (config + reguły)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: promtool check config
+        run: |
+          docker run --rm -v "$PWD/config/prometheus:/p:ro" --entrypoint /bin/promtool \
+            prom/prometheus:v3.14.0 check config /p/prometheus.yml
+      - name: promtool check rules
+        run: |
+          docker run --rm -v "$PWD/config/prometheus:/p:ro" --entrypoint /bin/sh \
+            prom/prometheus:v3.14.0 -c '/bin/promtool check rules /p/alerts/*.yml'
+      - name: Testy reguł (promtool test rules) — dowód, że alerty faktycznie się zapalają
+        run: |
+          docker run --rm -v "$PWD/config/prometheus:/p:ro" --entrypoint /bin/sh \
+            prom/prometheus:v3.14.0 \
+            -c 'for f in /p/tests/*.yml; do echo "--- $f"; /bin/promtool test rules "$f" || exit 1; done'
+
+  loki:
+    name: Loki (config + reguły)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Weryfikacja konfiguracji Loki
+        run: |
+          docker run --rm -v "$PWD/config/loki:/l:ro" -e LOKI_RETENTION=720h \
+            grafana/loki:3.6.17 -config.file=/l/loki-config.yaml -config.expand-env=true -verify-config=true
+      - name: Reguły alertów logowych (YAML)
+        run: |
           python3 -c "
-          import yaml
-          import sys
-          
-          try:
-              with open('docker-compose.yml', 'r') as f:
-                  config = yaml.safe_load(f)
-              
-              # Check required sections
-              required = ['version', 'services']
-              for section in required:
-                  if section not in config:
-                      print(f'❌ Missing required section: {section}')
-                      sys.exit(1)
-              
-              # Check required services
-              required_services = ['prometheus', 'grafana', 'loki', 'promtail']
-              services = config.get('services', {})
-              missing_services = [s for s in required_services if s not in services]
-              
-              if missing_services:
-                  print(f'❌ Missing required services: {missing_services}')
-                  sys.exit(1)
-              
-              print('✅ docker-compose.yml syntax is valid')
-              print(f'✅ Found {len(services)} services')
-          except yaml.YAMLError as e:
-              print(f'❌ YAML syntax error: {e}')
-              sys.exit(1)
-          except Exception as e:
-              print(f'❌ Error: {e}')
-              sys.exit(1)
+          import glob, yaml, sys
+          bad = []
+          for f in glob.glob('config/loki/rules/*.yml'):
+              d = yaml.safe_load(open(f))
+              for g in d.get('groups', []):
+                  for r in g.get('rules', []):
+                      if not r.get('expr') or not r.get('alert'):
+                          bad.append(f + ': ' + str(r.get('alert')))
+          print('OK:', len(glob.glob('config/loki/rules/*.yml')), 'plików reguł')
+          sys.exit(1 if bad else 0)
           "
 
-      - name: Check required files
+  grafana:
+    name: Grafana (provisioning + dashboardy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          python3 - <<'PY'
+          import glob, json, yaml, sys
+          errors = []
+          for f in glob.glob('config/grafana/provisioning/**/*.yml', recursive=True) + \
+                   glob.glob('config/grafana/provisioning/**/*.yaml', recursive=True):
+              try:
+                  yaml.safe_load(open(f))
+              except Exception as e:
+                  errors.append(f'{f}: {e}')
+          for f in glob.glob('config/grafana/dashboards/*.json'):
+              try:
+                  d = json.load(open(f))
+                  if 'uid' not in d or 'panels' not in d:
+                      errors.append(f'{f}: brak uid lub panels')
+              except Exception as e:
+                  errors.append(f'{f}: {e}')
+          print('\n'.join('  ✗ ' + e for e in errors) if errors else '  ✓ provisioning i dashboardy poprawne')
+          sys.exit(1 if errors else 0)
+          PY
+
+  python:
+    name: Serwisy Pythona (testy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Kompilacja i testy
         run: |
-          echo "🔍 Checking required configuration files..."
-          
-          REQUIRED_FILES=(
-            "config/prometheus/prometheus.yml"
-            "config/loki/loki-config.yaml"
-            "config/promtail/promtail-config.yaml"
-            "config/grafana/provisioning/datasources/datasources.yml"
-            "config/grafana/provisioning/dashboards/dashboards.yml"
-          )
-          
-          MISSING_FILES=()
-          for file in "${REQUIRED_FILES[@]}"; do
-            if [ ! -f "$file" ]; then
-              MISSING_FILES+=("$file")
-            fi
-          done
-          
-          if [ ${#MISSING_FILES[@]} -gt 0 ]; then
-            echo "❌ Missing required files:"
-            printf '  - %s\n' "${MISSING_FILES[@]}"
-            exit 1
-          fi
-          
-          echo "✅ All required configuration files present"
+          python3 -m compileall -q services
+          python3 -m unittest discover -s tests -v
 
-      - name: Validate Prometheus config
+  panel:
+    name: Panel (Astro build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: panel/pnpm-lock.yaml
+      - name: Build
+        working-directory: panel
         run: |
-          echo "🔍 Validating Prometheus configuration..."
-          python3 -c "
-          import yaml
-          import sys
-          
-          try:
-              with open('config/prometheus/prometheus.yml', 'r') as f:
-                  config = yaml.safe_load(f)
-              
-              required = ['global', 'scrape_configs']
-              for section in required:
-                  if section not in config:
-                      print(f'❌ Missing required section: {section}')
-                      sys.exit(1)
-              
-              scrape_configs = config.get('scrape_configs', [])
-              if not scrape_configs:
-                  print('⚠️  Warning: No scrape_configs defined')
-              
-              print('✅ Prometheus configuration is valid')
-              print(f'✅ Found {len(scrape_configs)} scrape configs')
-          except Exception as e:
-              print(f'❌ Error validating Prometheus config: {e}')
-              sys.exit(1)
-          "
+          pnpm install --frozen-lockfile
+          pnpm build
+      - name: Kontrola artefaktu
+        run: test -f panel/dist/index.html
 
-      - name: Validate Loki config
+  runbook:
+    name: Spójność alertów z runbookiem
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Każdy alert ma procedurę w docs/RUNBOOK.md
         run: |
-          echo "🔍 Validating Loki configuration..."
-          python3 -c "
-          import yaml
-          import sys
-          
-          try:
-              with open('config/loki/loki-config.yaml', 'r') as f:
-                  config = yaml.safe_load(f)
-              
-              if 'server' not in config:
-                  print('⚠️  Warning: Missing server configuration')
-              
-              print('✅ Loki configuration is valid')
-          except Exception as e:
-              print(f'❌ Error validating Loki config: {e}')
-              sys.exit(1)
-          "
+          python3 - <<'PY'
+          import glob, re, sys, yaml
+          runbook = open('docs/RUNBOOK.md', encoding='utf-8').read()
+          anchors = set(re.findall(r'<a name="([a-z0-9]+)">', runbook))
+          missing = []
+          for pattern in ('config/prometheus/alerts/*.yml', 'config/loki/rules/*.yml'):
+              for f in glob.glob(pattern):
+                  for m in re.finditer(r'runbook:\s*"#([a-z0-9]+)"', open(f, encoding='utf-8').read()):
+                      if m.group(1) not in anchors:
+                          missing.append(f'{f}: brak sekcji #{m.group(1)}')
+          print('\n'.join('  ✗ ' + m for m in sorted(set(missing))) if missing
+                else f'  ✓ wszystkie alerty mają procedury ({len(anchors)} sekcji runbooka)')
+          sys.exit(1 if missing else 0)
+          PY
 
-      - name: Validate Grafana datasources
+  images:
+    name: Spójność obrazów (compose ↔ macierz buildów)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Każdy własny obraz ma job budujący
+        env:
+          PANEL_AUTH_PASSWORD_HTPASSWD: 'admin:$apr1$abcdefgh$0123456789abcdefghij'
+          GRAFANA_ADMIN_PASSWORD: 'placeholder-password'
         run: |
-          echo "🔍 Validating Grafana datasources configuration..."
-          python3 -c "
-          import yaml
-          import sys
-          
-          try:
-              with open('config/grafana/provisioning/datasources/datasources.yml', 'r') as f:
-                  config = yaml.safe_load(f)
-              
-              if 'datasources' not in config:
-                  print('❌ Missing datasources section')
-                  sys.exit(1)
-              
-              datasources = config.get('datasources', [])
-              if not datasources:
-                  print('⚠️  Warning: No datasources defined')
-              
-              print('✅ Grafana datasources configuration is valid')
-              print(f'✅ Found {len(datasources)} datasources')
-          except Exception as e:
-              print(f'❌ Error validating Grafana datasources: {e}')
-              sys.exit(1)
-          "
+          docker compose -f docker-compose.yml config > /tmp/rendered.yml
+          python3 - <<'PY'
+          import re, sys, yaml
 
-      - name: Check dashboard templates
-        run: |
-          echo "🔍 Checking dashboard templates..."
-          
-          TEMPLATE_DIR="config/grafana/provisioning/dashboards/templates"
-          if [ ! -d "$TEMPLATE_DIR" ]; then
-            echo "⚠️  Warning: Dashboard templates directory not found"
-            exit 0
-          fi
-          
-          REQUIRED_TEMPLATES=(
-            "wordpress.json"
-            "generic-app.json"
-            "database.json"
-          )
-          
-          MISSING_TEMPLATES=()
-          for template in "${REQUIRED_TEMPLATES[@]}"; do
-            if [ ! -f "$TEMPLATE_DIR/$template" ]; then
-              MISSING_TEMPLATES+=("$template")
-            fi
-          done
-          
-          if [ ${#MISSING_TEMPLATES[@]} -gt 0 ]; then
-            echo "⚠️  Warning: Missing template files:"
-            printf '  - %s\n' "${MISSING_TEMPLATES[@]}"
-          else
-            echo "✅ All dashboard templates present"
-          fi
+          rendered = yaml.safe_load(open('/tmp/rendered.yml'))
+          workflow = yaml.safe_load(open('.github/workflows/build-images.yml'))
+          built = {
+              f"ghcr.io/subscribe-it/vps-monitoring-{i['name']}:main"
+              for i in workflow['jobs']['build']['strategy']['matrix']['include']
+          }
 
-      - name: Validate Summary
-        if: always()
-        run: |
-          echo "✅ Stack validation completed"
-          echo ""
-          echo "📋 Validation Summary:"
-          echo "  - docker-compose.yml: ✅ Valid"
-          echo "  - Configuration files: ✅ Present"
-          echo "  - Prometheus config: ✅ Valid"
-          echo "  - Loki config: ✅ Valid"
-          echo "  - Grafana datasources: ✅ Valid"
-          echo ""
-          echo "🚀 Stack is ready for deployment"
+          used = {s['image'] for s in rendered['services'].values() if s.get('image')}
+          own = {i for i in used if i.startswith('ghcr.io/subscribe-it/vps-monitoring-')}
 
-
-
+          missing = sorted(own - built)
+          unused = sorted(built - own)
+          if missing:
+              print('  ✗ obrazy bez jobu budującego:', missing)
+          if unused:
+              print('  ✗ macierz buduje obrazy, których nikt nie używa:', unused)
+          if not missing and not unused:
+              print(f'  ✓ {len(own)} własnych obrazów, każdy z jobem budującym')
+          sys.exit(1 if (missing or unused) else 0)
+          PY

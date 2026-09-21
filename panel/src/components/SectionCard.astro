@@ -1,0 +1,37 @@
+---
+/**
+ * Powłoka sekcji stanu: nagłówek z ikoną, tytułem, licznikiem i zbiorczym
+ * wskaźnikiem stanu. Kolor całej sekcji wynika z atrybutu `data-state` na
+ * tym elemencie (patrz `--state` w global.css), a skrypt klienta tylko go
+ * podmienia.
+ */
+import { Icon } from 'astro-icon/components';
+
+interface Props {
+  /** Klucz sekcji, używany przez skrypt jako `[data-section="..."]`. */
+  section: string;
+  title: string;
+  /** Nazwa ikony lucide, np. `lucide:globe`. */
+  icon: string;
+}
+
+const { section, title, icon } = Astro.props;
+---
+
+<section class="card-ops" data-section={section} data-state="unknown">
+  <header class="card-head">
+    <Icon name={icon} size={17} class="state-text" aria-hidden="true" />
+    <h2 class="card-title">{title}</h2>
+    <span class="count-chip" data-role="count">—</span>
+    <span
+      class="state-pill ml-auto"
+      data-role="rollup"
+      role="img"
+      aria-label="Stan sekcji: nieznany"
+    >
+      <span class="state-dot" aria-hidden="true"></span>
+      <span data-role="rollup-label">Nieznany</span>
+    </span>
+  </header>
+  <slot />
+</section>

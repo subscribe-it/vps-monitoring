@@ -1,0 +1,32 @@
+---
+/**
+ * Sekcja (c): certyfikaty TLS z `certs[]` — dni do wygaśnięcia.
+ * Stan wiersza bierzemy z API (`state`), a sama wartość dni jest dodatkowo
+ * wyróżniana progami (<30 dni, <14 dni).
+ */
+import { Icon } from 'astro-icon/components';
+import SectionCard from './SectionCard.astro';
+---
+
+<SectionCard section="certs" title="Certyfikaty TLS" icon="lucide:shield-check">
+  <div data-role="list"></div>
+  <div class="empty-ops" data-role="empty" hidden>
+    <Icon name="lucide:inbox" size={16} aria-hidden="true" />
+    <span>Brak danych o certyfikatach.</span>
+  </div>
+</SectionCard>
+
+<template id="tpl-cert-row">
+  <div class="row-ops" data-role="row" data-state="unknown">
+    <span class="state-dot" aria-hidden="true"></span>
+    <span class="num min-w-0 flex-1 truncate text-sm font-medium" data-role="host"></span>
+    <span class="subtle hidden text-xs sm:block" data-role="expires"></span>
+    <span data-role="days-wrap" data-state="unknown">
+      <span class="num state-text text-sm font-semibold" data-role="days"></span>
+    </span>
+    <span class="state-pill" data-role="state-pill">
+      <span class="state-dot" aria-hidden="true"></span>
+      <span data-role="state-label"></span>
+    </span>
+  </div>
+</template>

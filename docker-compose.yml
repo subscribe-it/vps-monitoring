@@ -1,131 +1,64 @@
-version: '3.8'
-
+# =============================================================================
+#  monitoring — stack obserwacyjny dla ovh-vps-1
+#  Stack name w Portainerze: monitoring
+#
+#  ZASADA NADRZĘDNA (docs/SCOPE.md):
+#    Ten stack WYŁĄCZNIE OBSERWUJE. Nie modyfikuje żadnego innego stacka.
+#    - zero publikowanych portów na hoście (ruch tylko przez Traefika, po labelach)
+#    - zero zewnętrznych Docker Swarm configs (konfiguracja jest w obrazach)
+#    - cudze wolumeny wyłącznie jako :ro (np. logi Traefika)
+#    - Docker API wyłącznie jako :ro, kod wykonuje tylko zapytania GET
+#    - jedyne zapisy: wolumeny tego stacka
+#
+#  Wdrożenie: Portainer → stack z Git repository (branch main) → ten plik.
+#  Sekrety: wyłącznie zmienne środowiskowe stacka w Portainerze (env.portainer.example).
+# =============================================================================
 networks:
   monitoring:
     driver: overlay
     attachable: true
   traefik-public:
-    external: true  # Istniejąca sieć Traefik
+    external: true
 
 volumes:
-  prometheus_data: {}
-  grafana_data: {}
-  loki_data: {}
-  uptime_kuma_data: {}
-  duplicati_data: {}
-  duplicati_backups: {}
-  alertmanager_data: {}
+  # Wolumen Traefika z access logami — CUDZY, tylko do odczytu (promtail).
+  portainer-edge-gateway_traefik-logs:
+    external: true
+  # Nowa generacja wolumenów (sufiks _v2) — stare wolumeny monitoring_* z
+  # poprzedniego wdrożenia zostają NIETKNIĘTE jako archiwum.
+  prometheus_data_v2: {}
+  grafana_data_v2: {}
+  loki_data_v2: {}
+  alertmanager_data_v2: {}
 
-# Docker Swarm Configs - pliki konfiguracyjne (muszą być utworzone przed deployem)
-# Zobacz: docs/DEPLOYMENT.md - sekcja "Creating Docker Configs"
-configs:
-  prometheus_config:
-    external: true
-  prometheus_alerts_system:
-    external: true
-  prometheus_alerts_http:
-    external: true
-  prometheus_alerts_monitoring:
-    external: true
-  prometheus_alerts_prometheus:
-    external: true
-  loki_config:
-    external: true
-  promtail_config:
-    external: true
-  alertmanager_config:
-    external: true
-  blackbox_config:
-    external: true
-  grafana_datasources:
-    external: true
-  grafana_dashboards:
-    external: true
-  telegram_webhook_script:
-    external: true
-  telegram_webhook_requirements:
-    external: true
-  dashboard_automation_script:
-    external: true
-  dashboard_template_wordpress:
-    external: true
-  dashboard_template_generic_app:
-    external: true
-  dashboard_template_database:
-    external: true
-  uptime_kuma_config:
-    external: true
-  uptime_kuma_init_script_v2:
-    file: ./scripts/uptime-kuma-init.py
+x-common: &common
+  networks:
+    - monitoring
+  deploy:
+    replicas: 1
+    placement:
+      constraints:
+        - node.role == manager
+    restart_policy:
+      condition: any
+      delay: 10s
+      max_attempts: 0
 
 services:
-  node-exporter:
-    image: prom/node-exporter:latest
-    deploy:
-      mode: global
-      restart_policy:
-        condition: any
-        delay: 5s
-      resources:
-        limits:
-          cpus: '0.2'
-          memory: 128M
-        reservations:
-          cpus: '0.05'
-          memory: 32M
-    command:
-      - '--path.procfs=/host/proc'
-      - '--path.rootfs=/rootfs'
-      - '--path.sysfs=/host/sys'
-      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc|$$)'  # Escaped $$
-    volumes:
-      - /proc:/host/proc:ro
-      - /sys:/host/sys:ro
-      - /:/rootfs:ro
-    networks:
-      - monitoring
-    ports:
-      - target: 9100
-        published: 9100
-        protocol: tcp
-        mode: host
 
-  cadvisor:
-    image: gcr.io/cadvisor/cadvisor:v0.47.0
-    hostname: cadvisor
-    deploy:
-      mode: global
-      restart_policy:
-        condition: any
-        delay: 5s
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 512M
-        reservations:
-          cpus: '0.1'
-          memory: 128M
-    command:
-      - --docker_only=true
-      - --housekeeping_interval=30s
-      - --disable_metrics=percpu,sched,tcp,udp,disk,diskIO,hugetlb
-      - --store_container_labels=false
-    volumes:
-      - /:/rootfs:ro
-      - /var/run:/var/run:ro
-      - /sys:/sys:ro
-      - /var/lib/docker/:/var/lib/docker:ro
-      - /dev/disk/:/dev/disk:ro
-    networks:
-      - monitoring
-    ports:
-      - target: 8080
-        published: 8081
-        protocol: tcp
-        mode: host
-
-  prometheus:
-    image: prom/prometheus:latest
+  # ---------------------------------------------------------------------------
+  # auth — jeden punkt uwierzytelnienia dla wszystkich paneli (Traefik ForwardAuth)
+  # Dzięki temu sekret (htpasswd) nie trafia do labeli Traefika, a wszystkie
+  # ścieżki mają jeden realm = jedno logowanie w przeglądarce.
+  # ---------------------------------------------------------------------------
+  auth:
+    image: ghcr.io/subscribe-it/vps-monitoring-auth:main
+    hostname: auth
+    environment:
+      - TZ=${TZ:-Europe/Warsaw}
+      - AUTH_USER=${PANEL_AUTH_USER:-admin}
+      - AUTH_PASSWORD_HTPASSWD=${PANEL_AUTH_PASSWORD_HTPASSWD:?Ustaw PANEL_AUTH_PASSWORD_HTPASSWD w env stacka}
+    <<: *common
     deploy:
       replicas: 1
       placement:
@@ -133,61 +66,152 @@ services:
           - node.role == manager
       restart_policy:
         condition: any
-        delay: 5s
-      resources:
-        limits:
-          cpus: '1'
-          memory: 2G
-        reservations:
-          cpus: '0.5'
-          memory: 512M
+        delay: 10s
+    networks:
+      - monitoring
+      - traefik-public
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:9090/-/healthy || exit 1"]
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/healthz || exit 1"]
       interval: 30s
-      timeout: 10s
+      timeout: 5s
       retries: 3
-      start_period: 40s
-    configs:
-      - source: prometheus_config
-        target: /etc/prometheus/prometheus.yml
-      - source: prometheus_alerts_system
-        target: /etc/prometheus/alerts/system.yml
-      - source: prometheus_alerts_http
-        target: /etc/prometheus/alerts/http.yml
-      - source: prometheus_alerts_monitoring
-        target: /etc/prometheus/alerts/monitoring.yml
-      - source: prometheus_alerts_prometheus
-        target: /etc/prometheus/alerts/prometheus.yml
+      start_period: 10s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-public"
+      # Middleware ForwardAuth — nazwa w Swarmie dostaje prefiks stacku,
+      # dlatego routery odwołują się do "monitoring-mon-auth@swarm".
+      - "traefik.http.middlewares.mon-auth.forwardauth.address=http://auth:8080/verify"
+      - "traefik.http.middlewares.mon-auth.forwardauth.authResponseHeaders=X-User"
+      - "traefik.http.middlewares.mon-auth.forwardauth.trustForwardHeader=true"
+
+  # ---------------------------------------------------------------------------
+  # panel — strona startowa (Astro, statyczna) z kafelkami i żywym stanem
+  # ---------------------------------------------------------------------------
+  panel:
+    image: ghcr.io/subscribe-it/vps-monitoring-panel:main
+    hostname: panel
+    environment:
+      - TZ=${TZ:-Europe/Warsaw}
+    <<: *common
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: any
+        delay: 10s
+    networks:
+      - monitoring
+      - traefik-public
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:80/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-public"
+      - "traefik.http.routers.mon-panel.rule=Host(`${MONITORING_DOMAIN:-monitoring.subscribeit.pl}`)"
+      - "traefik.http.routers.mon-panel.entrypoints=websecure"
+      - "traefik.http.routers.mon-panel.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-letsencrypt}"
+      - "traefik.http.routers.mon-panel.priority=1"
+      - "traefik.http.routers.mon-panel.middlewares=monitoring-mon-auth@swarm"
+      - "traefik.http.services.mon-panel.loadbalancer.server.port=80"
+      # www → domena główna: dwie origin oznaczałyby dwa logowania i dwa konteksty ciasteczek.
+      - "traefik.http.routers.mon-panel-www.rule=Host(`www.${MONITORING_DOMAIN:-monitoring.subscribeit.pl}`)"
+      - "traefik.http.routers.mon-panel-www.entrypoints=websecure"
+      - "traefik.http.routers.mon-panel-www.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-letsencrypt}"
+      - "traefik.http.routers.mon-panel-www.priority=10"
+      - "traefik.http.routers.mon-panel-www.middlewares=monitoring-mon-www-redirect@swarm"
+      - "traefik.http.routers.mon-panel-www.service=mon-panel"
+      - "traefik.http.middlewares.mon-www-redirect.redirectregex.regex=^https?://www\\.(.+)"
+      - "traefik.http.middlewares.mon-www-redirect.redirectregex.replacement=https://$${1}"
+      - "traefik.http.middlewares.mon-www-redirect.redirectregex.permanent=true"
+
+  # ---------------------------------------------------------------------------
+  # grafana — dashboardy i logi (provisioning + dashboardy w obrazie)
+  # ---------------------------------------------------------------------------
+  grafana:
+    image: ghcr.io/subscribe-it/vps-monitoring-grafana:main
+    hostname: grafana
+    environment:
+      - TZ=${TZ:-Europe/Warsaw}
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?Ustaw GRAFANA_ADMIN_PASSWORD w env stacka}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      - GF_SERVER_ROOT_URL=https://${MONITORING_DOMAIN:-monitoring.subscribeit.pl}/grafana
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
+      - GF_SECURITY_ALLOW_EMBEDDING=true
+      - GF_SECURITY_COOKIE_SAMESITE=lax
+      - GF_ANALYTICS_REPORTING_ENABLED=false
+      - GF_ANALYTICS_CHECK_FOR_UPDATES=false
+      - GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES=false
+      - GF_NEWS_NEWS_FEED_ENABLED=false
+      - GF_DATE_FORMATS_DEFAULT_TIMEZONE=browser
+      # Logowanie przez nagłówek z ForwardAuth (jeden login na całość).
+      - GF_AUTH_PROXY_ENABLED=${GRAFANA_AUTH_PROXY:-true}
+      - GF_AUTH_PROXY_HEADER_NAME=X-User
+      - GF_AUTH_PROXY_AUTO_SIGN_UP=true
+      - GF_AUTH_PROXY_SYNC_TTL=300
+      - GF_AUTH_PROXY_WHITELIST=10.0.0.0/8,172.16.0.0/12,127.0.0.1/8
+      - GF_LOG_MODE=console
+      - GF_METRICS_ENABLED=true
+      - GF_METRICS_BASIC_AUTH_USERNAME=
+      - GF_METRICS_BASIC_AUTH_PASSWORD=
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - prometheus_data:/prometheus
+      - grafana_data_v2:/var/lib/grafana
+    <<: *common
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: any
+        delay: 10s
+      resources:
+        limits: { cpus: '0.50', memory: 512M }
+        reservations: { cpus: '0.05', memory: 128M }
+    networks:
+      - monitoring
+      - traefik-public
+    depends_on:
+      - prometheus
+      - loki
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-public"
+      - "traefik.http.routers.mon-grafana.rule=Host(`${MONITORING_DOMAIN:-monitoring.subscribeit.pl}`) && PathPrefix(`/grafana`)"
+      - "traefik.http.routers.mon-grafana.entrypoints=websecure"
+      - "traefik.http.routers.mon-grafana.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-letsencrypt}"
+      - "traefik.http.routers.mon-grafana.priority=100"
+      - "traefik.http.routers.mon-grafana.middlewares=monitoring-mon-auth@swarm"
+      - "traefik.http.services.mon-grafana.loadbalancer.server.port=3000"
+
+  # ---------------------------------------------------------------------------
+  # prometheus — metryki (config i reguły w obrazie)
+  # ---------------------------------------------------------------------------
+  prometheus:
+    image: ghcr.io/subscribe-it/vps-monitoring-prometheus:main
+    hostname: prometheus
+    environment:
+      - TZ=${TZ:-Europe/Warsaw}
+    volumes:
+      - prometheus_data_v2:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
-      - '--storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-720h}'
-      - '--web.console.libraries=/etc/prometheus/console_libraries'
-      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-30d}'
+      - '--storage.tsdb.retention.size=${PROMETHEUS_RETENTION_SIZE:-8GB}'
+      - '--web.external-url=https://${MONITORING_DOMAIN:-monitoring.subscribeit.pl}/prometheus'
+      - '--web.route-prefix=/'
       - '--web.enable-lifecycle'
-    ports:
-      - "9090:9090"
-    networks:
-      - monitoring
-      - traefik-public
-    depends_on:
-      - node-exporter
-      - cadvisor
-      - alertmanager
-      - blackbox-exporter
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.services.prometheus.loadbalancer.server.port=9090"
-      - "traefik.http.routers.prometheus.rule=Host(`${MONITORING_HOST:-57.129.41.248}`) && PathPrefix(`/prometheus`)"
-      - "traefik.http.routers.prometheus.entrypoints=websecure"
-      - "traefik.http.routers.prometheus.middlewares=prometheus-stripprefix"
-      - "traefik.http.middlewares.prometheus-stripprefix.stripprefix.prefixes=/prometheus"
-
-  loki:
-    image: grafana/loki:latest
+      - '--web.enable-admin-api=false'
+      - '--query.max-concurrency=4'
+    <<: *common
     deploy:
       replicas: 1
       placement:
@@ -195,318 +219,104 @@ services:
           - node.role == manager
       restart_policy:
         condition: any
-        delay: 5s
+        delay: 10s
       resources:
-        limits:
-          cpus: '0.5'
-          memory: 1G
-        reservations:
-          cpus: '0.25'
-          memory: 256M
-    # Note: Healthcheck removed - Loki image is minimal (scratch-based) and doesn't include
-    # wget, curl, bash, or sh. Docker Swarm will monitor the container process status instead.
-    configs:
-      - source: loki_config
-        target: /etc/loki/local-config.yaml
-    volumes:
-      - loki_data:/loki
-    command: -config.file=/etc/loki/local-config.yaml -config.expand-env=true
-    ports:
-      - "3100:3100"
+        limits: { cpus: '1.0', memory: 1G }
+        reservations: { cpus: '0.10', memory: 256M }
     networks:
       - monitoring
       - traefik-public
-    depends_on:
-      - node-exporter
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.services.loki.loadbalancer.server.port=3100"
-      - "traefik.http.routers.loki.rule=Host(`${MONITORING_HOST:-57.129.41.248}`) && PathPrefix(`/loki`)"
-      - "traefik.http.routers.loki.entrypoints=websecure"
-      - "traefik.http.routers.loki.middlewares=loki-stripprefix"
-      - "traefik.http.middlewares.loki-stripprefix.stripprefix.prefixes=/loki"
-
-  promtail:
-    image: grafana/promtail:latest
-    deploy:
-      mode: global
-      restart_policy:
-        condition: any
-        delay: 5s
-      resources:
-        limits:
-          cpus: '0.3'
-          memory: 256M
-        reservations:
-          cpus: '0.1'
-          memory: 64M
-    configs:
-      - source: promtail_config
-        target: /etc/promtail/config.yml
-    volumes:
-      - /var/log:/var/log:ro
-      - /var/lib/docker/containers:/var/lib/docker/containers:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - /etc/localtime:/etc/localtime:ro
-    command: -config.file=/etc/promtail/config.yml
-    networks:
-      - monitoring
-    depends_on:
-      - loki
-
-  grafana:
-    image: grafana/grafana:latest
-    deploy:
-      replicas: 1
-      placement:
-        constraints:
-          - node.role == manager
-      restart_policy:
-        condition: any
-        delay: 5s
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 512M
-        reservations:
-          cpus: '0.25'
-          memory: 128M
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1"]
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:9090/-/healthy || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s
-    configs:
-      - source: grafana_datasources
-        target: /etc/grafana/provisioning/datasources/datasources.yml
-      - source: grafana_dashboards
-        target: /etc/grafana/provisioning/dashboards/dashboards.yml
-    volumes:
-      - grafana_data:/var/lib/grafana
-      # Templates directory - opcjonalny bind mount (katalog)
-      # Jeśli chcesz użyć templates, odkomentuj poniższą linię i zmień ścieżkę na właściwą lokalizację gdzie Portainer klonuje repo
-      # W Portainer: sprawdź ścieżkę w Stack → Editor → gdzie jest docker-compose.yml (zwykle /data/compose/ID/)
-      # - /data/compose/25/config/grafana/provisioning/dashboards/templates:/var/lib/grafana/dashboards/templates:ro
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
-      - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_AUTH_ANONYMOUS_ENABLED=false
-      - GF_SERVER_ROOT_URL=http://${MONITORING_HOST:-57.129.41.248}:3000
-      - GF_INSTALL_PLUGINS=
-    ports:
-      - "3000:3000"
-    networks:
-      - monitoring
-      - traefik-public
-    depends_on:
-      - prometheus
-      - loki
     labels:
       - "traefik.enable=true"
-      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
-      - "traefik.http.routers.grafana.rule=Host(`${MONITORING_HOST:-57.129.41.248}`) && PathPrefix(`/grafana`)"
-      - "traefik.http.routers.grafana.entrypoints=websecure"
-      - "traefik.http.routers.grafana.middlewares=grafana-stripprefix"
-      - "traefik.http.middlewares.grafana-stripprefix.stripprefix.prefixes=/grafana"
+      - "traefik.docker.network=traefik-public"
+      - "traefik.http.routers.mon-prometheus.rule=Host(`${MONITORING_DOMAIN:-monitoring.subscribeit.pl}`) && PathPrefix(`/prometheus`)"
+      - "traefik.http.routers.mon-prometheus.entrypoints=websecure"
+      - "traefik.http.routers.mon-prometheus.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-letsencrypt}"
+      - "traefik.http.routers.mon-prometheus.priority=100"
+      - "traefik.http.routers.mon-prometheus.middlewares=monitoring-mon-auth@swarm"
+      - "traefik.http.services.mon-prometheus.loadbalancer.server.port=9090"
 
-  uptime-kuma:
-    image: louislam/uptime-kuma:latest
-    hostname: uptime-kuma
-    deploy:
-      replicas: 1
-      placement:
-        constraints:
-          - node.role == manager
-      restart_policy:
-        condition: any
-        delay: 5s
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 512M
-        reservations:
-          cpus: '0.1'
-          memory: 128M
-    # Note: Healthcheck removed - Uptime Kuma image doesn't include wget/curl.
-    # Docker Swarm will monitor the container process status instead.
-    volumes:
-      - uptime_kuma_data:/app/data
-    ports:
-      - "3001:3001"
-    networks:
-      - monitoring
-      - traefik-public
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.services.uptime-kuma.loadbalancer.server.port=3001"
-      - "traefik.http.routers.uptime-kuma.rule=Host(`${MONITORING_HOST:-57.129.41.248}`) && PathPrefix(`/uptime-kuma`)"
-      - "traefik.http.routers.uptime-kuma.entrypoints=websecure"
-      - "traefik.http.routers.uptime-kuma.middlewares=uptime-kuma-stripprefix"
-      - "traefik.http.middlewares.uptime-kuma-stripprefix.stripprefix.prefixes=/uptime-kuma"
-
-  duplicati:
-    image: lscr.io/linuxserver/duplicati:latest
-    hostname: duplicati
-    deploy:
-      replicas: 1
-      placement:
-        constraints:
-          - node.role == manager
-      restart_policy:
-        condition: any
-        delay: 5s
-      resources:
-        limits:
-          cpus: '1'
-          memory: 1G
-        reservations:
-          cpus: '0.25'
-          memory: 256M
-    volumes:
-      - duplicati_data:/config
-      - duplicati_backups:/backups
-      - prometheus_data:/source/prometheus:ro
-      - grafana_data:/source/grafana:ro
-      - loki_data:/source/loki:ro
-      - uptime_kuma_data:/source/uptime-kuma:ro
-      - alertmanager_data:/source/alertmanager:ro
-    environment:
-      - PUID=1000
-      - PGID=1000
-      - TZ=Europe/Warsaw
-    ports:
-      - "8200:8200"
-    networks:
-      - monitoring
-      - traefik-public
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.services.duplicati.loadbalancer.server.port=8200"
-      - "traefik.http.routers.duplicati.rule=Host(`${MONITORING_HOST:-57.129.41.248}`) && PathPrefix(`/duplicati`)"
-      - "traefik.http.routers.duplicati.entrypoints=websecure"
-      - "traefik.http.routers.duplicati.middlewares=duplicati-stripprefix"
-      - "traefik.http.middlewares.duplicati-stripprefix.stripprefix.prefixes=/duplicati"
-
+  # ---------------------------------------------------------------------------
+  # alertmanager — routing alertów (config bez sekretów w obrazie)
+  # ---------------------------------------------------------------------------
   alertmanager:
-    image: prom/alertmanager:latest
+    image: ghcr.io/subscribe-it/vps-monitoring-alertmanager:main
     hostname: alertmanager
-    deploy:
-      replicas: 1
-      placement:
-        constraints:
-          - node.role == manager
-      restart_policy:
-        condition: any
-        delay: 5s
-      resources:
-        limits:
-          cpus: '0.25'
-          memory: 256M
-        reservations:
-          cpus: '0.1'
-          memory: 64M
-    healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:9093/-/healthy || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-    configs:
-      - source: alertmanager_config
-        target: /etc/alertmanager/alertmanager.yml
+    environment:
+      - TZ=${TZ:-Europe/Warsaw}
     volumes:
-      - alertmanager_data:/alertmanager
+      - alertmanager_data_v2:/alertmanager
     command:
       - '--config.file=/etc/alertmanager/alertmanager.yml'
       - '--storage.path=/alertmanager'
-      - '--web.external-url=http://${MONITORING_HOST:-57.129.41.248}:9093'
-    ports:
-      - "9093:9093"
+      - '--web.external-url=https://${MONITORING_DOMAIN:-monitoring.subscribeit.pl}/alertmanager'
+      - '--web.route-prefix=/'
+      - '--cluster.listen-address='
+    <<: *common
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: any
+        delay: 10s
+      resources:
+        limits: { cpus: '0.25', memory: 256M }
     networks:
       - monitoring
       - traefik-public
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.services.alertmanager.loadbalancer.server.port=9093"
-      - "traefik.http.routers.alertmanager.rule=Host(`${MONITORING_HOST:-57.129.41.248}`) && PathPrefix(`/alertmanager`)"
-      - "traefik.http.routers.alertmanager.entrypoints=websecure"
-      - "traefik.http.routers.alertmanager.middlewares=alertmanager-stripprefix"
-      - "traefik.http.middlewares.alertmanager-stripprefix.stripprefix.prefixes=/alertmanager"
-
-  blackbox-exporter:
-    image: prom/blackbox-exporter:latest
-    hostname: blackbox-exporter
-    deploy:
-      replicas: 1
-      placement:
-        constraints:
-          - node.role == manager
-      restart_policy:
-        condition: any
-        delay: 5s
-      resources:
-        limits:
-          cpus: '0.2'
-          memory: 128M
-        reservations:
-          cpus: '0.05'
-          memory: 32M
-    configs:
-      - source: blackbox_config
-        target: /etc/blackbox_exporter/config.yml
-    command:
-      - '--config.file=/etc/blackbox_exporter/config.yml'
-    ports:
-      - "9115:9115"
-    networks:
-      - monitoring
-
-  telegram-webhook:
-    image: ghcr.io/subscribe-it/vps-monitoring-telegram-webhook:latest
-    hostname: telegram-webhook
-    deploy:
-      replicas: 1
-      placement:
-        constraints:
-          - node.role == manager
-      restart_policy:
-        condition: any
-        delay: 5s
-      resources:
-        limits:
-          cpus: '0.25'
-          memory: 128M
-        reservations:
-          cpus: '0.1'
-          memory: 32M
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8088/ || exit 1"]
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:9093/-/healthy || exit 1"]
       interval: 30s
-      timeout: 10s
+      timeout: 5s
       retries: 3
       start_period: 30s
-    configs:
-      - source: telegram_webhook_script
-        target: /app/telegram-webhook.py
-      - source: telegram_webhook_requirements
-        target: /app/requirements.txt
-    working_dir: /app
-    command: sh -c "pip install -q -r requirements.txt && python3 telegram-webhook.py"
-    environment:
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
-      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
-      - PORT=8088
-    ports:
-      - "8088:8088"
-    networks:
-      - monitoring
-    depends_on:
-      - alertmanager
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-public"
+      - "traefik.http.routers.mon-alertmanager.rule=Host(`${MONITORING_DOMAIN:-monitoring.subscribeit.pl}`) && PathPrefix(`/alertmanager`)"
+      - "traefik.http.routers.mon-alertmanager.entrypoints=websecure"
+      - "traefik.http.routers.mon-alertmanager.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-letsencrypt}"
+      - "traefik.http.routers.mon-alertmanager.priority=100"
+      - "traefik.http.routers.mon-alertmanager.middlewares=monitoring-mon-auth@swarm"
+      - "traefik.http.services.mon-alertmanager.loadbalancer.server.port=9093"
 
-  dashboard-automation:
-    image: ghcr.io/subscribe-it/vps-monitoring-dashboard-automation:latest
-    hostname: dashboard-automation
+  # ---------------------------------------------------------------------------
+  # notifier — jedyne wyjście alertów: ntfy (push) + e-mail (SMTP)
+  # Alertmanager nie zna żadnych sekretów, rozmawia tylko z tym serwisem.
+  # ---------------------------------------------------------------------------
+  notifier:
+    image: ghcr.io/subscribe-it/vps-monitoring-notifier:main
+    hostname: notifier
+    environment:
+      - TZ=${TZ:-Europe/Warsaw}
+      - NTFY_URL=${NTFY_URL:-https://ntfy.sh}
+      - NTFY_TOPIC=${NTFY_TOPIC:-}
+      - NTFY_TOKEN=${NTFY_TOKEN:-}
+      - NTFY_PRIORITY_CRITICAL=${NTFY_PRIORITY_CRITICAL:-urgent}
+      - NTFY_PRIORITY_WARNING=${NTFY_PRIORITY_WARNING:-default}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-465}
+      - SMTP_SECURE=${SMTP_SECURE:-true}
+      - SMTP_USERNAME=${SMTP_USERNAME:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - ALERT_EMAIL_FROM=${ALERT_EMAIL_FROM:-}
+      - ALERT_EMAIL_TO=${ALERT_EMAIL_TO:-}
+      - EMAIL_MIN_SEVERITY=${EMAIL_MIN_SEVERITY:-warning}
+      - ALERT_BASE_URL=https://${MONITORING_DOMAIN:-monitoring.subscribeit.pl}
+      - HC_PING_MONITORING=${HC_PING_MONITORING:-}
+      - HC_PING_FAIL_SUFFIX=${HC_PING_FAIL_SUFFIX:-/fail}
+      - WATCHDOG_PING=${WATCHDOG_PING:-true}
+      - NOTIFIER_TOKEN=${NOTIFIER_TOKEN:-}
+      - RUNBOOK_BASE_URL=${RUNBOOK_BASE_URL:-https://github.com/subscribe-it/vps-monitoring/blob/main/docs/RUNBOOK.md}
+    <<: *common
     deploy:
       replicas: 1
       placement:
@@ -514,83 +324,51 @@ services:
           - node.role == manager
       restart_policy:
         condition: any
-        delay: 5s
+        delay: 10s
       resources:
-        limits:
-          cpus: '0.25'
-          memory: 256M
-        reservations:
-          cpus: '0.1'
-          memory: 64M
+        limits: { cpus: '0.10', memory: 128M }
     healthcheck:
-      test: ["CMD", "pgrep", "-f", "dashboard-automation.py"]
+      test: ["CMD", "python3", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3).status==200 else 1)"]
       interval: 60s
       timeout: 10s
       retries: 3
-      start_period: 30s
-    configs:
-      - source: dashboard_automation_script
-        target: /app/dashboard-automation.py
-      - source: dashboard_template_wordpress
-        target: /app/templates/wordpress.json
-      - source: dashboard_template_generic_app
-        target: /app/templates/generic-app.json
-      - source: dashboard_template_database
-        target: /app/templates/database.json
-    working_dir: /app
-    command: python3 dashboard-automation.py
-    environment:
-      - GRAFANA_URL=${GRAFANA_URL:-http://grafana:3000}
-      - GRAFANA_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
-      - GRAFANA_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
-      - PROMETHEUS_URL=${PROMETHEUS_URL:-http://prometheus:9090}
-      - CHECK_INTERVAL=${CHECK_INTERVAL:-60}
-    networks:
-      - monitoring
-    depends_on:
-      - grafana
-      - prometheus
+      start_period: 15s
 
-  uptime-kuma-init:
-    image: ghcr.io/subscribe-it/vps-monitoring-uptime-kuma-init:latest
-    hostname: uptime-kuma-init
-    deploy:
-      replicas: 1
-      placement:
-        constraints:
-          - node.role == manager
-      restart_policy:
-        condition: none
-      resources:
-        limits:
-          cpus: '0.1'
-          memory: 128M
-        reservations:
-          cpus: '0.05'
-          memory: 32M
-    configs:
-      - source: uptime_kuma_config
-        target: /app/config/uptime-kuma-config.yaml
-      - source: uptime_kuma_init_script_v2
-        target: /app/uptime-kuma-init.py
-      - source: telegram_webhook_requirements
-        target: /app/requirements.txt
-    working_dir: /app
-    command: sh -c "pip install -q -r requirements.txt && python3 uptime-kuma-init.py"
+  # ---------------------------------------------------------------------------
+  # discovery — serce automatycznego monitoringu nowych aplikacji.
+  # Czyta Docker API (:ro) i wystawia:
+  #   /sd/http.json  → Prometheus HTTP SD (sondy blackbox dla każdej nowej trasy)
+  #   /metrics       → repliki usług, stany zadań, zasoby kontenerów
+  #   /status/api.json → dane dla panelu
+  # ---------------------------------------------------------------------------
+  discovery:
+    image: ghcr.io/subscribe-it/vps-monitoring-discovery:main
+    hostname: discovery
     environment:
-      - UPTIME_KUMA_URL=http://uptime-kuma:3001
-      - UPTIME_KUMA_USERNAME=${UPTIME_KUMA_USERNAME:-admin}
-      - UPTIME_KUMA_PASSWORD=${UPTIME_KUMA_PASSWORD:-}
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
-      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
-    networks:
-      - monitoring
-    depends_on:
-      - uptime-kuma
-
-  wordpress-stack-discovery:
-    image: ghcr.io/subscribe-it/vps-monitoring-wordpress-stack-discovery:latest
-    hostname: wordpress-stack-discovery
+      - TZ=${TZ:-Europe/Warsaw}
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - REFRESH_SECONDS=${DISCOVERY_REFRESH_SECONDS:-30}
+      - SKIP_STACKS=${DISCOVERY_SKIP_STACKS:-monitoring,traefik,traefik_stack}
+      - SKIP_SERVICES=${DISCOVERY_SKIP_SERVICES:-}
+      - CRITICAL_STACKS=${CRITICAL_STACKS:-ventiplan-prod,jpolski_na6_pl_prod,star-sign,bugsink,portainer-edge-gateway}
+      - WARN_STACKS=${WARN_STACKS:-kosmetix-staging,staging_mdi-studio}
+      - DEFAULT_PROBE_PATH=${DEFAULT_PROBE_PATH:-/}
+      - BACKUP_SERVICE=${BACKUP_SERVICE:-ventiplan-prod_db-backup}
+      - BACKUP_SUCCESS_REGEX=${BACKUP_SUCCESS_REGEX:-}
+      - BLACKBOX_MODULE=${BLACKBOX_MODULE:-http_2xx}
+      - PROBE_TIMEOUT_SECONDS=${PROBE_TIMEOUT_SECONDS:-5}
+      - MONITORING_DOMAIN=${MONITORING_DOMAIN:-monitoring.subscribeit.pl}
+      - ALERTMANAGER_URL=http://alertmanager:9093
+      - HEALTH_PING_URL=http://health-ping:8080
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    # Gniazdo Dockera należy do grupy `docker` (0660). Kontener działa jako UID
+    # 10001, więc musi dostać TĘ grupę — inaczej nie odczyta listy usług.
+    # Poprawny GID sprawdzisz na hoście: stat -c %g /var/run/docker.sock
+    # (pre-flight wypisuje go i porównuje z tą wartością).
+    group_add:
+      - "${DOCKER_GID:-999}"
+    <<: *common
     deploy:
       replicas: 1
       placement:
@@ -598,34 +376,165 @@ services:
           - node.role == manager
       restart_policy:
         condition: any
-        delay: 5s
+        delay: 10s
       resources:
-        limits:
-          cpus: '0.25'
-          memory: 256M
-        reservations:
-          cpus: '0.1'
-          memory: 64M
+        limits: { cpus: '0.25', memory: 256M }
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3).status==200 else 1)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-public"
+      - "traefik.http.routers.mon-status.rule=Host(`${MONITORING_DOMAIN:-monitoring.subscribeit.pl}`) && PathPrefix(`/status`)"
+      - "traefik.http.routers.mon-status.entrypoints=websecure"
+      - "traefik.http.routers.mon-status.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-letsencrypt}"
+      - "traefik.http.routers.mon-status.priority=200"
+      - "traefik.http.routers.mon-status.middlewares=monitoring-mon-auth@swarm"
+      - "traefik.http.services.mon-status.loadbalancer.server.port=8080"
+
+  # ---------------------------------------------------------------------------
+  # health-ping — watchdog wychodzący: pinguje healthchecks.io TYLKO gdy
+  # wszystko jest zielone, a przy problemie wysyła /fail z powodem.
+  # ---------------------------------------------------------------------------
+  health-ping:
+    image: ghcr.io/subscribe-it/vps-monitoring-health-ping:main
+    hostname: health-ping
+    environment:
+      - TZ=${TZ:-Europe/Warsaw}
+      - HC_PING_ALL_OK=${HC_PING_ALL_OK:-}
+      - HC_PING_BACKUP=${HC_PING_BACKUP:-}
+      - INTERVAL_SECONDS=${HEALTH_PING_INTERVAL_SECONDS:-120}
+      - PROMETHEUS_URL=http://prometheus:9090
+      - DISCOVERY_URL=http://discovery:8080
+      - BACKUP_MAX_AGE_HOURS=${BACKUP_MAX_AGE_HOURS:-26}
+      - BACKUP_MIN_SIZE_MB=${BACKUP_MIN_SIZE_MB:-1}
+      - DISK_MIN_FREE_PERCENT=${DISK_MIN_FREE_PERCENT:-15}
+      - INODES_MIN_FREE_PERCENT=${INODES_MIN_FREE_PERCENT:-10}
+      - CERT_MIN_DAYS=${CERT_MIN_DAYS:-14}
+      - RESTORE_TEST_MAX_DAYS=${RESTORE_TEST_MAX_DAYS:-45}
+      - DOCKER_HOST=unix:///var/run/docker.sock
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    configs:
-      - source: dashboard_template_wordpress
-        target: /app/templates/wordpress.json
-      - source: dashboard_template_generic_app
-        target: /app/templates/generic-app.json
-      - source: dashboard_template_database
-        target: /app/templates/database.json
+    group_add:
+      - "${DOCKER_GID:-999}"
+    <<: *common
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: any
+        delay: 10s
+      resources:
+        limits: { cpus: '0.10', memory: 128M }
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3).status==200 else 1)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ---------------------------------------------------------------------------
+  # node-exporter — metryki hosta
+  # ---------------------------------------------------------------------------
+  node-exporter:
+    image: prom/node-exporter:v1.12.1
+    hostname: node-exporter
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc|var/lib/docker/.+)($$|/)'
+      - '--no-collector.wifi'
+      - '--no-collector.hwmon'
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    pid: host
+    <<: *common
+    deploy:
+      mode: global
+      restart_policy:
+        condition: any
+        delay: 10s
+      resources:
+        limits: { cpus: '0.20', memory: 128M }
+
+  # ---------------------------------------------------------------------------
+  # blackbox-exporter — sondy HTTP/TCP + wygasanie certyfikatów TLS
+  # ---------------------------------------------------------------------------
+  blackbox-exporter:
+    image: prom/blackbox-exporter:v0.28.0
+    hostname: blackbox-exporter
+    command:
+      - '--config.file=/etc/blackbox_exporter/config.yml'
+      - '--log.level=info'
+    <<: *common
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: any
+        delay: 10s
+      resources:
+        limits: { cpus: '0.20', memory: 128M }
+
+  # ---------------------------------------------------------------------------
+  # loki — magazyn logów
+  # ---------------------------------------------------------------------------
+  loki:
+    image: ghcr.io/subscribe-it/vps-monitoring-loki:main
+    hostname: loki
     environment:
-      - UPTIME_KUMA_URL=http://uptime-kuma:3001
-      - UPTIME_KUMA_USERNAME=${UPTIME_KUMA_USERNAME:-admin}
-      - UPTIME_KUMA_PASSWORD=${UPTIME_KUMA_PASSWORD:-}
-      - GRAFANA_URL=http://grafana:3000
-      - GRAFANA_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
-      - GRAFANA_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
-      - CHECK_INTERVAL=300
-      - STACK_PATTERN=jpolski_.*_prod_.*
-    networks:
-      - monitoring
-    depends_on:
-      - uptime-kuma
-      - grafana
+      - TZ=${TZ:-Europe/Warsaw}
+      - LOKI_RETENTION=${LOKI_RETENTION:-720h}
+    volumes:
+      - loki_data_v2:/loki
+    command: -config.file=/etc/loki/loki-config.yaml -config.expand-env=true
+    <<: *common
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: any
+        delay: 10s
+      resources:
+        limits: { cpus: '0.50', memory: 768M }
+        reservations: { cpus: '0.05', memory: 128M }
+
+  # ---------------------------------------------------------------------------
+  # promtail — zbieranie logów: kontenery (Docker API), journald hosta,
+  # access logi Traefika z cudzego wolumenu (tylko :ro)
+  # ---------------------------------------------------------------------------
+  promtail:
+    image: ghcr.io/subscribe-it/vps-monitoring-promtail:main
+    hostname: promtail
+    environment:
+      - TZ=${TZ:-Europe/Warsaw}
+      - LOKI_URL=http://loki:3100/loki/api/v1/push
+      - HOSTNAME=ovh-vps-1
+    volumes:
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/log/journal:/var/log/journal:ro
+      - /run/log/journal:/run/log/journal:ro
+      - /etc/machine-id:/etc/machine-id:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - portainer-edge-gateway_traefik-logs:/traefik-logs:ro
+    command: -config.file=/etc/promtail/config.yml -config.expand-env=true
+    <<: *common
+    deploy:
+      mode: global
+      restart_policy:
+        condition: any
+        delay: 10s
+      resources:
+        limits: { cpus: '0.30', memory: 256M }

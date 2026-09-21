@@ -1,0 +1,57 @@
+---
+/**
+ * Sekcja (a): publiczne endpointy z `checks[]`, pogrupowane po `group`
+ * (kolejność grup taka jak w odpowiedzi API).
+ */
+import { Icon } from 'astro-icon/components';
+import SectionCard from './SectionCard.astro';
+---
+
+<SectionCard section="checks" title="Publiczne endpointy" icon="lucide:globe">
+  <div data-role="groups"></div>
+  <div class="empty-ops" data-role="empty" hidden>
+    <Icon name="lucide:inbox" size={16} aria-hidden="true" />
+    <span>Brak danych o endpointach.</span>
+  </div>
+</SectionCard>
+
+<template id="tpl-check-group">
+  <section class="border-b border-base-300 last:border-b-0" data-role="group" data-state="unknown">
+    <header class="flex flex-wrap items-center gap-2 px-4 pt-3 pb-1.5">
+      <h3 class="text-xs font-semibold tracking-wide uppercase" data-role="group-name"></h3>
+      <span class="count-chip" data-role="group-count"></span>
+      <span
+        class="state-pill ml-auto"
+        data-role="group-rollup"
+        role="img"
+        aria-label="Stan grupy: nieznany"
+      >
+        <span class="state-dot" aria-hidden="true"></span>
+        <span data-role="group-rollup-label">Nieznany</span>
+      </span>
+    </header>
+    <div data-role="rows"></div>
+  </section>
+</template>
+
+<template id="tpl-check-row">
+  <div class="row-ops" data-role="row" data-state="unknown">
+    <span class="state-dot" aria-hidden="true"></span>
+    <span class="min-w-0 flex-1">
+      <span class="block truncate text-sm font-medium" data-role="name"></span>
+      <span class="subtle block truncate text-xs" data-role="detail"></span>
+    </span>
+    <span class="num hidden text-xs sm:block" data-role="latency"></span>
+    <span class="subtle hidden text-xs lg:block" data-role="since"></span>
+    <a
+      class="link-ops inline-flex items-center gap-1 text-xs"
+      data-role="link"
+      target="_blank"
+      rel="noopener"
+      hidden
+    >
+      <span>Otwórz</span>
+      <Icon name="lucide:external-link" size={12} aria-hidden="true" />
+    </a>
+  </div>
+</template>

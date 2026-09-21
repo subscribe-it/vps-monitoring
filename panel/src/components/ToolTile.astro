@@ -1,0 +1,39 @@
+---
+/**
+ * Wzorzec kafelka narzędzia. Nie renderuje się sam — trafia do `<template>`,
+ * a skrypt klienta klonuje go dla każdej pozycji z `tools[]` i wypełnia teksty.
+ * Dzięki temu znaczniki zostają w Astro, a dane wstawiamy przez `textContent`
+ * (żadnego wstrzykiwania HTML z odpowiedzi API).
+ */
+import { Icon } from 'astro-icon/components';
+---
+
+<template id="tpl-tool-tile">
+  <a class="tile" data-role="tile">
+    <span class="tile-icon" aria-hidden="true">
+      <svg class="icon-use" aria-hidden="true" focusable="false">
+        <use href="#i-box"></use>
+      </svg>
+    </span>
+    <span class="min-w-0 flex-1">
+      <span class="flex items-center gap-2">
+        <span class="truncate text-sm font-semibold" data-role="name"></span>
+        <Icon
+          name="lucide:external-link"
+          size={13}
+          class="subtle ml-auto shrink-0"
+          data-role="marker"
+          aria-hidden="true"
+        />
+      </span>
+      <span class="muted tile-desc mt-0.5 text-xs leading-snug" data-role="description"></span>
+      <span class="mt-2 flex flex-wrap items-center gap-2">
+        <span class="state-pill">
+          <span class="state-dot" aria-hidden="true"></span>
+          <span data-role="state-label"></span>
+        </span>
+        <span class="subtle text-[11px]" data-role="kind"></span>
+      </span>
+    </span>
+  </a>
+</template>

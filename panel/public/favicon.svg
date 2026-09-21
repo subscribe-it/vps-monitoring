@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="Panel monitoringu">
+  <rect width="32" height="32" rx="7" fill="#141a23" />
+  <path
+    d="M4.5 18.2h4.3l2.7-6.8 3.5 12.4 3-9.6 2 4h7.5"
+    fill="none"
+    stroke="#5cc9ee"
+    stroke-width="2.3"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+</svg>

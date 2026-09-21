@@ -1,0 +1,36 @@
+---
+/**
+ * Powłoka HTML panelu. Wszystkie zasoby są lokalne (styl + favicon + sprite),
+ * więc strona nie wykonuje żadnych zapytań do internetu.
+ */
+import '../styles/global.css';
+import IconSprite from '../components/IconSprite.astro';
+
+interface Props {
+  title: string;
+  description?: string;
+}
+
+const {
+  title,
+  description = 'Panel monitoringu infrastruktury VPS — stan usług, certyfikatów i kopii zapasowych.',
+} = Astro.props;
+---
+
+<!doctype html>
+<html lang="pl" data-theme="ops">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <meta name="color-scheme" content="dark" />
+    <meta name="robots" content="noindex, nofollow" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <IconSprite />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Przejdź do treści</a>
+    <slot />
+  </body>
+</html>

@@ -1,0 +1,29 @@
+groups:
+  - name: host-logs
+    interval: 30s
+    rules:
+
+      # Zastępstwo SMART: jeśli wirtualizacja OVH nie przepuszcza SMART,
+      # to logi jądra są jedynym sygnałem problemów sprzętowych.
+      - alert: KernelDiskErrors
+        expr: |
+          sum(count_over_time({job="journald", transport="kernel"}
+            |~ "(?i)I/O error|blk_update_request|EXT4-fs error|nvme.*(error|I/O)|medium error|Buffer I/O error|ata[0-9]+\\.[0-9]+:|failed command" [10m])) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Jądro zgłasza błędy wejścia/wyjścia"
+          description: "Błędy I/O dysku to najczęstsza przyczyna korupcji bazy. Zanotuj numery sektorów i zgłoś do OVH, zanim stracisz dane."
+          runbook: "#disk"
+
+      - alert: KernelOomKill
+        expr: |
+          sum(count_over_time({job="journald", transport="kernel"} |~ "(?i)Out of memory: Killed process" [10m])) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "OOM killer zabił proces"
+          description: "Brak swapu oznacza, że presja pamięci kończy się natychmiastowym zabiciem procesu. Sprawdź, co rosło."
+          runbook: "#memory"
