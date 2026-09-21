@@ -12,7 +12,6 @@ Zero zależności zewnętrznych — tylko biblioteka standardowa Pythona.
 
 from __future__ import annotations
 
-import base64  # noqa: F401  (dozwolona biblioteka stdlib; używana przy parsowaniu auth)
 import json
 import math
 import os

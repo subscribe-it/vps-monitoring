@@ -46,6 +46,14 @@ drugi jest tym, którego Prometheus używa jako parametru sondy.
 `docker_volumes_reclaimable_bytes`, `docker_containers`,
 `docker_containers_running`.
 
+### Konwencja nazw
+
+Sufiks `_total` należy wyłącznie do liczników (`discovery_new_services_total`).
+Liczba kontenerów to gauge `docker_containers` — nazwa `docker_containers_total`
+została zmieniona, bo `promtool check metrics` słusznie zgłaszał
+`non-counter metrics should not have "_total" suffix`. Tę samą regułę pilnuje
+test `tests/test_discovery.py::MetricLintTests::test_total_suffix_only_for_counters`.
+
 ## Etykiety sterujące (na usłudze Docker)
 
 | Label | Znaczenie |
@@ -86,8 +94,11 @@ adresy są deduplikowane.
 
 ## Zachowanie przy braku zależności
 
-Gdy Docker API nie odpowiada, `discovery_up` = 0, a serwis dalej działa i serwuje
-ostatnią znaną migawkę. Brak Prometheusa → sekcja `host` wypełniona zerami,
+Gdy Docker API nie odpowiada (np. gniazdo niedostępne dla UID 10001 — dostęp
+rozwiązuje `group_add` w compose), `discovery_up` = 0, `/health` zwraca
+`{"status":"degraded","up":false}`, a serwis dalej działa i serwuje ostatnią znaną
+migawkę oraz kompletny `/status/api.json` (HTTP 200). Serwis nie wymaga uprawnień
+roota i nie podnosi ich samodzielnie. Brak Prometheusa → sekcja `host` wypełniona zerami,
 `overall` co najmniej `warning`. Brak Alertmanagera → pusta lista `alerts`.
 Brak `health-ping` → sekcja `backup` w stanie `unknown`.
 

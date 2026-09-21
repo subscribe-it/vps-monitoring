@@ -10,7 +10,7 @@ padło coś, co monitorujemy.
 
 | Endpoint | Opis |
 | --- | --- |
-| `GET /health` | status serwisu, `all_ok` oraz mapa `checks` (0/1) z opisami |
+| `GET /health` | `status` = `ok` (wszystko zielone) / `degraded` (coś czerwone) / `starting` (przed pierwszym przebiegiem), pole `all_ok` oraz mapa `checks` (0/1) z opisami |
 | `GET /metrics` | Ekspozycja Prometheusa (`text/plain; version=0.0.4`) |
 | `GET /backup.json` | `{"state":"ok\|warning\|critical\|unknown","last_success_at":...,"age_hours":16.5,"size_bytes":0,"objects_in_r2":0,"restore_test_days":12}` |
 
@@ -98,16 +98,21 @@ Serwis nigdy nie przestaje działać z powodu braku Prometheusa, Dockera, discov
 czy Alertmanagera — odpowiedni check staje się czerwony (`monitoring_check_ok{...} 0`),
 `monitoring_all_ok` spada do 0, a healthchecks.io dostaje ping `/fail` z powodem.
 `monitoring_up` opisuje sam serwis (czy pętla kontrolna działa), a nie zależności.
+Brak dostępu do gniazda Dockera (UID 10001 + `group_add` w compose) nie wywala
+serwisu — check `backup` staje się czerwony, a `/health` zwraca `degraded`.
 
 ## Ustalenia i odstępstwa
 
 - Dysk i i-węzły liczone są najpierw z Prometheusa (mountpoint `/` **hosta**), a gdy
   Prometheus nie odpowiada — z lokalnego `os.statvfs("/")` (z ostrzeżeniem w logach,
   bo wewnątrz kontenera to system plików kontenera, nie hosta).
-- `monitoring_backup_age_seconds` i `monitoring_backup_size_bytes` pojawiają się
-  tylko wtedy, gdy wartość jest znana — brak serii jest czytelniejszy niż zero,
-  które wyglądałoby jak „świeży backup". Sygnał problemu niesie
+- `monitoring_backup_age_seconds` i `monitoring_backup_size_bytes`: nagłówki
+  `# HELP`/`# TYPE` są zawsze (rodzina metryk istnieje), ale **próbka z wartością
+  pojawia się tylko wtedy, gdy wartość jest znana**. Brak próbki jest czytelniejszy
+  niż zero, które wyglądałoby jak „świeży backup". Sygnał problemu niesie
   `monitoring_check_ok{check="backup"}` (0).
+- Sufiks `_total` mają wyłącznie liczniki (`monitoring_hc_ping_failures_total`) —
+  pilnuje tego test `test_total_suffix_only_for_counters`.
 - `objects_in_r2` w `/backup.json` jest zawsze `0` — ten serwis nie ma dostępu do
   R2; pole istnieje dla zgodności ze schematem panelu.
 - Gdy oba kanały pingów są nieskonfigurowane, serwis tylko loguje ostrzeżenie

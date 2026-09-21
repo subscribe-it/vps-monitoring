@@ -14,7 +14,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import re
 import signal
 import smtplib
 import sys
@@ -560,8 +559,9 @@ class NotifierService:
     def __init__(self, config, ntfy_sender=None, email_sender=None, smtp_factory=None,
                  poster=None, clock=time.time):
         self.config = config
+        self.poster = poster or http_post
         self.ntfy_sender = ntfy_sender or (
-            lambda message: send_ntfy(message, config, poster)
+            lambda message: send_ntfy(message, config, self.poster)
         )
         self.email_sender = email_sender or (
             lambda message: send_email(message, config, smtp_factory)
@@ -655,7 +655,7 @@ class NotifierService:
                 self.watchdog_pings["failed"] += 1
             return 500, {"status": "failed", "error": "brak skonfigurowanego URL watchdoga"}
         try:
-            status = http_post(target, "watchdog ok", {}, self.config.timeout)
+            status = self.poster(target, "watchdog ok", {}, self.config.timeout)
         except Exception as exc:  # noqa: BLE001 - brak sieci nie może wywalić serwisu
             log_error("Watchdog: ping nie powiódł się: %s", exc)
             with self._lock:

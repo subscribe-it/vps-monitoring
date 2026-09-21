@@ -212,7 +212,13 @@ def http_post(url, body="", timeout=10.0):
         return int(getattr(response, "status", 0) or 0)
 
 
-def ping_healthchecks(ping_url, ok, message, timeout=10.0):
+def ping_target_url(ping_url, ok):
+    """Sukces -> <url>, problem -> <url>/fail (tak działa healthchecks.io)."""
+    base = (ping_url or "").rstrip("/")
+    return base if ok else base + "/fail"
+
+
+def ping_healthchecks(ping_url, ok, message, timeout=10.0, poster=None):
     """
     Pinguje healthchecks.io. Przy problemie wysyła na <url>/fail z powodem.
 
@@ -220,10 +226,11 @@ def ping_healthchecks(ping_url, ok, message, timeout=10.0):
     """
     if not ping_url:
         return None
-    target = ping_url.rstrip("/") if ok else ping_url.rstrip("/") + "/fail"
+    target = ping_target_url(ping_url, ok)
     body = "OK" if ok else (message or "check nie przeszedł")
+    poster = poster or http_post
     try:
-        status = http_post(target, body, timeout=timeout)
+        status = poster(target, body, timeout=timeout)
     except Exception as exc:  # noqa: BLE001 - brak sieci nie może wywalić pętli
         log_error("Ping %s nie powiódł się: %s", target, exc)
         return False
@@ -352,9 +359,6 @@ class DockerClient:
 
     def containers(self):
         return self.get_json("/containers/json?all=1") or []
-
-    def container_inspect(self, container_id):
-        return self.get_json("/containers/%s/json" % container_id) or {}
 
     def container_logs(self, container_id, tail=2000):
         return self.get_bytes(
@@ -711,8 +715,12 @@ def find_backup_container(containers, service_name):
     if not service_name:
         return None
     for container in containers or []:
-        labels = container.get("Labels") or {}
-        name = (labels.get("com.docker.swarm.service.name") or "").strip()
+        if not isinstance(container, dict):
+            continue
+        labels = container.get("Labels")
+        if not isinstance(labels, dict):
+            continue
+        name = str(labels.get("com.docker.swarm.service.name") or "").strip()
         if name == service_name:
             return container
     return None
@@ -1061,6 +1069,7 @@ class HealthPing:
                 "backup_size_bytes": self.backup_info.size_bytes,
                 "restore_test_age_days": self.restore_test_days,
                 "last_ping": dict(self.last_ping),
+                "last_ping_status": dict(self.last_ping_status),
                 "ping_failures": dict(self.ping_failures),
             }
 
@@ -1068,9 +1077,16 @@ class HealthPing:
         return render_metrics(self.state_view())
 
     def health(self):
+        """`ok` gdy wszystkie sprawdzenia zielone, `degraded` gdy nie, `starting` przed pierwszym przebiegiem."""
         with self._lock:
+            if not self.up:
+                status = "starting"
+            elif self.all_ok:
+                status = "ok"
+            else:
+                status = "degraded"
             return {
-                "status": "ok" if self.up else "starting",
+                "status": status,
                 "up": bool(self.up),
                 "all_ok": bool(self.all_ok),
                 "last_run": iso_z(self.last_run) if self.last_run else None,
