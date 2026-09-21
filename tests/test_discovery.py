@@ -375,7 +375,7 @@ class MetricsTests(unittest.TestCase):
             "states": {"running": 1}, "failed_1h": 0, "image": "img\nx", "updated_at": 1.0,
         }]
         text = discovery.render_metrics(snapshot)
-        self.assertIn('swarm_service_info{image="img\\nx",service="svc\\\\x",stack="sta\\"ck"} 1', text)
+        self.assertIn('swarm_service_info{image="img\\nx",service="svc\\\\x",severity="warning",stack="sta\\"ck"} 1', text)
 
     def test_values_and_states(self):
         text = discovery.render_metrics(discovery.Snapshot())
@@ -423,8 +423,8 @@ class ReplicaModeTests(unittest.TestCase):
         service = build_service(docker)
         service.refresh()
         metrics = service.metrics()
-        self.assertIn('swarm_service_desired_replicas{service="node-exporter",stack="monitoring"} 3', metrics)
-        self.assertIn('swarm_service_running_replicas{service="node-exporter",stack="monitoring"} 3', metrics)
+        self.assertIn('swarm_service_desired_replicas{service="node-exporter",severity="warning",stack="monitoring"} 3', metrics)
+        self.assertIn('swarm_service_running_replicas{service="node-exporter",severity="warning",stack="monitoring"} 3', metrics)
         stack = service.api_json()["stacks"][0]
         self.assertEqual(stack["services"][0]["desired"], 3)
         self.assertEqual(stack["services"][0]["replicas_text"], "3/3")
@@ -501,9 +501,9 @@ class RefreshAndHealthTests(unittest.TestCase):
         service = build_service(docker)
         service.refresh()
         metrics = service.metrics()
-        self.assertIn('swarm_container_cpu_percent{container="ventiplan-prod_api.1.abc",service="api",stack="ventiplan-prod"} 20', metrics)
-        self.assertIn('swarm_container_memory_bytes{container="ventiplan-prod_api.1.abc",service="api",stack="ventiplan-prod"} 1048576', metrics)
-        self.assertIn('swarm_container_health{container="ventiplan-prod_api.1.abc",health="healthy",service="api",stack="ventiplan-prod"} 1', metrics)
+        self.assertIn('swarm_container_cpu_percent{container="ventiplan-prod_api.1.abc",service="api",severity="critical",stack="ventiplan-prod"} 20', metrics)
+        self.assertIn('swarm_container_memory_bytes{container="ventiplan-prod_api.1.abc",service="api",severity="critical",stack="ventiplan-prod"} 1048576', metrics)
+        self.assertIn('swarm_container_health{container="ventiplan-prod_api.1.abc",health="healthy",service="api",severity="critical",stack="ventiplan-prod"} 1', metrics)
         self.assertIn("docker_images_reclaimable_bytes 100", metrics)
         self.assertIn("docker_volumes_reclaimable_bytes 1024", metrics)
         self.assertIn("docker_containers 1", metrics)

@@ -1143,8 +1143,19 @@ def render_metrics(snapshot):
     def add(name, labels, value):
         samples.append((name, labels, value))
 
+    # Usługi oznaczone jako `skip` nie trafiają do metryk — inaczej powstałyby
+    # alerty o czymś, czego użytkownik świadomie nie chce monitorować.
+    severity_by_service = {}
     for service in snapshot.services:
-        base = {"stack": service["stack"], "service": service["service"]}
+        severity_by_service[(service["stack"], service["service"])] = service.get("severity") or "warning"
+    monitorowane = [s for s in snapshot.services if (s.get("severity") or "warning") != "skip"]
+
+    for service in monitorowane:
+        base = {
+            "stack": service["stack"],
+            "service": service["service"],
+            "severity": severity_by_service.get((service["stack"], service["service"]), "warning"),
+        }
         add("swarm_service_desired_replicas", base, service["desired"])
         add("swarm_service_running_replicas", base, service["running"])
         states = dict(service.get("states") or {})
@@ -1153,17 +1164,21 @@ def render_metrics(snapshot):
             if state in states:
                 add(
                     "swarm_service_tasks",
-                    {"stack": service["stack"], "service": service["service"], "state": state},
+                    dict(base, state=state),
                     states[state],
                 )
         add("swarm_service_failed_tasks_1h", base, service["failed_1h"])
         add("swarm_service_info", dict(base, image=service.get("image") or ""), 1)
         add("swarm_service_updated_at", base, service.get("updated_at") or 0)
     for container in snapshot.containers:
+        sev = severity_by_service.get((container["stack"], container["service"]), "warning")
+        if sev == "skip":
+            continue
         base = {
             "stack": container["stack"],
             "service": container["service"],
             "container": container["container"],
+            "severity": sev,
         }
         add("swarm_container_cpu_percent", base, round(container.get("cpu") or 0.0, 4))
         add("swarm_container_memory_bytes", base, container.get("mem") or 0)
@@ -1367,6 +1382,14 @@ class DiscoveryService:
                 "stack": stack,
                 "service": service_name,
                 "labels": labels,
+                # Poziom istotności jedzie ZARÓWNO do sond (HTTP SD), jak i do metryk
+                # replik — bez tego alert o zejściu produkcji z N/N nie miałby
+                # etykiety severity i w nocy poszedłby tylko mailem.
+                "severity": (
+                    "skip"
+                    if _is_true(labels.get(LABEL_SKIP))
+                    else classify_severity(stack, labels, self.config.critical_stacks, self.config.warn_stacks)
+                ),
                 "image": container_spec.get("Image") or "",
                 "mode": service_mode(spec),
                 "desired": desired_replicas(spec, stats["running"]),
