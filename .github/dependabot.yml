@@ -1,11 +1,24 @@
 # Automatyczne aktualizacje zależności.
 # Obrazy są pinowane do konkretnych wersji (celowo — brak `:latest`),
 # więc bez tego kota zostałyby zamrożone na zawsze.
+#
+# Uwaga: Dependabot NIE schodzi w głąb katalogów, dlatego każdy katalog
+# z Dockerfile jest wymieniony osobno (klucz `directories`).
 version: 2
 updates:
-  # Obrazy w Dockerfile'ach i docker-compose.yml
   - package-ecosystem: docker
-    directory: /
+    directories:
+      - "/"                          # docker-compose.yml (obrazy zewnętrzne)
+      - "/dockerfiles/prometheus"
+      - "/dockerfiles/alertmanager"
+      - "/dockerfiles/loki"
+      - "/dockerfiles/promtail"
+      - "/dockerfiles/grafana"
+      - "/dockerfiles/auth"
+      - "/services/discovery"
+      - "/services/notifier"
+      - "/services/health-ping"
+      - "/panel"
     schedule:
       interval: weekly
       day: monday
@@ -16,12 +29,11 @@ updates:
       obrazy-monitoringu:
         patterns: ["*"]
 
-  # Zależności panelu (Astro, Tailwind, DaisyUI)
+  # Panel: rzadziej niż obrazy, bo aktualizacje Astro/Tailwind są najmniej pilne.
   - package-ecosystem: npm
     directory: /panel
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
     open-pull-requests-limit: 5
     commit-message:
       prefix: "chore(deps)"
@@ -29,7 +41,6 @@ updates:
       panel:
         patterns: ["*"]
 
-  # Akcje w workflow'ach
   - package-ecosystem: github-actions
     directory: /
     schedule:
