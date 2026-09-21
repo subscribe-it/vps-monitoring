@@ -1,0 +1,69 @@
+rule_files:
+  - ../alerts/certificates.yml
+evaluation_interval: 1m
+
+tests:
+  - name: certyfikat wygasa za ~11 dni -> ostrzeżenie, ale nie krytyczny
+    interval: 1m
+    input_series:
+      - series: 'probe_ssl_earliest_cert_expiry{instance="https://app.ventiplan.pl"}'
+        values: '1000000x200'
+      - series: 'node_time_seconds'
+        values: '1x200'
+    alert_rule_test:
+      - eval_time: 2h
+        alertname: TlsCertExpiringSoon
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: https://app.ventiplan.pl
+            exp_annotations:
+              summary: 'Certyfikat TLS wygasa: https://app.ventiplan.pl'
+              description: "Pozostało 11.5 dni. Odnowienie robi Traefik (Let's Encrypt) — sprawdź logi ACME, jeśli data się nie zmienia."
+              runbook: '#tlscert'
+      - eval_time: 2h
+        alertname: TlsCertExpiringCritical
+        exp_alerts: []
+
+  - name: certyfikat wygasa za ~1 dzień -> krytyczny
+    interval: 1m
+    input_series:
+      - series: 'probe_ssl_earliest_cert_expiry{instance="https://api.ventiplan.pl"}'
+        values: '100000x200'
+    alert_rule_test:
+      - eval_time: 2h
+        alertname: TlsCertExpiringCritical
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: https://api.ventiplan.pl
+            exp_annotations:
+              summary: 'Certyfikat TLS wygasa w ciągu 3 dni: https://api.ventiplan.pl'
+              description: 'Pozostało 1.1 dni. Po wygaśnięciu domena przestanie działać dla użytkowników.'
+              runbook: '#tlscert'
+
+  - name: świeży certyfikat nie generuje żadnego alertu
+    interval: 1m
+    input_series:
+      - series: 'probe_ssl_earliest_cert_expiry{instance="https://star-sign.pl"}'
+        values: '2000000x200'
+    alert_rule_test:
+      - eval_time: 2h
+        alertname: TlsCertExpiringSoon
+        exp_alerts: []
+
+  - name: brak jakichkolwiek danych o certyfikatach -> monitoring jest ślepy
+    interval: 1m
+    input_series:
+      - series: 'node_time_seconds'
+        values: '1x60'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: TlsProbeUnavailable
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: 'Brak danych o certyfikatach TLS'
+              description: 'Żadna sonda nie zwraca metryki wygasania certyfikatów — monitoring certyfikatów jest ślepy.'
+              runbook: '#tlscert'

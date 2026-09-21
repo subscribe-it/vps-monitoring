@@ -24,6 +24,8 @@ Zasada: jeśli czegoś tu nie ma, nie zakładaj, że działa — sprawdź.
 | Grafana: provisioning | uruchomiona Grafana | 4 dashboardy, `database: ok` |
 | Panel w przeglądarce | Chrome DevTools na zbudowanym obrazie | 0 błędów w konsoli, 7 sekcji, iframe 704/800 px, 375 px bez przewijania |
 | Kontrakt panel ↔ discovery | prawdziwy `/status/api.json` → parser panelu | `isStatusSnapshot` = true, formatowanie pl-PL |
+| Logowanie do Grafany przez nagłówek | `curl` z i bez `X-User` | bez nagłówka 401 (bezpieczny fallback), z nagłówkiem zalogowany jako **Org Admin** |
+| Testy progów alertów | `promtool test rules`, 6 plików | wszystkie grupy reguł pokryte (44 reguły) |
 | Auto-discovery | atrapa Docker API (`tests/integration/`) | wykrywa `Host(...)` i `PathPrefix`, pomija `skip`, tryb global, zadanie padnięte jako 1/2 |
 | Serwisy Pythona | 191 testów jednostkowych | wszystkie przechodzą |
 | Walidacja przed wdrożeniem | `docker stack config` (schemat Swarma) | przechodzi |
@@ -53,7 +55,8 @@ Zasada: jeśli czegoś tu nie ma, nie zakładaj, że działa — sprawdź.
 ## Czego NIE da się sprawdzić bez wdrożenia
 
 - faktyczne trasowanie Traefika (reguły, priorytety, certyfikat dla nowej domeny),
-- logowanie przez ForwardAuth w przeglądarce (w tym przejrzystość iframe'ów),
+- pełny łańcuch ForwardAuth w przeglądarce (sam mechanizm nagłówka Grafany jest
+  sprawdzony, brakuje przejścia basic-auth → Traefik → iframe w realnej domenie),
 - zachowanie `discovery` na prawdziwym menedżerze Swarma (na atrapie tak,
   ale `/services` z prawdziwego roju to inny kod po stronie demona),
 - realne dostarczenie powiadomienia na telefon i do skrzynki.

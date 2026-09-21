@@ -1,0 +1,74 @@
+rule_files:
+  - ../alerts/monitoring.yml
+evaluation_interval: 1m
+
+tests:
+  - name: Alertmanager nie odpowiada -> krytyczny po 3 minutach
+    interval: 1m
+    input_series:
+      - series: 'up{job="alertmanager",instance="alertmanager:9093"}'
+        values: '1 1 0+0x20'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: AlertmanagerDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: alertmanager
+              instance: alertmanager:9093
+            exp_annotations:
+              summary: 'Alertmanager nie odpowiada'
+              description: 'Alerty są wykrywane, ale nie mają jak dotrzeć do Ciebie. Sprawdź natychmiast.'
+              runbook: '#selfhealth'
+
+  - name: WATCHDOG jest zawsze aktywny (to on pilnuje healthchecks.io)
+    interval: 1m
+    input_series:
+      - series: 'up{job="prometheus"}'
+        values: '1x10'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: Watchdog
+        exp_alerts:
+          - exp_labels:
+              severity: none
+              watchdog: "true"
+            exp_annotations:
+              summary: 'Watchdog monitoringu'
+              description: 'Ten alert nie opisuje awarii — jest dowodem, że stack monitoringu żyje i potrafi wysyłać alerty.'
+              runbook: '#watchdog'
+
+  - name: nieudane przeładowanie konfiguracji Prometheusa
+    interval: 1m
+    input_series:
+      - series: 'prometheus_config_last_reload_successful{job="prometheus"}'
+        values: '0+0x20'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: PrometheusConfigReloadFailed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: prometheus
+            exp_annotations:
+              summary: 'Prometheus nie przeładował konfiguracji'
+              description: 'Ostatnia zmiana konfiguracji nie weszła w życie.'
+              runbook: '#selfhealth'
+
+  - name: padło zbieranie metryk hosta -> brak celu
+    interval: 1m
+    input_series:
+      - series: 'up{job="loki",instance="loki:3100"}'
+        values: '1x40'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: PrometheusNoTargets
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              # absent() przepisuje etykiety z selektora — stąd job w wyniku
+              job: node-exporter
+            exp_annotations:
+              summary: 'Prometheus nie widzi żadnych celów'
+              description: 'Brak metryki up dla node-exportera — zbieranie metryk nie działa.'
+              runbook: '#selfhealth'

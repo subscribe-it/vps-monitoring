@@ -157,6 +157,9 @@ services:
       - GF_AUTH_PROXY_AUTO_SIGN_UP=true
       - GF_AUTH_PROXY_SYNC_TTL=300
       - GF_AUTH_PROXY_WHITELIST=10.0.0.0/8,172.16.0.0/12,127.0.0.1/8
+      # Bez tego użytkownik wchodzący przez nagłówek dostaje rolę Viewer
+      # i nie może korzystać z Explore (czyli z przeglądania logów).
+      - GF_USERS_AUTO_ASSIGN_ORG_ROLE=Admin
       - GF_LOG_MODE=console
       - GF_METRICS_ENABLED=true
       - GF_METRICS_BASIC_AUTH_USERNAME=
