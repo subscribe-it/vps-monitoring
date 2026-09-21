@@ -13,7 +13,7 @@ help:
 	@echo "make up / down / ps / logs — lokalny stack (wymaga /tmp/mon-local)"
 	@echo "make validate-promtool — testy reguł alertów (dowód, że progi działają)"
 
-validate: validate-workflows validate-compose validate-prometheus validate-promtool validate-loki validate-grafana test
+validate: validate-workflows validate-compose validate-prometheus validate-promtool validate-loki validate-grafana validate-dashboards test
 
 validate-workflows:
 	@python3 scripts/ci/check_workflows.py
@@ -38,6 +38,11 @@ validate-loki:
 
 validate-grafana:
 	@python3 -c "import glob,json,yaml; [json.load(open(f)) for f in glob.glob('config/grafana/dashboards/*.json')]; [yaml.safe_load(open(f)) for f in glob.glob('config/grafana/provisioning/**/*.yml', recursive=True)]" && echo "✓ grafana: dashboardy + provisioning"
+
+validate-dashboards:
+	@echo "  (wymaga uruchomionego Prometheusa i Loki — patrz job 'dashboards' w CI)"
+	@PROMETHEUS_URL=$${PROMETHEUS_URL:-http://127.0.0.1:9090} LOKI_URL=$${LOKI_URL:-http://127.0.0.1:3100} \
+	  python3 scripts/ci/check_dashboard_queries.py
 
 test: test-python
 

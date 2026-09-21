@@ -99,6 +99,44 @@ jobs:
       - uses: actions/checkout@v4
       - run: python3 scripts/ci/check_runbook.py
 
+
+  dashboards:
+    name: Dashboardy (składnia zapytań PromQL i LogQL)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Uruchom Prometheusa i Loki do walidacji zapytań
+        run: |
+          docker network create walidacja
+          docker run -d --name walidacja-prometheus --network walidacja -p 127.0.0.1:9090:9090 \
+            -v "$PWD/config/prometheus:/etc/prometheus:ro" \
+            prom/prometheus:v3.14.0 \
+            --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/tmp --web.enable-lifecycle
+          docker run -d --name walidacja-loki --network walidacja -p 127.0.0.1:3100:3100 \
+            -v "$PWD/config/loki:/etc/loki:ro" -e LOKI_RETENTION=24h \
+            grafana/loki:3.6.17 \
+            -config.file=/etc/loki/loki-config.yaml -config.expand-env=true
+          echo "czekam na gotowość…"
+          for i in $(seq 1 30); do
+            p=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:9090/-/healthy || true)
+            l=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3100/metrics || true)
+            echo "  próba $i: prometheus=$p loki=$l"
+            [ "$p" = "200" ] && [ "$l" = "200" ] && exit 0
+            sleep 5
+          done
+          echo "::error::Prometheus lub Loki nie wstały na czas"; exit 1
+
+      - name: Każde zapytanie z dashboardów musi się parsować
+        env:
+          PROMETHEUS_URL: http://127.0.0.1:9090
+          LOKI_URL: http://127.0.0.1:3100
+        run: python3 scripts/ci/check_dashboard_queries.py
+
+      - name: Sprzątanie
+        if: always()
+        run: docker rm -f walidacja-prometheus walidacja-loki || true
+
   python:
     name: Serwisy Pythona (testy)
     runs-on: ubuntu-latest
