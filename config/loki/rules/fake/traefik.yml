@@ -49,3 +49,20 @@ groups:
           summary: "Traefik zgłasza błąd konfiguracji routera"
           description: "Nowa aplikacja lub zmiana labeli mogła nie zostać wdrożona po stronie edge."
           runbook: "#edgedown"
+
+      # Próg RATE (powyżej) nie zadziała dla małych aplikacji: 0,2 błędu/s to
+      # 12 błędów na minutę, a witryna z ruchem 5 req/min nawet zwracając 5xx na
+      # wszystko da 0,08/s. Ta reguła łapie właśnie takie przypadki — liczbą,
+      # nie tempem. Próg dostrajaj tutaj, jeśli będzie za czuły/za tępy.
+      - alert: Traefik5xxCountHigh
+        expr: |
+          sum by (RequestHost) (
+            count_over_time({job="traefik"} | json | DownstreamStatus >= 500 [5m])
+          ) > 20
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Wiele błędów 5xx na {{ $labels.RequestHost }}"
+          description: "{{ $value | printf \"%.0f\" }} błędów 5xx w 5 minut — przy niskim ruchu to sygnał, że aplikacja jest zepsuta, a nie tylko chwilowo przeciążona."
+          runbook: "#http5xx"

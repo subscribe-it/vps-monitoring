@@ -41,11 +41,11 @@ groups:
       # Cockpit to panel z uprawnieniami roota wystawiony do internetu (9090).
       - alert: CockpitLogin
         expr: |
-          sum(count_over_time({job="journald", unit=~"cockpit.+"} |~ "(?i)logged in|session opened|new session|authentication" [10m])) > 0
+          sum(count_over_time({job="journald", unit=~"cockpit.+"} |~ "(?i)successful login|logged in|login for user|session (opened|started)|new session|authentication" [10m])) > 0
         for: 0m
         labels:
           severity: warning
         annotations:
           summary: "Logowanie do Cockpita"
-          description: "Ktoś uwierzytelnił się w panelu Cockpit (port 9090 jest publiczny). Sprawdź, czy to Ty. Reguła może wymagać dostrojenia do formatu logów Cockpita."
+          description: "W logach Cockpita pojawiła się informacja o logowaniu (udanym lub nieudanym) — port 9090 jest publiczny. Sprawdź, czy to Ty. Jeśli reguła milczy przy realnych logowaniach, dopasuj wzorzec do faktycznego formatu logów."
           runbook: "#security"
