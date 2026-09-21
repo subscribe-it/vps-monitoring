@@ -17,19 +17,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Walidacja compose (z podstawionymi zmiennymi)
-        env:
-          PANEL_AUTH_PASSWORD_HTPASSWD: 'admin:$apr1$abcdefgh$0123456789abcdefghij'
-          GRAFANA_ADMIN_PASSWORD: 'placeholder-password'
-        run: docker compose -f docker-compose.yml config > /dev/null
-
-      - name: "Zasady stacku: zero portów, zero configów, cudze montowania tylko :ro, limity"
+      - name: "Walidacja schematem SWARMA (autorytatywna — to on wdraża stack)"
         env:
           PANEL_AUTH_PASSWORD_HTPASSWD: 'admin:$apr1$abcdefgh$0123456789abcdefghij'
           GRAFANA_ADMIN_PASSWORD: 'placeholder-password'
         run: |
-          docker compose -f docker-compose.yml config > /tmp/rendered.yml
-          python3 scripts/ci/check_compose_rules.py
+          # `docker compose config` przepuszcza klucze, których Swarm NIE ZNA
+          # (np. group_add) — a `docker stack deploy` odrzuca wtedy CAŁY plik.
+          # Dlatego walidujemy schematem Swarma i to jego wynik analizujemy dalej.
+          docker stack config -c docker-compose.yml > /tmp/rendered.yml
+          echo "  ✓ stack przechodzi walidację Swarma"
+
+      - name: "Zasady stacku: zero portów, zero configów, cudze montowania tylko :ro, limity"
+        run: python3 scripts/ci/check_compose_rules.py
 
       - name: "Lint flag (klasa błędu: --flaga=false wysadza Prometheusa)"
         run: python3 scripts/ci/lint_shell_flags.py

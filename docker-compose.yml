@@ -361,12 +361,12 @@ services:
       - HEALTH_PING_URL=http://health-ping:8080
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    # Gniazdo Dockera należy do grupy `docker` (0660). Kontener działa jako UID
-    # 10001, więc musi dostać TĘ grupę — inaczej nie odczyta listy usług.
+    # Gniazdo Dockera należy do grupy `docker` (0660). Proces działa jako UID 10001,
+    # więc jego GŁÓWNA grupa musi być grupą gniazda — inaczej nie odczyta usług.
+    # Uwaga: `group_add` NIE istnieje w schemacie Swarma (stack deploy odrzuca cały
+    # plik), dlatego używamy `user: uid:gid`, które v3 obsługuje.
     # Poprawny GID sprawdzisz na hoście: stat -c %g /var/run/docker.sock
-    # (pre-flight wypisuje go i porównuje z tą wartością).
-    group_add:
-      - "${DOCKER_GID:-999}"
+    user: "10001:${DOCKER_GID:-999}"
     <<: *common
     deploy:
       replicas: 1
@@ -417,8 +417,8 @@ services:
       - DOCKER_HOST=unix:///var/run/docker.sock
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    group_add:
-      - "${DOCKER_GID:-999}"
+    # jak wyżej: schemat Swarma nie zna `group_add`
+    user: "10001:${DOCKER_GID:-999}"
     <<: *common
     deploy:
       replicas: 1
