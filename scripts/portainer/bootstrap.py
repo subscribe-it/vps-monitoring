@@ -165,6 +165,7 @@ def main() -> int:
     p.add_argument("--logi", metavar="WZORZEC",
                    help="pokaż ostatnie linie logów usługi pasującej do wzorca (dowolny stack)")
     p.add_argument("--linii", type=int, default=40, help="ile linii logu (domyślnie 40)")
+    p.add_argument("--sieci", action="store_true", help="lista sieci w rojniku (nazwy, naprawdę widziane przez Docker)")
     p.add_argument("--labelki", metavar="WZORZEC",
                    help="pokaż labelki traefik.* usługi pasującej do wzorca (co naprawdę dostał Traefik)")
     args = p.parse_args()
@@ -221,6 +222,14 @@ def main() -> int:
     if args.uslugi:
         print()
         pokaz_uslugi(api, eid, args.stack)
+
+    if args.sieci:
+        kod, sieci = api("GET", f"/api/endpoints/{eid}/docker/networks")
+        if kod != 200:
+            print(f"  ✗ HTTP {kod}: {str(sieci)[:200]}")
+        for s in sorted(sieci or [], key=lambda x: x.get("Name", "")):
+            if s.get("Scope") == "swarm" or "traefik" in (s.get("Name") or ""):
+                print(f"    {s.get('Name'):45s} driver={s.get('Driver')} scope={s.get('Scope')}")
 
     if args.labelki:
         filtr = urllib.parse.quote(json.dumps({"name": [args.labelki]}))
