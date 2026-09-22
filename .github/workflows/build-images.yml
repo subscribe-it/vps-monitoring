@@ -43,19 +43,20 @@ jobs:
         id: plan
         run: |
           set -uo pipefail
+          # UWAGA: nie przez $GITHUB_ENV — to działa dopiero w KOLEJNYCH krokach,
+          # a planista jest wołany tutaj, więc dostałby pustkę i zbudował wszystko.
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "uruchomienie ręczne — buduję wszystko"
-            echo "ZMIENIONE_PLIKI=ALL" >> "$GITHUB_ENV"
+            ZMIENIONE_PLIKI=ALL python3 scripts/ci/plan_builds.py
           elif git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" > /tmp/zmiany 2>/dev/null; then
             # `github.event.before` bywa zerowe (nowa gałąź, force push) — wtedy
             # schodzimy do gałęzi `else`, czyli budowy wszystkiego.
             echo "zmienionych plików: $(wc -l < /tmp/zmiany)"
-            { echo "ZMIENIONE_PLIKI<<EOF"; cat /tmp/zmiany; echo "EOF"; } >> "$GITHUB_ENV"
+            ZMIENIONE_PLIKI="$(cat /tmp/zmiany)" python3 scripts/ci/plan_builds.py
           else
             echo "nie umiem policzyć różnicy — buduję wszystko"
-            echo "ZMIENIONE_PLIKI=ALL" >> "$GITHUB_ENV"
+            ZMIENIONE_PLIKI=ALL python3 scripts/ci/plan_builds.py
           fi
-          python3 scripts/ci/plan_builds.py
 
   build:
     name: ${{ matrix.name }}
