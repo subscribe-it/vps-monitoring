@@ -40,39 +40,48 @@ jobs:
         run: |
           set -uo pipefail
           ORG="${{ github.repository_owner }}"
+
+          # Kod HTTP bez wywoływania SIGPIPE (poprzednia wersja używała `gh api -i | head`,
+          # co kończyło krok kodem 141 i POMIJAŁO kolejne kroki — dlatego nic nie działało).
+          kod_http() {
+            lokalne=$(gh api -i "$1" 2>/dev/null || true)
+            printf '%s' "$lokalne" | sed -n '1s/.* \([0-9][0-9][0-9]\) .*/\1/p'
+          }
+          cialo() {
+            lokalne=$(gh api "$1" 2>&1 || true)
+            printf '%s' "$lokalne" | head -c 220
+          }
+
           if [ -n "${{ secrets.GHCR_ADMIN_TOKEN }}" ]; then
             echo "Sekret GHCR_ADMIN_TOKEN: ustawiony"
           else
-            echo "::warning::Brak sekretu GHCR_ADMIN_TOKEN — używam tokenu Actions, którym widoczności pakietów nie zmienisz"
+            echo "::warning::Brak sekretu GHCR_ADMIN_TOKEN — używam tokenu Actions"
           fi
 
           echo "--- właściciel tokenu ---"
-          gh api /user --jq '"  login: \(.login), typ: \(.type)"' || echo "  ✗ nie mogę odczytać /user"
+          gh api /user --jq '"  login: \(.login), typ: \(.type)"' 2>/dev/null || echo "  ✗ nie odczytam /user"
 
           echo "--- typ tokenu i zakresy ---"
           zakresy=$(gh api -i /user 2>/dev/null | grep -i '^x-oauth-scopes:' || true)
           if [ -n "$zakresy" ]; then
             echo "  klasyczny PAT, zakresy:${zakresy#*:}"
-            case "$zakresy" in
-              *write:packages*) echo "  ✓ ma write:packages" ;;
-              *) echo "  ✗ BRAK zakresu write:packages — dodaj go w Settings → Developer settings → Tokens (classic)" ;;
-            esac
           else
             echo "  token fine-grained (brak nagłówka X-Oauth-Scopes)"
-            echo "  ! dla pakietów ORGANIZACJI fine-grained token musi mieć zgodę organizacji"
-            echo "    i uprawnienie „Packages: Read and write” — klasyczny PAT jest prostszy"
           fi
 
-          echo "--- rola w organizacji $ORG ---"
-          gh api "/orgs/$ORG/membership" --jq '"  rola: \(.role)  (admin = może zmieniać pakiety)"' \
-            || echo "  ✗ nie odczytam roli (token bez read:org) — sprawdź ręcznie: Organization → People"
+          echo "--- co widzi token ---"
+          echo "  LISTA /orgs/$ORG/packages       → HTTP $(kod_http "/orgs/$ORG/packages?package_type=container")"
+          echo "  LISTA /user/packages             → HTTP $(kod_http "/user/packages?package_type=container")"
+          echo "  PAKIET /orgs/…/vps-monitoring-loki  → HTTP $(kod_http "/orgs/$ORG/packages/container/vps-monitoring-loki")"
+          echo "  PAKIET /user/…/vps-monitoring-loki  → HTTP $(kod_http "/user/packages/container/vps-monitoring-loki")"
 
-          echo "--- gdzie żyją pakiety ---"
-          for baza in "/orgs/$ORG/packages/container" "/user/packages/container"; do
-            kod=$(gh api -i "$baza/vps-monitoring-loki" 2>/dev/null | head -1 | awk '{print $2}')
-            echo "  $baza/vps-monitoring-loki → HTTP ${kod:-brak}"
-          done
-          echo "  200 = pakiet tu jest; 404 = inny właściciel albo brak uprawnień do niego"
+          echo "--- nazwy widziane przez /user/packages (pierwsze 15) ---"
+          gh api "/user/packages?package_type=container" --jq '.[].name' 2>/dev/null | head -15 || echo "  (brak dostępu)"
+
+          echo "--- treść odpowiedzi z listy organizacji ---"
+          cialo "/orgs/$ORG/packages?package_type=container"
+          echo
+          exit 0
 
       - name: Ustaw widoczność pakietów
         env:
