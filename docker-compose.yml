@@ -236,7 +236,11 @@ services:
         - "traefik.http.routers.mon-prometheus.entrypoints=websecure"
         - "traefik.http.routers.mon-prometheus.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-letsencrypt}"
         - "traefik.http.routers.mon-prometheus.priority=100"
-        - "traefik.http.routers.mon-prometheus.middlewares=mon-auth"
+        - "traefik.http.routers.mon-prometheus.middlewares=mon-auth,mon-prometheus-strip"
+        # Prometheus ma `--web.route-prefix=/`, więc sam serwuje się w korzeniu.
+        # Bez zdjęcia prefiksu Traefik przekazywał mu `/prometheus/api/v1/...`,
+        # czego Prometheus nie znał → 404 (zmierzone: UI i API niedostępne).
+        - "traefik.http.middlewares.mon-prometheus-strip.stripprefix.prefixes=/prometheus"
         - "traefik.http.services.mon-prometheus.loadbalancer.server.port=9090"
     networks:
       - monitoring
@@ -282,7 +286,9 @@ services:
         - "traefik.http.routers.mon-alertmanager.entrypoints=websecure"
         - "traefik.http.routers.mon-alertmanager.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-letsencrypt}"
         - "traefik.http.routers.mon-alertmanager.priority=100"
-        - "traefik.http.routers.mon-alertmanager.middlewares=mon-auth"
+        - "traefik.http.routers.mon-alertmanager.middlewares=mon-auth,mon-alertmanager-strip"
+        # Analogicznie jak Prometheus: `--web.route-prefix=/` + prefiks w routerze.
+        - "traefik.http.middlewares.mon-alertmanager-strip.stripprefix.prefixes=/alertmanager"
         - "traefik.http.services.mon-alertmanager.loadbalancer.server.port=9093"
     networks:
       - monitoring
