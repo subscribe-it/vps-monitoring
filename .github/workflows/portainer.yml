@@ -22,6 +22,7 @@ on:
         type: choice
         options:
           - check
+          - show-env
           - start
           - redeploy
           - start-and-redeploy
@@ -51,6 +52,7 @@ jobs:
           set -o pipefail
           args=""
           case "${{ inputs.action }}" in
+            show-env)           args="--show-env" ;;
             start)              args="--start" ;;
             redeploy)           args="--redeploy --pull" ;;
             start-and-redeploy) args="--start --redeploy --pull" ;;

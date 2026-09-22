@@ -85,6 +85,8 @@ def main() -> int:
     p.add_argument("--redeploy", action="store_true", help="wymuś redeploy z Gita")
     p.add_argument("--pull", action="store_true", help="przy redeployu dociągnij obraz na nowo")
     p.add_argument("--json", action="store_true", help="wypisz wynik maszynowo")
+    p.add_argument("--show-env", action="store_true",
+                   help="pokaż NAZWY zmiennych środowiskowych stacka (wartości nigdy)")
     args = p.parse_args()
 
     url = (os.environ.get("PORTAINER_URL") or "").strip()
@@ -106,6 +108,26 @@ def main() -> int:
     dziala = (stack.get("Status") or 0) == 1
     print(f"  stack „{args.stack}”: id={sid}, endpoint={eid}, "
           f"status={'działa' if dziala else 'zatrzymany'}")
+
+    if args.show_env:
+        # Tylko NAZWY — wartości to sekrety (hasła, tokeny), nie mogą trafić do logu.
+        env = stack.get("Env") or []
+        nazwy = sorted(p.get("name") for p in env if isinstance(p, dict))
+        puste = sorted(p.get("name") for p in env
+                       if isinstance(p, dict) and not str(p.get("value") or "").strip())
+        print(f"  zmiennych środowiskowych: {len(env)}")
+        print(f"  nazwy: {', '.join(nazwy) if nazwy else '(brak)'}")
+        if puste:
+            print(f"  PUSTE wartości: {', '.join(puste)}")
+        wymagane = ["PANEL_AUTH_PASSWORD_HTPASSWD", "GRAFANA_ADMIN_PASSWORD",
+                    "NTFY_TOPIC", "NOTIFIER_TOKEN", "DOCKER_GID"]
+        brakujace = [k for k in wymagane if k not in nazwy]
+        if brakujace:
+            print(f"  ✗ brakuje kluczowych zmiennych: {', '.join(brakujace)}")
+        elif puste:
+            print("  ! część zmiennych ma puste wartości — uzupełnij przed wdrożeniem")
+        else:
+            print("  ✓ komplet kluczowych zmiennych jest w stacku")
 
     if plik != args.compose:
         print(f"  ✗ stack wskazuje na „{plik}”, a powinien na „{args.compose}”.")
