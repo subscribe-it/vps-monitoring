@@ -54,7 +54,9 @@ Dlatego zalecana droga to klucz API, który pozwala z Akcji zrobić więcej:
 
 1. Portainer → **My account → Access tokens → Add access token** → skopiuj token.
 2. GitHub → repo → Settings → Secrets → Actions:
-   - **`PORTAINER_URL`** — np. `https://57.129.41.248:9443` (albo `http://…:9000`),
+   - **`PORTAINER_URL`** — `https://portainer.subscribeit.pl` (sprawdzone: publicznie
+     dostępne, certyfikat Let's Encrypt, API 2.33.3 — dokładnie ta wersja, na której
+testowałem skrypt). Adres z portem też działa: `https://57.129.41.248:9443`.
    - **`PORTAINER_API_KEY`** — token z punktu 1.
 3. Uruchom workflow **Portainer (stack monitoring)** z akcją `check` — powie, czy
    stack istnieje, czy działa i **na jaki plik compose wskazuje**.

@@ -4,7 +4,7 @@ Skonfiguruj w: **Settings → Secrets and variables → Actions → Repository s
 
 | Sekret | Wymagany | Do czego |
 | --- | --- | --- |
-| `PORTAINER_URL` | **tak** (zalecane) | adres API Portainera, np. `https://57.129.41.248:9443` |
+| `PORTAINER_URL` | **tak** (zalecane) | `https://portainer.subscribeit.pl` (albo `https://57.129.41.248:9443`) |
 | `PORTAINER_API_KEY` | **tak** (zalecane) | sprawdzenie i start stacku oraz redeploy z Gita (Portainer → My account → Access tokens) |
 | `PORTAINER_MONITORING_WEBHOOK` | nie | tryb zapasowy: wywołanie redeployu publicznym webhookiem stacku |
 | `NOTIFIER_TOKEN` | nie | powiadomienie na telefon (ntfy), gdy deploy się nie powiedzie |
@@ -19,7 +19,7 @@ stacka umie tylko to ostatnie — i w dodatku da się go utworzyć wyłącznie w
 
 1. Portainer → **My account → Access tokens → Add access token** → skopiuj token.
 2. GitHub → Settings → Secrets and variables → Actions → dodaj `PORTAINER_URL`
-   (np. `https://57.129.41.248:9443`) i `PORTAINER_API_KEY`.
+   (`https://portainer.subscribeit.pl`) i `PORTAINER_API_KEY`.
 3. Sprawdź: workflow **Portainer (stack monitoring)** → akcja `check`.
 
 ## `PORTAINER_MONITORING_WEBHOOK` (tryb zapasowy)
