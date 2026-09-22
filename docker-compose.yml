@@ -60,6 +60,15 @@ services:
       - AUTH_PASSWORD_HTPASSWD=${PANEL_AUTH_PASSWORD_HTPASSWD:?Ustaw PANEL_AUTH_PASSWORD_HTPASSWD w env stacka}
     <<: *common
     deploy:
+      # TWARDY SUFIT ZASOBÓW (host: 8 vCPU / 22,9 GiB RAM).
+      # Suma limitów całego stacku: ~2,5 vCPU (31 %) i 3,0 GiB (13 %).
+      # Świadoma decyzja: monitoring MOŻE przestać działać (OOM/throttle),
+      # ale nie może zabrać zasobów usługom produkcyjnym na tym samym hoście.
+
+      resources:
+        limits: { cpus: '0.10', memory: 64M }
+        reservations: { cpus: '0.02', memory: 32M }
+
       replicas: 1
       placement:
         constraints:
@@ -90,6 +99,15 @@ services:
       - TZ=${TZ:-Europe/Warsaw}
     <<: *common
     deploy:
+      # TWARDY SUFIT ZASOBÓW (host: 8 vCPU / 22,9 GiB RAM).
+      # Suma limitów całego stacku: ~2,5 vCPU (31 %) i 3,0 GiB (13 %).
+      # Świadoma decyzja: monitoring MOŻE przestać działać (OOM/throttle),
+      # ale nie może zabrać zasobów usługom produkcyjnym na tym samym hoście.
+
+      resources:
+        limits: { cpus: '0.10', memory: 64M }
+        reservations: { cpus: '0.02', memory: 32M }
+
       replicas: 1
       placement:
         constraints:
@@ -187,8 +205,8 @@ services:
         condition: any
         delay: 10s
       resources:
-        limits: { cpus: '0.50', memory: 512M }
-        reservations: { cpus: '0.05', memory: 128M }
+        limits: { cpus: '0.40', memory: 512M }
+        reservations: { cpus: '0.02', memory: 32M }
       labels:
         - "traefik.enable=true"
         - "traefik.swarm.network=traefik-public"
@@ -234,8 +252,8 @@ services:
         condition: any
         delay: 10s
       resources:
-        limits: { cpus: '1.0', memory: 1G }
-        reservations: { cpus: '0.10', memory: 256M }
+        limits: { cpus: '0.60', memory: 768M }
+        reservations: { cpus: '0.02', memory: 32M }
       labels:
         - "traefik.enable=true"
         - "traefik.swarm.network=traefik-public"
@@ -285,7 +303,7 @@ services:
         condition: any
         delay: 10s
       resources:
-        limits: { cpus: '0.25', memory: 256M }
+        limits: { cpus: '0.20', memory: 256M }
       labels:
         - "traefik.enable=true"
         - "traefik.swarm.network=traefik-public"
@@ -367,10 +385,11 @@ services:
     environment:
       - TZ=${TZ:-Europe/Warsaw}
       - DOCKER_HOST=unix:///var/run/docker.sock
-      # 60 s zamiast 30 s: każde odświeżenie to `stats` dla ~45 kontenerów
-      # (każde próbkuje ~1 s) plus tanie listy usług — zmierzone na produkcji,
-      # przy 30 s cykl bywał dłuższy niż interwał i obciążał dockerd bez przerwy.
-      - REFRESH_SECONDS=${DISCOVERY_REFRESH_SECONDS:-60}
+      # 120 s: każde odświeżenie to `stats` dla ~45 kontenerów (Docker próbkuje
+      # każde ~1 s) plus listy usług i zadań. Monitoring może pokazywać stan
+      # o minutę później — nie może natomiast trzymać dockera zajętego, bo na tym
+      # samym demonie stoją Portainer i produkcja (incydent 22.09.2026).
+      - REFRESH_SECONDS=${DISCOVERY_REFRESH_SECONDS:-120}
       - SKIP_STACKS=${DISCOVERY_SKIP_STACKS:-monitoring,traefik,traefik_stack}
       - SKIP_SERVICES=${DISCOVERY_SKIP_SERVICES:-}
       - CRITICAL_STACKS=${CRITICAL_STACKS:-ventiplan-prod,jpolski_na6_pl_prod,star-sign,bugsink,portainer-edge-gateway}
@@ -407,7 +426,7 @@ services:
         condition: any
         delay: 10s
       resources:
-        limits: { cpus: '0.25', memory: 256M }
+        limits: { cpus: '0.20', memory: 192M }
       labels:
         - "traefik.enable=true"
         - "traefik.swarm.network=traefik-public"
@@ -459,7 +478,7 @@ services:
         condition: any
         delay: 10s
       resources:
-        limits: { cpus: '0.10', memory: 128M }
+        limits: { cpus: '0.05', memory: 64M }
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3).status==200 else 1)"]
       interval: 60s
@@ -492,7 +511,7 @@ services:
         condition: any
         delay: 10s
       resources:
-        limits: { cpus: '0.20', memory: 128M }
+        limits: { cpus: '0.15', memory: 128M }
 
   # ---------------------------------------------------------------------------
   # blackbox-exporter — sondy HTTP/TCP + wygasanie certyfikatów TLS
@@ -513,7 +532,7 @@ services:
         condition: any
         delay: 10s
       resources:
-        limits: { cpus: '0.20', memory: 128M }
+        limits: { cpus: '0.15', memory: 128M }
 
   # ---------------------------------------------------------------------------
   # loki — magazyn logów
@@ -537,8 +556,8 @@ services:
         condition: any
         delay: 10s
       resources:
-        limits: { cpus: '0.50', memory: 768M }
-        reservations: { cpus: '0.05', memory: 128M }
+        limits: { cpus: '0.30', memory: 512M }
+        reservations: { cpus: '0.02', memory: 32M }
 
   # ---------------------------------------------------------------------------
   # promtail — zbieranie logów: kontenery (Docker API), journald hosta,
@@ -566,4 +585,4 @@ services:
         condition: any
         delay: 10s
       resources:
-        limits: { cpus: '0.30', memory: 256M }
+        limits: { cpus: '0.20', memory: 256M }
