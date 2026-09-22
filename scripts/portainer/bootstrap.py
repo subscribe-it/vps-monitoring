@@ -230,9 +230,11 @@ def main() -> int:
         for u in (uslugi or [])[:5]:
             spec = u.get("Spec") or {}
             print(f"\n  --- labelki: {spec.get('Name')} ---")
-            for klucz, wartosc in sorted((spec.get("Labels") or {}).items()):
-                if klucz.startswith("traefik."):
-                    print(f"    {klucz}={wartosc}")
+            labelki = spec.get("Labels") or {}
+            if not labelki:
+                print("    (BRAK labelek na poziomie usługi)")
+            for klucz, wartosc in sorted(labelki.items()):
+                print(f"    {klucz}={wartosc[:120]}")
 
     if args.logi:
         # Szukamy po WSZYSTKICH usługach w rojniku — dzięki temu można zajrzeć
