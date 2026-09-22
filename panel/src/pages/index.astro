@@ -4,8 +4,10 @@
  *
  * Statyczny HTML (Astro) + jeden mały skrypt klienta. Skrypt pobiera
  * `/status/api.json` co 30 s, wypełnia znaczniki i obsługuje routing po hashu:
- *   `#/`            → widok stanu
- *   `#/tool/<id>`   → podgląd narzędzia w iframe (ten sam origin)
+ *   `#/`                          → widok stanu
+ *   `#/tool/<id>`                 → podgląd narzędzia w iframe (ten sam origin)
+ *   `#/wykresy`                   → wykresy per usługa (bez ramki Grafany)
+ *   `#/wykresy/<usługa>?zakres=`  → jeden powiększony wykres + statystyki
  *
  * Skrypt nigdy nie rzuca wyjątkiem na zewnątrz: błąd pobrania pokazuje banner
  * i pozostawia ostatnie znane dane na ekranie.
@@ -24,6 +26,7 @@ import StacksSection from '../components/StacksSection.astro';
 import StatusBar from '../components/StatusBar.astro';
 import StatusHeader from '../components/StatusHeader.astro';
 import ToolGrid from '../components/ToolGrid.astro';
+import WykresyView from '../components/WykresyView.astro';
 ---
 
 <Base title="Panel monitoringu — stan usług">
@@ -58,6 +61,8 @@ import ToolGrid from '../components/ToolGrid.astro';
       </div>
 
       <IframeView />
+
+      <WykresyView />
     </main>
 
     <footer class="border-t border-base-300 py-3" data-role="footer">
@@ -136,6 +141,34 @@ import ToolGrid from '../components/ToolGrid.astro';
     type Zmiana,
   } from '../lib/filtry';
   import { spriteHref } from '../lib/icons';
+  import {
+    czyTrasaWykresow,
+    doHaszaWykresow,
+    etykietyCzasu,
+    formatujBajty,
+    formatujProcent,
+    formatujPrzeplywnosc,
+    graniceWykresu,
+    kluczSerii,
+    opisCpu,
+    opisRam,
+    opisSieci,
+    osieY,
+    podpisZakresu,
+    punktyWykresu,
+    statystyki,
+    statystykiCpu,
+    statystykiRam,
+    statystykiSieci,
+    zHaszaWykresy,
+    zakresZId,
+    zapytaniaZbiorcze,
+    zbudujUrlQueryRange,
+    znajdzUsluge,
+    type Granice,
+    type Zakres,
+    type ZakresId,
+  } from '../lib/wykresy';
 
   function bootstrap(app: HTMLElement): void {
     const endpoint = app.dataset.endpoint ?? '/status/api.json';
@@ -999,9 +1032,18 @@ import ToolGrid from '../components/ToolGrid.astro';
       kind: 'tool';
       id: string;
     }
-    type Route = RouteStatus | RouteTool;
+    interface RouteWykresy {
+      kind: 'wykresy';
+      usluga: string | null;
+      zakres: ZakresId;
+    }
+    type Route = RouteStatus | RouteTool | RouteWykresy;
 
     function parseRoute(): Route {
+      if (czyTrasaWykresow(window.location.hash)) {
+        const trasa = zHaszaWykresy(window.location.hash);
+        return { kind: 'wykresy', usluga: trasa.usluga, zakres: trasa.zakres };
+      }
       const match = /^#\/tool\/(.+)$/.exec(window.location.hash);
       const id = match?.[1];
       return id ? { kind: 'tool', id: decodeURIComponent(id) } : { kind: 'status' };
@@ -1024,9 +1066,16 @@ import ToolGrid from '../components/ToolGrid.astro';
       if (statusView) statusView.hidden = !visible;
     }
 
+    /** Widok wykresów to osobna „strona" panelu — pokazujemy dokładnie jeden widok. */
+    function setWykresyViewVisible(visible: boolean): void {
+      const wykresy = q<HTMLElement>(app, '[data-role="wykresy-view"]');
+      if (wykresy) wykresy.hidden = !visible;
+    }
+
     function showStatus(): void {
       app.dataset.view = 'status';
       setStatusViewVisible(true);
+      setWykresyViewVisible(false);
       const wrap = q<HTMLElement>(app, '[data-role="frame-wrap"]');
       if (wrap) wrap.hidden = true;
       highlightActiveTool(null);
@@ -1037,6 +1086,7 @@ import ToolGrid from '../components/ToolGrid.astro';
       const wrap = q<HTMLElement>(app, '[data-role="frame-wrap"]');
       app.dataset.view = 'tool';
       setStatusViewVisible(false);
+      setWykresyViewVisible(false);
       if (wrap) wrap.hidden = false;
       highlightActiveTool(id);
 
@@ -1107,7 +1157,46 @@ import ToolGrid from '../components/ToolGrid.astro';
     function applyRoute(): void {
       const route = parseRoute();
       if (route.kind === 'tool') showTool(route.id);
+      else if (route.kind === 'wykresy') showWykresy(route);
       else showStatus();
+    }
+
+    /**
+     * Widok wykresów. Trasa niesie usługę i zakres czasu, więc wygląd odtwarza
+     * się z adresu (link do „tej usługi w 24 h" działa).
+     */
+    function showWykresy(route: RouteWykresy): void {
+      app.dataset.view = 'wykresy';
+      setStatusViewVisible(false);
+      setWykresyViewVisible(true);
+      const wrap = q<HTMLElement>(app, '[data-role="frame-wrap"]');
+      if (wrap) wrap.hidden = true;
+      highlightActiveTool(null);
+
+      const powrot = q<HTMLAnchorElement>(app, '[data-role="wykresy-powrot"]');
+      if (powrot) powrot.href = ostatniHaszStatusu;
+
+      for (const przycisk of qa<HTMLElement>(app, '[data-action="wykres-zakres"]')) {
+        przycisk.setAttribute(
+          'aria-pressed',
+          przycisk.dataset.zakres === route.zakres ? 'true' : 'false',
+        );
+      }
+
+      const zakres = zakresZId(route.zakres);
+      const naglowek = q<HTMLElement>(app, '[data-role="wykresy-naglowek"]');
+      const podpis = q<HTMLElement>(app, '[data-role="wykresy-podpis"]');
+      if (route.usluga) {
+        if (naglowek) naglowek.textContent = route.usluga;
+        if (podpis) podpis.textContent = `Szczegóły usługi · ${podpisZakresu(zakres)}`;
+        document.title = `${route.usluga} — wykresy panelu monitoringu`;
+      } else {
+        if (naglowek) naglowek.textContent = 'Wykresy';
+        if (podpis) podpis.textContent = `Zużycie per usługa · ${podpisZakresu(zakres)}`;
+        document.title = 'Wykresy — panel monitoringu';
+      }
+
+      void renderWykresy(route);
     }
 
     /**
@@ -1179,8 +1268,10 @@ import ToolGrid from '../components/ToolGrid.astro';
     }
 
     function syncHash(): void {
-      // Trasa podglądu i widok narzędzia należą do ramki — filtr ich nie rusza.
+      // Trasa podglądu narzędzia i widoku wykresów niosą własne parametry —
+      // hasz filtra nie może ich nadpisać.
       if (czyTrasaNarzedzia()) return;
+      if (czyTrasaWykresow(window.location.hash)) return;
       if (app.dataset.view !== 'status') return;
       const docelowy = doHasza(filtr, fokus);
       if (window.location.hash === docelowy) return;
@@ -1196,9 +1287,10 @@ import ToolGrid from '../components/ToolGrid.astro';
     /** Wejście z linku (albo Wstecz): hasz jest źródłem prawdy dla filtra i fokusu. */
     function wczytajStanZHasza(): void {
       if (haszZNaszegoPisania) return;
-      // Trasa narzędzia nie zawiera filtra — wejście w podgląd (i powrót z
-      // niego przez Wstecz) nie może kasować ustawień widoku stanu.
+      // Trasa narzędzia i wykresów nie zawiera filtra — wejście w podgląd
+      // (i powrót z niego przez Wstecz) nie może kasować ustawień widoku stanu.
       if (czyTrasaNarzedzia()) return;
+      if (czyTrasaWykresow(window.location.hash)) return;
       const stan = zHasza(window.location.hash);
       filtr = stan.filtr;
       fokus = stan.fokus;
@@ -1432,6 +1524,455 @@ import ToolGrid from '../components/ToolGrid.astro';
         const maksCpu = dane.cpu.length > 0 ? Math.max(...dane.cpu) : null;
         const ostatniRam = dane.ram.length > 0 ? dane.ram[dane.ram.length - 1] : null;
         opis.textContent = `6 h · CPU maks. ${fmtPercent(maksCpu)} · RAM teraz ${fmtBytes(ostatniRam)}`;
+      }
+    }
+
+    /* ---------------- widok wykresów (własny, bez ramki Grafany) ---------------- */
+
+    /**
+     * Cache serii per zakres. Wykresy mają własny cykl: przy 50 usługach
+     * i trzech wykresach na usługę zapytanie „per usługa" to ~150 żądań, więc
+     * pytamy RAZ na metrykę (`by (stack, service)`), a wynik trzymamy 60 s.
+     */
+    const serieCache = new Map<ZakresId, { kiedy: number; dane: Map<string, Map<string, number[]>> }>();
+    /** Sygnatura tego, co narysowane — przebudowa DOM tylko przy realnej zmianie. */
+    let sygnaturaWykresow = '';
+
+    async function pobierzSerie(zakres: Zakres): Promise<Map<string, Map<string, number[]>> | null> {
+      const zapisane = serieCache.get(zakres.id);
+      if (zapisane && Date.now() - zapisane.kiedy < 60_000) return zapisane.dane;
+
+      const teraz = Math.floor(Date.now() / 1000);
+      const wynik = new Map<string, Map<string, number[]>>();
+      try {
+        await Promise.all(
+          zapytaniaZbiorcze().map(async (zapytanie) => {
+            const odpowiedz = await fetchWithTimeout(
+              zbudujUrlQueryRange(zapytanie.expr, zakres, teraz),
+            );
+            if (!odpowiedz.ok) throw new Error(`HTTP ${odpowiedz.status}`);
+            const dane = (await odpowiedz.json()) as {
+              data?: {
+                result?: Array<{
+                  metric?: Record<string, string>;
+                  values?: Array<[number, string]>;
+                }>;
+              };
+            };
+            const mapa = new Map<string, number[]>();
+            for (const seria of dane.data?.result ?? []) {
+              const stack = seria.metric?.stack ?? '';
+              const usluga = seria.metric?.service ?? '';
+              if (!stack || !usluga) continue;
+              mapa.set(
+                kluczSerii(stack, usluga),
+                (seria.values ?? [])
+                  .map(([, wartosc]) => Number(wartosc))
+                  .filter((v) => Number.isFinite(v)),
+              );
+            }
+            wynik.set(zapytanie.id, mapa);
+          }),
+        );
+      } catch {
+        // Brak Prometheusa nie może psuć panelu — mówimy to wprost pod nagłówkiem.
+        return null;
+      }
+      serieCache.set(zakres.id, { kiedy: Date.now(), dane: wynik });
+      return wynik;
+    }
+
+    type SerieZbioru = Map<string, Map<string, number[]>> | null;
+
+    function seriaZ(dane: SerieZbioru, id: string, stack: string, usluga: string): number[] {
+      return dane?.get(id)?.get(kluczSerii(stack, usluga)) ?? [];
+    }
+
+    interface MetrykiUslugi {
+      cpu: number[];
+      ram: number[];
+      limit: number | null;
+      rx: number[];
+      tx: number[];
+    }
+
+    function metrykiUslugi(dane: SerieZbioru, stack: string, usluga: string): MetrykiUslugi {
+      const limitSerii = seriaZ(dane, 'limit', stack, usluga);
+      const limit = limitSerii.length > 0 ? (limitSerii[limitSerii.length - 1] as number) : null;
+      return {
+        cpu: seriaZ(dane, 'cpu', stack, usluga),
+        ram: seriaZ(dane, 'ram', stack, usluga),
+        limit: limit !== null && limit > 0 ? limit : null,
+        rx: seriaZ(dane, 'rx', stack, usluga),
+        tx: seriaZ(dane, 'tx', stack, usluga),
+      };
+    }
+
+    interface OpisFigury {
+      tytul: string;
+      liczby: string;
+      statystyki?: string;
+      serie: Array<{ rola: 'wyk-linia' | 'wyk-linia2'; wartosci: number[] }>;
+      limit: number[] | null;
+      granice: Granice;
+      jednostka: (wartosc: number | null) => string;
+      aria: string;
+    }
+
+    /**
+     * Trzy figury dla jednej usługi: CPU, RAM (z linią limitu) i sieć (rx/tx).
+     *
+     * Liczby „teraz" bierzemy z API (świeższe niż ostatni punkt serii), a limity
+     * i przebiegi z Prometheusa; limit CPU nie istnieje w danych i mówimy to
+     * wprost, zamiast liczyć procent z niczego.
+     */
+    function opisFigur(metryki: MetrykiUslugi, usluga: Service): OpisFigury[] {
+      const stCpu = statystyki(metryki.cpu);
+      const stRam = statystyki(metryki.ram);
+      const stRx = statystyki(metryki.rx);
+      const stTx = statystyki(metryki.tx);
+      const terazCpu = usluga.cpu_percent ?? stCpu.teraz;
+      const terazRam = usluga.mem_bytes ?? stRam.teraz;
+      const graniceRam = graniceWykresu([
+        ...metryki.ram,
+        ...(metryki.limit === null ? [] : [metryki.limit]),
+      ]);
+      const graniceSiec = graniceWykresu([...metryki.rx, ...metryki.tx], { odZera: true });
+
+      return [
+        {
+          tytul: 'CPU',
+          liczby: opisCpu(terazCpu, stCpu.maks),
+          statystyki: statystykiCpu(stCpu, terazCpu),
+          serie: [{ rola: 'wyk-linia', wartosci: metryki.cpu }],
+          limit: null,
+          granice: graniceWykresu(metryki.cpu, { odZera: true }),
+          jednostka: (v) => formatujProcent(v, 1),
+          aria: `Zużycie CPU usługi ${usluga.name}`,
+        },
+        {
+          tytul: 'RAM',
+          liczby: opisRam(terazRam, metryki.limit, stRam.maks),
+          statystyki: statystykiRam(stRam, metryki.limit, terazRam),
+          serie: [{ rola: 'wyk-linia', wartosci: metryki.ram }],
+          limit: metryki.limit === null ? null : [metryki.limit, metryki.limit],
+          granice: graniceRam,
+          jednostka: (v) => formatujBajty(v, 0),
+          aria: `Zużycie pamięci usługi ${usluga.name}`,
+        },
+        {
+          tytul: 'Sieć (rx / tx)',
+          liczby: opisSieci(stRx.teraz, stTx.teraz, stRx.maks),
+          statystyki: statystykiSieci(stRx, stTx),
+          serie: [
+            { rola: 'wyk-linia', wartosci: metryki.rx },
+            { rola: 'wyk-linia2', wartosci: metryki.tx },
+          ],
+          limit: null,
+          granice: graniceSiec,
+          jednostka: (v) => formatujPrzeplywnosc(v, 0),
+          aria: `Ruch sieciowy usługi ${usluga.name}`,
+        },
+      ];
+    }
+
+    /** Rysowanie w istniejącym DOM (jedno miejsce dla listy i szczegółów). */
+    function rysujFigure(figura: HTMLElement, opis: OpisFigury, duza: boolean): void {
+      const szerokosc = duza ? 900 : 320;
+      const wysokosc = duza ? 200 : 84;
+      const margines = duza ? 10 : 4;
+      const ticki = osieY(opis.granice, duza ? 4 : 3);
+
+      const siatki = qa<SVGLineElement>(figura, '.wykres-siatka');
+      siatki.forEach((linia, indeks) => {
+        const tick = ticki[indeks];
+        if (tick === undefined) {
+          linia.style.display = 'none';
+          return;
+        }
+        linia.style.display = '';
+        const y = wspolrzednaY(tick, opis.granice, wysokosc, margines);
+        linia.setAttribute('x1', '0');
+        linia.setAttribute('x2', String(szerokosc));
+        linia.setAttribute('y1', y.toFixed(2));
+        linia.setAttribute('y2', y.toFixed(2));
+      });
+
+      for (const seria of opis.serie) {
+        ustawLinie(figura, seria.rola, seria.wartosci, opis.granice, szerokosc, wysokosc, margines);
+      }
+      ustawLinie(figura, 'wyk-limit', opis.limit ?? [], opis.granice, szerokosc, wysokosc, margines);
+
+      const gora = ticki[0] ?? opis.granice.max;
+      const dol = ticki[ticki.length - 1] ?? opis.granice.min;
+      setText(figura, '[data-role="wyk-os-gora"]', opis.jednostka(gora));
+      setText(figura, '[data-role="wyk-os-dol"]', opis.jednostka(dol));
+      if (duza) {
+        const srodek = ticki[Math.floor(ticki.length / 2)];
+        setText(figura, '[data-role="wyk-os-srodek"]', opis.jednostka(srodek ?? null));
+      }
+
+      setText(figura, '[data-role="wyk-tytul"]', opis.tytul);
+      setText(figura, '[data-role="wyk-liczby"]', opis.liczby);
+      if (opis.statystyki !== undefined) {
+        setText(figura, '[data-role="wyk-statystyki"]', opis.statystyki);
+      }
+      const svg = q<SVGElement>(figura, '[data-role="wyk-svg"]');
+      if (svg) svg.setAttribute('aria-label', opis.aria);
+    }
+
+    function wspolrzednaY(
+      wartosc: number,
+      granice: Granice,
+      wysokosc: number,
+      margines: number,
+    ): number {
+      const uzyteczna = Math.max(1, wysokosc - 2 * margines);
+      const rozstep = granice.max - granice.min || 1;
+      const udzial = (wartosc - granice.min) / rozstep;
+      return margines + (1 - Math.min(1, Math.max(0, udzial))) * uzyteczna;
+    }
+
+    function ustawLinie(
+      figura: HTMLElement,
+      rola: string,
+      wartosci: readonly number[],
+      granice: Granice,
+      szerokosc: number,
+      wysokosc: number,
+      margines: number,
+    ): void {
+      const linia = q<SVGElement>(figura, `[data-role="${rola}"]`);
+      if (!linia) return;
+      if (wartosci.length === 0) {
+        linia.setAttribute('points', '');
+        linia.style.display = 'none';
+        return;
+      }
+      linia.style.display = '';
+      linia.setAttribute(
+        'points',
+        punktyWykresu(wartosci, szerokosc, wysokosc, granice, { margines }),
+      );
+    }
+
+    /**
+     * Przebudowa widoku wykresów. Wołane przy każdej zmianie trasy i przy
+     * odświeżeniu danych, ale DOM rusza się tylko wtedy, gdy zmienił się
+     * zakres, usługa albo zbiór usług — inaczej przewijanie skakałoby co 30 s.
+     */
+    async function renderWykresy(route: RouteWykresy): Promise<void> {
+      const lista = q<HTMLElement>(app, '[data-role="wykresy-lista"]');
+      const szczegoly = q<HTMLElement>(app, '[data-role="wykresy-szczegoly"]');
+      const komunikat = q<HTMLElement>(app, '[data-role="wykresy-komunikat"]');
+      if (!lista || !szczegoly) return;
+
+      const pokazKomunikat = (tekst: string | null): void => {
+        if (!komunikat) return;
+        komunikat.hidden = tekst === null;
+        komunikat.textContent = tekst ?? '';
+      };
+
+      if (!snapshot) {
+        pokazKomunikat('Wczytywanie danych o usługach…');
+        return;
+      }
+
+      const zakres = zakresZId(route.zakres);
+      const widok = przygotujWidok(snapshot);
+      const pary = widok.stacki.stacki.flatMap((stack) =>
+        stack.services.map((usluga) => ({ stack, usluga })),
+      );
+
+      if (pary.length === 0) {
+        sygnaturaWykresow = '';
+        lista.replaceChildren();
+        szczegoly.replaceChildren();
+        szczegoly.hidden = true;
+        lista.hidden = false;
+        pokazKomunikat('Filtr nie przepuszcza żadnej usługi — wyczyść filtr w widoku stanu.');
+        return;
+      }
+
+      const dane = await pobierzSerie(zakres);
+      if (!dane) {
+        pokazKomunikat(
+          'Nie udało się pobrać przebiegów z Prometheusa — wykresy są niedostępne, dane bieżące w widoku stanu nadal działają.',
+        );
+        return;
+      }
+      pokazKomunikat(null);
+
+      const sygnatura = [
+        route.usluga ?? 'lista',
+        zakres.id,
+        pary.map((para) => kluczSerii(para.stack.name, para.usluga.name)).join(','),
+      ].join('|');
+
+      if (sygnatura !== sygnaturaWykresow) {
+        sygnaturaWykresow = sygnatura;
+        if (route.usluga) {
+          const znaleziona = znajdzUsluge(
+            pary.map((para) => ({ stack: para.stack.name, usluga: para.usluga })),
+            route.usluga,
+          );
+          if (!znaleziona) {
+            lista.replaceChildren();
+            szczegoly.hidden = false;
+            lista.hidden = true;
+            szczegoly.replaceChildren();
+            pokazKomunikat(
+              `Nie znaleziono usługi „${route.usluga}" — wróć do listy wykresów i wybierz usługę z listy.`,
+            );
+            return;
+          }
+          zbudujSzczegolyWykresow(znaleziona.stack, znaleziona.usluga, zakres);
+        } else {
+          zbudujListeWykresow(pary, zakres);
+        }
+      }
+
+      odswiezWykresy(pary, dane, zakres, route.usluga);
+    }
+
+    function zbudujListeWykresow(
+      pary: ReadonlyArray<{ stack: Stack; usluga: Service }>,
+      zakres: Zakres,
+    ): void {
+      const lista = q<HTMLElement>(app, '[data-role="wykresy-lista"]');
+      const szczegoly = q<HTMLElement>(app, '[data-role="wykresy-szczegoly"]');
+      if (!lista || !szczegoly) return;
+      szczegoly.hidden = true;
+      szczegoly.replaceChildren();
+      lista.hidden = false;
+
+      const czas = etykietyCzasu(zakres, Math.floor(Date.now() / 1000));
+      const karty: HTMLElement[] = [];
+      for (const para of pary) {
+        const karta = instantiate('tpl-wykres-karta');
+        if (!karta) continue;
+        karta.dataset.stack = para.stack.name;
+        karta.dataset.usluga = para.usluga.name;
+        setState(karta, '[data-role="wyk-dot"]', para.usluga.state);
+        setText(karta, '[data-role="wyk-nazwa"]', para.usluga.name);
+        setText(karta, '[data-role="wyk-stack"]', para.stack.name);
+        setText(
+          karta,
+          '[data-role="wyk-repliki"]',
+          para.usluga.replicas_text ?? `${para.usluga.running ?? 0}/${para.usluga.desired ?? 0}`,
+        );
+        const link = q<HTMLAnchorElement>(karta, '[data-role="wyk-link"]');
+        if (link) {
+          link.href = doHaszaWykresow(kluczSerii(para.stack.name, para.usluga.name), zakres.id);
+          link.title = `Szczegóły wykresów: ${para.stack.name}/${para.usluga.name}`;
+        }
+        const przycisk = q<HTMLElement>(karta, '[data-role="wyk-szczegoly"]');
+        if (przycisk) przycisk.dataset.usluga = kluczSerii(para.stack.name, para.usluga.name);
+
+        const siatka = q<HTMLElement>(karta, '[data-role="wyk-siatka"]');
+        if (siatka) {
+          for (const opis of opisFigur(metrykiUslugi(null, para.stack.name, para.usluga.name), para.usluga)) {
+            const figura = instantiate('tpl-wykres');
+            if (!figura) continue;
+            rysujFigure(figura, opis, false);
+            setText(figura, '[data-role="wyk-czas-od"]', czas.od);
+            setText(figura, '[data-role="wyk-czas-do"]', czas.do);
+            siatka.append(figura);
+          }
+        }
+        karty.push(karta);
+      }
+      lista.replaceChildren(...karty);
+    }
+
+    function zbudujSzczegolyWykresow(stack: string, usluga: Service, zakres: Zakres): void {
+      const lista = q<HTMLElement>(app, '[data-role="wykresy-lista"]');
+      const szczegoly = q<HTMLElement>(app, '[data-role="wykresy-szczegoly"]');
+      if (!lista || !szczegoly) return;
+      lista.hidden = true;
+      lista.replaceChildren();
+      szczegoly.hidden = false;
+
+      const kontener = instantiate('tpl-wykres-szczegoly');
+      if (!kontener) return;
+      kontener.dataset.stack = stack;
+      kontener.dataset.usluga = usluga.name;
+      setState(kontener, '[data-role="wyk-dot"]', usluga.state);
+      setText(kontener, '[data-role="wyk-nazwa-uslugi"]', usluga.name);
+      setText(kontener, '[data-role="wyk-stack-uslugi"]', stack);
+      setText(
+        kontener,
+        '[data-role="wyk-repliki-uslugi"]',
+        usluga.replicas_text ?? `${usluga.running ?? 0}/${usluga.desired ?? 0}`,
+      );
+      const czas = etykietyCzasu(zakres, Math.floor(Date.now() / 1000));
+      const siatka = q<HTMLElement>(kontener, '[data-role="wyk-duze"]');
+      if (siatka) {
+        for (const opis of opisFigur(metrykiUslugi(null, stack, usluga.name), usluga)) {
+          const figura = instantiate('tpl-wykres-duzy');
+          if (!figura) continue;
+          rysujFigure(figura, opis, true);
+          setText(figura, '[data-role="wyk-czas-od"]', `${czas.od} UTC`);
+          setText(figura, '[data-role="wyk-czas-do"]', `${czas.do} UTC`);
+          siatka.append(figura);
+        }
+      }
+      szczegoly.replaceChildren(kontener);
+    }
+
+    /** Odświeżenie liczb i linii bez przebudowy DOM (co cykl odświeżania panelu). */
+    function odswiezWykresy(
+      pary: ReadonlyArray<{ stack: Stack; usluga: Service }>,
+      dane: SerieZbioru,
+      zakres: Zakres,
+      wybrana: string | null,
+    ): void {
+      const czas = etykietyCzasu(zakres, Math.floor(Date.now() / 1000));
+      if (wybrana) {
+        const kontener = q<HTMLElement>(app, '[data-role="wyk-szczegoly"]');
+        if (!kontener) return;
+        const znaleziona = znajdzUsluge(
+          pary.map((para) => ({ stack: para.stack.name, usluga: para.usluga })),
+          wybrana,
+        );
+        if (!znaleziona) return;
+        const stack = znaleziona.stack;
+        const usluga = znaleziona.usluga;
+        const opisy = opisFigur(metrykiUslugi(dane, stack, usluga.name), usluga);
+        qa<HTMLElement>(kontener, '[data-role="wyk-figura"]').forEach((figura, indeks) => {
+          const opis = opisy[indeks];
+          if (!opis) return;
+          rysujFigure(figura, opis, true);
+          setText(figura, '[data-role="wyk-czas-od"]', `${czas.od} UTC`);
+          setText(figura, '[data-role="wyk-czas-do"]', `${czas.do} UTC`);
+        });
+        setState(kontener, '[data-role="wyk-dot"]', usluga.state);
+        setText(
+          kontener,
+          '[data-role="wyk-repliki-uslugi"]',
+          usluga.replicas_text ?? `${usluga.running ?? 0}/${usluga.desired ?? 0}`,
+        );
+        return;
+      }
+
+      const lista = q<HTMLElement>(app, '[data-role="wykresy-lista"]');
+      if (!lista) return;
+      for (const karta of qa<HTMLElement>(lista, '[data-role="wyk-karta"]')) {
+        const stack = karta.dataset.stack ?? '';
+        const nazwa = karta.dataset.usluga ?? '';
+        const para = pary.find((p) => p.stack.name === stack && p.usluga.name === nazwa);
+        if (!para) continue;
+        const opisy = opisFigur(metrykiUslugi(dane, stack, nazwa), para.usluga);
+        qa<HTMLElement>(karta, '[data-role="wyk-figura"]').forEach((figura, indeks) => {
+          const opis = opisy[indeks];
+          if (opis) rysujFigure(figura, opis, false);
+        });
+        setState(karta, '[data-role="wyk-dot"]', para.usluga.state);
+        setText(
+          karta,
+          '[data-role="wyk-repliki"]',
+          para.usluga.replicas_text ?? `${para.usluga.running ?? 0}/${para.usluga.desired ?? 0}`,
+        );
       }
     }
 
@@ -1674,6 +2215,17 @@ import ToolGrid from '../components/ToolGrid.astro';
         if (action === 'stack-filtr') ustawFiltrStacka(trigger.dataset.stack ?? '');
         if (action === 'usluga-fokus') {
           przelaczFokus(trigger.dataset.stack ?? '', trigger.dataset.usluga ?? '');
+        }
+        if (action === 'wykres-zakres') {
+          const zakres = zakresZId(trigger.dataset.zakres);
+          const trasa = zHaszaWykresy(window.location.hash);
+          window.location.hash = doHaszaWykresow(trasa.usluga, zakres.id);
+          return;
+        }
+        if (action === 'wykres-usluga') {
+          const zakres = zakresZId(zHaszaWykresy(window.location.hash).zakres);
+          window.location.hash = doHaszaWykresow(trigger.dataset.usluga ?? null, zakres.id);
+          return;
         }
         if (action === 'pokaz-fokus') {
           const czesci = rozbijFokus(trigger.dataset.fokus ?? null);

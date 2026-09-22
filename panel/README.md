@@ -161,9 +161,43 @@ listy dostaje bezpieczny zamiennik (`box`) — kafelek nigdy nie zostaje pusty.
 | --- | --- |
 | `#/` | widok stanu (domyślny) |
 | `#/tool/<id>` | podgląd narzędzia w `<iframe>` |
+| `#/wykresy` | wykresy per usługa (własne, bez ramki Grafany) |
+| `#/wykresy/<usługa>?zakres=1h\|6h\|24h\|7d` | szczegóły usługi: duże wykresy + statystyki |
 
 Routing opiera się na zdarzeniu `hashchange`, więc przycisk wstecz/dalej
 przeglądarki działa, a widok odtwarza się po odświeżeniu strony.
+
+### Widok „Wykresy" (bez ramki Grafany)
+
+Po co: żeby ocenić zużycie jednej usługi nie trzeba wchodzić do Grafany —
+osadzona ramka oddaje wykresy razem z cudzą nawigacją i nie da się w niej
+przeskoczyć „ta usługa, ale w 24 h".
+
+- **Lista** (`#/wykresy`) — karta na każdą usługę widoczną po filtrach
+  (filtrowanie i sortowanie per stack działa jak w widoku stanu): CPU, RAM
+  (z linią limitu) i sieć rx/tx. Pod każdym wykresem liczby tekstem, np.
+  `RAM: 51,0 MiB / 512,0 MiB · 10,0% limitu · maks. 47,5 MiB`.
+- **Szczegóły** (`#/wykresy/<stack>/<usługa>?zakres=…`) — trzy duże wykresy
+  z osią czasu (UTC), statystykami (`teraz / maks. / średnia`) oraz przyciskami
+  zakresu 1 h / 6 h / 24 h / 7 d. Stan zakresu siedzi w haszu, więc link do
+  „ta usługa w 24 h" działa i przeżywa odświeżenie.
+- **Dane**: wartości bieżące z `/status/api.json`, przebiegi z
+  `/prometheus/api/v1/query_range` (ten sam origin, przez proxy panelu).
+  Zapytań jest **pięć na cały widok**, nie trzy na usługę: Prometheus oddaje
+  wszystkie serie jednym `sum by (stack, service) (…)`, a panel wybiera swoją
+  usługę. Wynik trzymamy w cache 60 s, więc przełączanie usług nie młóci
+  Prometheusa.
+- **Czego NIE pokazujemy**: procentu limitu CPU. Limitu CPU nie ma ani
+  w `/status/api.json`, ani w metrykach (`swarm_container_memory_limit_bytes`
+  dotyczy tylko RAM), więc CPU jest wartością bezwzględną, a brak limitu jest
+  nazwany wprost w interfejsie i w kodzie (`// TODO: [待确认]` w
+  `src/lib/wykresy.ts`). Sieć nie ma limitu z definicji — pokazujemy B/s.
+- **Rysowanie**: własne `<polyline>` w SVG (jak sparkline w tabeli usług),
+  zero zewnętrznych bibliotek; każdy wykres ma `role="img"` i `aria-label`.
+- **Czysta logika** (zakresy, formatowanie, procenty limitów, osie, geometria,
+  trasa) siedzi w `src/lib/wykresy.ts` i jest testowana Node'em:
+  `node scripts/ci/check_wykresy.mts` (102 sprawdzenia w CI, krok „Testy logiki
+  wykresów" w jobie `panel`).
 
 Kafelek z `"embed": true` ładuje narzędzie w tym samym widoku; kafelek z
 `"embed": false` otwiera nową kartę (`target="_blank" rel="noopener"`). Kafelek
@@ -224,10 +258,14 @@ panel/
    ├─ pages/index.astro            # widok + cały skrypt klienta
    ├─ styles/global.css            # Tailwind v4 + daisyUI 5 + motyw "ops"
    ├─ lib/status.ts                # typy, formatowanie, parser z walidacją
+   ├─ lib/filtry.ts                # filtr, fokus, sortowanie per stack, hasz, CSV
+   ├─ lib/wykresy.ts               # zakresy, osie, limity, geometria wykresów, trasa #/wykresy
    ├─ lib/icons.ts                 # lista ikon narzędzi + zamiennik
    └─ components/
       ├─ StatusHeader.astro  HostStat.astro  StatBlock.astro
       ├─ ToolGrid.astro      ToolTile.astro  IframeView.astro
+      ├─ FiltersBar.astro    ChangesSection.astro SortableTh.astro
+      ├─ WykresyView.astro   # widok „Wykresy": nagłówek, zakresy, szablony wykresów
       ├─ ChecksSection.astro StacksSection.astro CertsSection.astro
       ├─ BackupSection.astro SecuritySection.astro AlertsSection.astro
       ├─ SectionCard.astro   ErrorBanner.astro     IconSprite.astro

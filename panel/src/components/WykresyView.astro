@@ -1,0 +1,165 @@
+---
+/**
+ * Widok „Wykresy" — własne wykresy panelu (bez ramki Grafany).
+ *
+ * Po co: żeby zobaczyć zużycie jednej usługi nie trzeba wchodzić do Grafany;
+ * osadzona ramka oddaje wykresy razem z jej nawigacją i nie da się w niej
+ * przeskoczyć „ta usługa, ale w 24 h".
+ *
+ * Struktura: nagłówek (powrót, tytuł, przyciski zakresu), lista kart usług
+ * i kontener szczegółów. Wszystkie wartości wypełnia skrypt klienta — role
+ * mają prefiks `wyk-`, żeby nie kolidowały z istniejącymi (`d-*`, `sticky-*`).
+ *
+ * Wykresy rysujemy jako `<polyline>` w SVG (jak sparkline w tabeli usług) —
+ * żadnych zewnętrznych bibliotek.
+ */
+import { Icon } from 'astro-icon/components';
+---
+
+<section class="wykresy-view" data-role="wykresy-view" aria-label="Wykresy usług" hidden>
+  <div class="card-ops wykresy-naglowek">
+    <a class="btn-ops" data-role="wykresy-powrot" href="#/">
+      <Icon name="lucide:arrow-left" size={14} aria-hidden="true" />
+      <span>Wróć do stanu</span>
+    </a>
+    <div class="wykresy-tytul">
+      <h2 class="card-title" data-role="wykresy-naglowek">Wykresy</h2>
+      <p class="subtle text-xs" data-role="wykresy-podpis">
+        Zużycie per usługa — bez wchodzenia do Grafany.
+      </p>
+    </div>
+    <div class="wykresy-zakresy" role="group" aria-label="Zakres czasu wykresów" data-role="wykresy-zakresy">
+      <button type="button" class="zakres-btn" data-action="wykres-zakres" data-zakres="1h" aria-pressed="false">
+        1 h
+      </button>
+      <button type="button" class="zakres-btn" data-action="wykres-zakres" data-zakres="6h" aria-pressed="true">
+        6 h
+      </button>
+      <button type="button" class="zakres-btn" data-action="wykres-zakres" data-zakres="24h" aria-pressed="false">
+        24 h
+      </button>
+      <button type="button" class="zakres-btn" data-action="wykres-zakres" data-zakres="7d" aria-pressed="false">
+        7 d
+      </button>
+    </div>
+  </div>
+
+  <p class="wykresy-komunikat subtle" data-role="wykresy-komunikat" role="status" aria-live="polite" hidden></p>
+
+  <div class="wykresy-siatka" data-role="wykresy-lista"></div>
+
+  <div class="wykresy-szczegoly" data-role="wykresy-szczegoly" hidden></div>
+
+  <p class="subtle wykresy-stopka text-xs">
+    Źródło: <span class="num">/status/api.json</span> (wartości bieżące) i
+    <span class="num">/prometheus/api/v1/query_range</span> (przebiegi). Sieć nie ma limitu —
+    pokazujemy przepustowość, nie procent. Limit CPU nie jest wystawiany przez API.
+  </p>
+</section>
+
+<!-- Karta jednej usługi na liście: trzy małe wykresy (CPU, RAM, sieć). -->
+<template id="tpl-wykres-karta">
+  <article class="wykres-karta" data-role="wyk-karta">
+    <header class="wykres-karta-naglowek">
+      <span class="state-dot" data-role="wyk-dot" aria-hidden="true"></span>
+      <h3 class="wykres-karta-nazwa">
+        <a class="row-name" data-role="wyk-link" href="#/wykresy">
+          <span data-role="wyk-nazwa"></span>
+        </a>
+      </h3>
+      <span class="subtle text-xs" data-role="wyk-stack"></span>
+      <span class="count-chip num" data-role="wyk-repliki"></span>
+      <button type="button" class="btn-ops" data-action="wykres-usluga" data-role="wyk-szczegoly">
+        <Icon name="lucide:maximize-2" size={13} aria-hidden="true" />
+        <span>Szczegóły</span>
+      </button>
+    </header>
+    <div class="wykres-karta-siatka" data-role="wyk-siatka"></div>
+  </article>
+</template>
+
+<!-- Nagłówek szczegółów jednej usługi + miejsce na duże wykresy. -->
+<template id="tpl-wykres-szczegoly">
+  <div class="wykres-szczegoly" data-role="wyk-szczegoly">
+    <div class="card-ops wykres-naglowek-uslugi">
+      <a class="btn-ops" data-role="wyk-lista" href="#/wykresy">
+        <Icon name="lucide:list" size={13} aria-hidden="true" />
+        <span>Wszystkie usługi</span>
+      </a>
+      <span class="state-dot" data-role="wyk-dot" aria-hidden="true"></span>
+      <h3 class="card-title"><span data-role="wyk-nazwa-uslugi"></span></h3>
+      <span class="subtle text-xs" data-role="wyk-stack-uslugi"></span>
+      <span class="count-chip num" data-role="wyk-repliki-uslugi"></span>
+      <a class="btn-ops" data-role="wyk-link-stan" href="#/">
+        <Icon name="lucide:activity" size={13} aria-hidden="true" />
+        <span>Pokaż w widoku stanu</span>
+      </a>
+    </div>
+    <div class="wykres-siatka-duza" data-role="wyk-duze"></div>
+  </div>
+</template>
+
+<!-- Mały wykres (lista). -->
+<template id="tpl-wykres">
+  <figure class="wykres" data-role="wyk-figura">
+    <figcaption class="wykres-naglowek">
+      <span class="wykres-tytul" data-role="wyk-tytul"></span>
+      <span class="wykres-liczby num" data-role="wyk-liczby"></span>
+    </figcaption>
+    <div class="wykres-plot">
+      <svg
+        class="wykres-svg"
+        viewBox="0 0 320 84"
+        preserveAspectRatio="none"
+        role="img"
+        aria-label="Wykres zużycia"
+        data-role="wyk-svg"
+      >
+        <line class="wykres-siatka" x1="0" y1="21" x2="320" y2="21"></line>
+        <line class="wykres-siatka" x1="0" y1="42" x2="320" y2="42"></line>
+        <line class="wykres-siatka" x1="0" y1="63" x2="320" y2="63"></line>
+        <polyline class="wykres-linia" data-role="wyk-linia" points=""></polyline>
+        <polyline class="wykres-linia wykres-linia-druga" data-role="wyk-linia2" points=""></polyline>
+        <polyline class="wykres-linia wykres-linia-limit" data-role="wyk-limit" points=""></polyline>
+      </svg>
+      <span class="wykres-os wykres-os-gora num" data-role="wyk-os-gora"></span>
+      <span class="wykres-os wykres-os-dol num" data-role="wyk-os-dol"></span>
+    </div>
+  </figure>
+</template>
+
+<!-- Duży wykres (szczegóły usługi) — z osią czasu i statystykami. -->
+<template id="tpl-wykres-duzy">
+  <figure class="wykres wykres-duzy" data-role="wyk-figura">
+    <figcaption class="wykres-naglowek">
+      <span class="wykres-tytul" data-role="wyk-tytul"></span>
+      <span class="wykres-liczby num" data-role="wyk-liczby"></span>
+      <span class="subtle text-xs" data-role="wyk-statystyki"></span>
+    </figcaption>
+    <div class="wykres-plot">
+      <svg
+        class="wykres-svg wykres-svg-duzy"
+        viewBox="0 0 900 200"
+        preserveAspectRatio="none"
+        role="img"
+        aria-label="Wykres zużycia w wybranym zakresie"
+        data-role="wyk-svg"
+      >
+        <line class="wykres-siatka" x1="0" y1="20" x2="900" y2="20"></line>
+        <line class="wykres-siatka" x1="0" y1="70" x2="900" y2="70"></line>
+        <line class="wykres-siatka" x1="0" y1="120" x2="900" y2="120"></line>
+        <line class="wykres-siatka" x1="0" y1="170" x2="900" y2="170"></line>
+        <polyline class="wykres-linia" data-role="wyk-linia" points=""></polyline>
+        <polyline class="wykres-linia wykres-linia-druga" data-role="wyk-linia2" points=""></polyline>
+        <polyline class="wykres-linia wykres-linia-limit" data-role="wyk-limit" points=""></polyline>
+      </svg>
+      <span class="wykres-os wykres-os-gora num" data-role="wyk-os-gora"></span>
+      <span class="wykres-os wykres-os-srodek num" data-role="wyk-os-srodek"></span>
+      <span class="wykres-os wykres-os-dol num" data-role="wyk-os-dol"></span>
+    </div>
+    <div class="wykres-czas subtle num">
+      <span data-role="wyk-czas-od"></span>
+      <span data-role="wyk-czas-do"></span>
+    </div>
+  </figure>
+</template>

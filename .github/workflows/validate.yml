@@ -266,5 +266,10 @@ jobs:
       - name: Testy logiki panelu (filtry, sortowanie, hasz)
         run: node scripts/ci/check_filtry.mts
 
+      # Geometria wykresów, procenty limitów i trasa `#/wykresy` — pomyłka
+      # w nich pokazuje nieprawdziwe zużycie (np. „120% limitu", gdy limit = 0).
+      - name: Testy logiki wykresów (zakresy, osie, limity)
+        run: node scripts/ci/check_wykresy.mts
+
       - name: Kontrola artefaktu
         run: test -f panel/dist/index.html

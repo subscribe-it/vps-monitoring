@@ -41,6 +41,15 @@ import { Icon } from 'astro-icon/components';
       <span class="num" data-role="sticky-updated">—</span>
       <span data-role="sticky-ago"></span>
     </span>
+    <a
+      class="btn-ops"
+      data-role="nav-wykresy"
+      href="#/wykresy"
+      title="Wykresy per usługa — bez wchodzenia do Grafany"
+    >
+      <Icon name="lucide:chart-line" size={14} aria-hidden="true" />
+      <span>Wykresy</span>
+    </a>
     <button type="button" class="btn-ops" data-action="refresh">
       <Icon name="lucide:refresh-cw" size={14} aria-hidden="true" />
       <span>Odśwież</span>
