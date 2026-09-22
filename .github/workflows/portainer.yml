@@ -32,6 +32,10 @@ on:
         description: "Fragment nazwy usługi dla akcji 'logi' (np. traefik, discovery)"
         required: false
         default: traefik
+      linie:
+        description: "Ile ostatnich linii logu (dla akcji 'logi')"
+        required: false
+        default: "60"
 
 permissions:
   contents: read
@@ -55,6 +59,7 @@ jobs:
           PORTAINER_URL: ${{ secrets.PORTAINER_URL }}
           PORTAINER_API_KEY: ${{ secrets.PORTAINER_API_KEY }}
           WZORZEC: ${{ inputs.wzorzec }}
+          LINIE: ${{ inputs.linie }}
         run: |
           set -o pipefail
           # Tablica, nie string: sklejanie argumentów ze spacjami gubiło cudzysłowy
@@ -63,7 +68,7 @@ jobs:
           case "${{ inputs.action }}" in
             show-env)           args=(--show-env) ;;
             uslugi)             args=(--uslugi) ;;
-            logi)               args=(--logi "$WZORZEC" --linii 60) ;;
+            logi)               args=(--logi "$WZORZEC" --linii "${LINIE:-60}") ;;
             start)              args=(--start) ;;
             redeploy)           args=(--redeploy --pull) ;;
             start-and-redeploy) args=(--start --redeploy --pull) ;;
