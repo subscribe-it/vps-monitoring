@@ -260,5 +260,11 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm build
 
+      # Logika filtrów/sortowania/hasza panelu — czysta, bez DOM, więc da się ją
+      # sprawdzić Node'em (type stripping jest wbudowany od Node 22.6+).
+      # Bez tego testu pomyłka w filtrach cicho pokazuje nieprawdziwy stan produkcji.
+      - name: Testy logiki panelu (filtry, sortowanie, hasz)
+        run: node scripts/ci/check_filtry.mts
+
       - name: Kontrola artefaktu
         run: test -f panel/dist/index.html

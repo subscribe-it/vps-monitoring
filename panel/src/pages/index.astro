@@ -14,8 +14,10 @@ import Base from '../layouts/Base.astro';
 import AlertsSection from '../components/AlertsSection.astro';
 import BackupSection from '../components/BackupSection.astro';
 import CertsSection from '../components/CertsSection.astro';
+import ChangesSection from '../components/ChangesSection.astro';
 import ChecksSection from '../components/ChecksSection.astro';
 import ErrorBanner from '../components/ErrorBanner.astro';
+import FiltersBar from '../components/FiltersBar.astro';
 import IframeView from '../components/IframeView.astro';
 import SecuritySection from '../components/SecuritySection.astro';
 import StacksSection from '../components/StacksSection.astro';
@@ -32,17 +34,21 @@ import ToolGrid from '../components/ToolGrid.astro';
       <StatusHeader />
       <ToolGrid />
 
+      <FiltersBar />
+
       <!--
-        Układ widoku stanu: alerty obok endpointów (gdy obie kolumny mają
-        sensowną szerokość), stacki na pełnej szerokości, a trzy lżejsze sekcje
-        w jednym rzędzie. Progi kolumn trzyma `.grid-ops-*` w global.css, więc
-        na 27-calowym monitorze szerokość jest wykorzystana, a nie pusta.
+        Układ widoku stanu: alerty obok „ostatnich zmian" (to, co wymaga
+        reakcji, trzyma się razem), endpointy i stacki na pełnej szerokości,
+        a trzy lżejsze sekcje w jednym rzędzie. Progi kolumn trzyma
+        `.grid-ops-*` w global.css, więc na 27-calowym monitorze szerokość
+        jest wykorzystana, a nie pusta.
       -->
       <div class="status-view" data-role="status-view">
         <div class="grid-ops grid-ops-2">
           <AlertsSection />
-          <ChecksSection />
+          <ChangesSection />
         </div>
+        <ChecksSection />
         <StacksSection />
         <div class="grid-ops grid-ops-3">
           <CertsSection />
@@ -95,12 +101,39 @@ import ToolGrid from '../components/ToolGrid.astro';
     type Cert,
     type Check,
     type HostSnapshot,
+    type Login,
     type Security,
+    type Service,
     type Stack,
     type State,
     type StatusSnapshot,
     type Tool,
   } from '../lib/status';
+  import {
+    KLUCZE_SORTOWANIA,
+    PUSTY_FILTR,
+    STANY_FILTRA,
+    czyAktywny,
+    doHasza,
+    filtrujAlerty,
+    filtrujCertyfikaty,
+    filtrujEndpointy,
+    filtrujLogowania,
+    kluczFokusa,
+    opisFiltra,
+    pasujeStan,
+    przygotujStacki,
+    punktySparkline,
+    rozbijFokus,
+    uslugiDoCsv,
+    zHasza,
+    zmianyMiedzy,
+    type Filtr,
+    type KluczSortowania,
+    type StanFiltra,
+    type WierszCsv,
+    type Zmiana,
+  } from '../lib/filtry';
   import { spriteHref } from '../lib/icons';
 
   function bootstrap(app: HTMLElement): void {
@@ -119,6 +152,21 @@ import ToolGrid from '../components/ToolGrid.astro';
 
     /** Sygnatury sekcji — zapobiegają zbędnemu przebudowywaniu DOM (i gubieniu fokusu). */
     const signatures = new Map<string, string>();
+
+    /* ---------------- stan widoku: filtr, fokus, zwinięte stacki ---------------- */
+
+    let filtr: Filtr = { ...PUSTY_FILTR };
+    let fokus: string | null = null;
+    /** Poprzedni snapshot — z różnicy powstaje sekcja „Ostatnie zmiany". */
+    let poprzedni: StatusSnapshot | null = null;
+    /** Stacki zwinięte przez użytkownika (przeżywają odświeżenie i reload). */
+    const zwieteStacki = new Set<string>();
+    /** Cache przebiegów 6 h — klikanie po usługach nie młóci Prometheusa. */
+    const przebiegi = new Map<string, { cpu: number[]; ram: number[] }>();
+    let debounceFiltra: number | null = null;
+    /** Piszemy do hasza sami — nie traktuj tego jako wejścia z linku. */
+    let haszZNaszegoPisania = false;
+    const KLUCZ_ZWINIETE = 'monitoring:zwiete-stacki';
 
     /* ---------------- pomocnicze DOM ---------------- */
 
@@ -516,9 +564,16 @@ import ToolGrid from '../components/ToolGrid.astro';
       const grid = section('stacks');
       if (!grid) return;
       updateSection('stacks', stacks.map((stack) => stack.state), String(stacks.length));
+      // Stan „brak danych" jest korygowany przez `renderFiltry` — filtr to nie
+      // brak danych, a sekcja nie wie, czy coś zostało odsiane.
       emptyState('stacks', stacks.length === 0);
 
-      if (!stale('stacks', stacks)) return;
+      /*
+       * Sygnatura obejmuje fokus i zwinięcia: rozwinięcie wiersza szczegółów
+       * albo zwinięcie stacka musi przemalować sekcję, mimo że dane z API są
+       * te same.
+       */
+      if (!stale('stacks', [stacks, fokus, [...zwieteStacki].sort()])) return;
       const holder = q<HTMLElement>(grid, '[data-role="list"]');
       if (!holder) return;
       holder.replaceChildren();
@@ -528,7 +583,25 @@ import ToolGrid from '../components/ToolGrid.astro';
         if (!block) continue;
 
         block.dataset.state = stack.state;
-        setText(block, '[data-role="stack-name"]', stack.name);
+        const zwiniety = zwieteStacki.has(stack.name);
+        block.dataset.zwiniety = zwiniety ? 'true' : 'false';
+
+        const przelacznik = q<HTMLButtonElement>(block, '[data-role="stack-toggle"]');
+        if (przelacznik) {
+          przelacznik.setAttribute('aria-expanded', zwiniety ? 'false' : 'true');
+          przelacznik.setAttribute('aria-label', `${zwiniety ? 'Rozwiń' : 'Zwiń'} stack ${stack.name}`);
+        }
+        const tabela = q<HTMLElement>(block, '[data-role="stack-tabela"]');
+        if (tabela) tabela.hidden = zwiniety;
+
+        const nazwa = q<HTMLButtonElement>(block, '[data-role="stack-name"]');
+        if (nazwa) {
+          nazwa.textContent = stack.name;
+          nazwa.dataset.stack = stack.name;
+          nazwa.title = `Pokaż tylko stack ${stack.name}`;
+          nazwa.setAttribute('aria-label', `Filtruj widok do stacka ${stack.name}`);
+        }
+
         setText(block, '[data-role="stack-rollup-label"]', stateLabel(stack.state));
         const rollup = q<HTMLElement>(block, '[data-role="stack-rollup"]');
         rollup?.setAttribute('aria-label', `Stan stacka ${stack.name}: ${stateLabel(stack.state)}`);
@@ -549,17 +622,24 @@ import ToolGrid from '../components/ToolGrid.astro';
           const row = instantiate('tpl-service-row');
           if (!row || !body) continue;
           row.dataset.state = service.state;
-          setTextWithTitle(row, '[data-role="name"]', service.name);
-          /*
-           * `full_name` to ta sama nazwa z prefiksem stacka (np. `bugsink_db`
-           * dla usługi `db`), więc druga linia w komórce była czystą
-           * redundancją i podwajała wysokość 47 wierszy. Zostaje w podpowiedzi.
-           */
-          const komorkaNazwy = q<HTMLElement>(row, '[data-role="name"]');
-          if (komorkaNazwy) {
-            if (service.full_name) komorkaNazwy.title = service.full_name;
-            else komorkaNazwy.removeAttribute('title');
+
+          // Nazwa usługi jest przyciskiem fokusu: klik = rozwiń szczegóły.
+          const klucz = kluczFokusa(stack.name, service.name);
+          const wybrany = fokus === klucz;
+          row.dataset.fokus = wybrany ? 'true' : 'false';
+          const przycisk = q<HTMLButtonElement>(row, '[data-role="name"]');
+          if (przycisk) {
+            przycisk.textContent = service.name;
+            przycisk.dataset.stack = stack.name;
+            przycisk.dataset.usluga = service.name;
+            przycisk.setAttribute('aria-expanded', wybrany ? 'true' : 'false');
+            przycisk.setAttribute(
+              'aria-label',
+              `${service.name} — ${stateLabel(service.state)} · pokaż szczegóły`,
+            );
+            if (service.full_name) przycisk.title = service.full_name;
           }
+
           setText(row, '[data-role="state-label"]', stateLabel(service.state));
           setText(
             row,
@@ -584,9 +664,14 @@ import ToolGrid from '../components/ToolGrid.astro';
             else komorkaObrazu.removeAttribute('title');
           }
           body.append(row);
+          if (wybrany) {
+            const szczegoly = zbudujSzczegoly(stack, service);
+            if (szczegoly) body.append(szczegoly);
+          }
         }
         holder.append(block);
       }
+      if (fokus) przewinDoFokusa();
     }
 
     function renderCerts(certs: Cert[]): void {
@@ -667,7 +752,7 @@ import ToolGrid from '../components/ToolGrid.astro';
       );
     }
 
-    function renderSecurity(security: Security | null): void {
+    function renderSecurity(security: Security | null, loginy: Login[] | null = null): void {
       const grid = section('security');
       if (!grid) return;
       updateSection('security', security ? [security.state] : [], security ? '1' : '0');
@@ -683,7 +768,7 @@ import ToolGrid from '../components/ToolGrid.astro';
         setField('security-bans', fmtInt(security.ssh_bans_24h), 'zablokowane adresy', security.state);
       }
 
-      const logins = security?.logins_24h ?? [];
+      const logins = loginy ?? security?.logins_24h ?? [];
       setText(grid, '[data-role="logins-count"]', String(logins.length));
       const emptyLogins = q<HTMLElement>(grid, '[data-role="logins-empty"]');
       if (emptyLogins) emptyLogins.hidden = logins.length > 0;
@@ -853,6 +938,8 @@ import ToolGrid from '../components/ToolGrid.astro';
         // musi być potraktowana jak awaria — inaczej skasowałaby ostatnie dane.
         if (!isStatusSnapshot(parsed)) throw new Error('nieoczekiwany kształt odpowiedzi');
 
+        // Poprzedni stan staje się punktem odniesienia dla „Ostatnich zmian".
+        poprzedni = snapshot;
         snapshot = parsed;
         lastGoodAt = new Date();
         hideBanner();
@@ -867,19 +954,26 @@ import ToolGrid from '../components/ToolGrid.astro';
         renderMeta();
       }
     }
-
     function renderAll(): void {
       if (!snapshot) return;
       const overall = deriveOverall(snapshot);
+      const widok = przygotujWidok(snapshot);
       renderHeader(snapshot, overall);
       renderHost(snapshot.host);
       renderTools(snapshot.tools);
-      renderChecks(snapshot.checks);
-      renderStacks(snapshot.stacks);
-      renderCerts(snapshot.certs);
+      renderAlerts(widok.alerty.pozycje);
+      renderZmiany();
+      renderChecks(widok.checki.pozycje);
+      renderStacks(widok.stacki.stacki);
+      renderCerts(widok.certy.pozycje);
       renderBackup(snapshot.backup);
-      renderSecurity(snapshot.security);
-      renderAlerts(snapshot.alerts);
+      renderSecurity(snapshot.security, widok.logowania.pozycje);
+      /*
+       * Kolejność ma znaczenie: sekcje ustawiają własne stany „brak danych",
+       * a `renderFiltry` koryguje je po nich — filtr, który coś ukrył, to nie
+       * to samo, co brak danych z API.
+       */
+      renderFiltry(widok);
       applyRoute();
     }
 
@@ -1026,19 +1120,573 @@ import ToolGrid from '../components/ToolGrid.astro';
       );
     }
 
+    /* ---------------- filtry, fokus, CSV, sparkline ---------------- */
+
+    interface Widok {
+      stacki: { stacki: Stack[]; pokazano: number; wszystkich: number; ukryteStacki: number };
+      checki: { pozycje: Check[]; pokazano: number; wszystkich: number };
+      certy: { pozycje: Cert[]; pokazano: number; wszystkich: number };
+      alerty: { pozycje: Alert[]; pokazano: number; wszystkich: number };
+      logowania: { pozycje: Login[]; pokazano: number; wszystkich: number };
+    }
+
+    /** Widok po filtrach — liczony raz na render i przekazywany sekcjom. */
+    function przygotujWidok(s: StatusSnapshot): Widok {
+      return {
+        stacki: przygotujStacki(s.stacks, filtr, fokus),
+        checki: filtrujEndpointy(s.checks, filtr),
+        certy: filtrujCertyfikaty(s.certs, filtr),
+        alerty: filtrujAlerty(s.alerts, filtr),
+        logowania: filtrujLogowania(s.security?.logins_24h ?? [], filtr),
+      };
+    }
+
+    function odswiezWidok(): void {
+      syncHash();
+      renderAll();
+    }
+
+    function syncHash(): void {
+      // W widoku narzędzia hasz należy do ramki — nie nadpisujemy go filtrem.
+      if (app.dataset.view !== 'status') return;
+      const docelowy = doHasza(filtr, fokus);
+      if (window.location.hash === docelowy) return;
+      haszZNaszegoPisania = true;
+      try {
+        window.history.replaceState(null, '', docelowy);
+      } finally {
+        haszZNaszegoPisania = false;
+      }
+    }
+
+    /** Wejście z linku (albo Wstecz): hasz jest źródłem prawdy dla filtra i fokusu. */
+    function wczytajStanZHasza(): void {
+      if (haszZNaszegoPisania) return;
+      const stan = zHasza(window.location.hash);
+      filtr = stan.filtr;
+      fokus = stan.fokus;
+      if (fokus) {
+        const czesci = rozbijFokus(fokus);
+        if (czesci) zwieteStacki.delete(czesci.stack);
+      }
+    }
+
+    function wczytajZwiete(): void {
+      try {
+        const zapis = window.localStorage.getItem(KLUCZ_ZWINIETE);
+        if (!zapis) return;
+        const nazwy: unknown = JSON.parse(zapis);
+        if (Array.isArray(nazwy)) {
+          for (const nazwa of nazwy) if (typeof nazwa === 'string') zwieteStacki.add(nazwa);
+        }
+      } catch {
+        // brak localStorage (tryb prywatny) nie może psuć panelu
+      }
+    }
+
+    function zapiszZwiete(): void {
+      try {
+        window.localStorage.setItem(KLUCZ_ZWINIETE, JSON.stringify([...zwieteStacki]));
+      } catch {
+        // jw.
+      }
+    }
+
+    function ustawStanFiltra(stan: StanFiltra): void {
+      filtr = { ...filtr, stan: filtr.stan === stan ? 'wszystko' : stan };
+      odswiezWidok();
+    }
+
+    function ustawSortowanie(klucz: string): void {
+      const poprawny = (KLUCZE_SORTOWANIA as readonly string[]).includes(klucz)
+        ? (klucz as KluczSortowania)
+        : filtr.sort;
+      const tenSam = poprawny === filtr.sort;
+      const domyslny = poprawny === 'usluga' || poprawny === 'obraz' ? 'asc' : 'desc';
+      filtr = {
+        ...filtr,
+        sort: poprawny,
+        // Ponowny klik w tę samą kolumnę odwraca kierunek (jak w każdym arkuszu).
+        kierunek: tenSam ? (filtr.kierunek === 'desc' ? 'asc' : 'desc') : domyslny,
+      };
+      odswiezWidok();
+    }
+
+    function wyczyscFiltr(): void {
+      filtr = { ...filtr, q: '', stan: 'wszystko' };
+      fokus = null;
+      const pole = q<HTMLInputElement>(app, '[data-role="filter-input"]');
+      if (pole) pole.value = '';
+      odswiezWidok();
+    }
+
+    function ustawFiltrStacka(nazwa: string): void {
+      if (!nazwa) return;
+      const juz = filtr.q.trim() === nazwa;
+      filtr = { ...filtr, q: juz ? '' : nazwa };
+      const pole = q<HTMLInputElement>(app, '[data-role="filter-input"]');
+      if (pole) pole.value = filtr.q;
+      odswiezWidok();
+    }
+
+    function przelaczZwiniety(stackEl: Element | null): void {
+      const nazwa = q<HTMLElement>(stackEl ?? app, '[data-role="stack-name"]')?.textContent?.trim();
+      if (!nazwa) return;
+      if (zwieteStacki.has(nazwa)) zwieteStacki.delete(nazwa);
+      else zwieteStacki.add(nazwa);
+      zapiszZwiete();
+      renderAll();
+    }
+
+    /**
+     * Fokus usługi: rozwija wiersz szczegółów, przenosi informację do adresu
+     * i (jeśli trzeba) rozwija zwinięty stack. Ponowny klik zamyka szczegóły.
+     */
+    function przelaczFokus(stack: string, usluga: string): void {
+      if (!stack || !usluga) return;
+      const klucz = kluczFokusa(stack, usluga);
+      fokus = fokus === klucz ? null : klucz;
+      if (fokus) {
+        zwieteStacki.delete(stack);
+        zapiszZwiete();
+      }
+      odswiezWidok();
+    }
+
+    function przewinDoFokusa(): void {
+      /*
+       * UWAGA na nazwę roli: `detail` należy do wierszy endpointów (jest tam
+       * od dawna), więc szczegóły usługi mają własną rolę `usluga-szczegoly`.
+       * Zmierzone: wspólna nazwa powodowała, że przewijanie trafiało w losowy
+       * wiersz sondy, a testy widziały 17 „szczegółów" zamiast jednego.
+       */
+      const szczegoly = q<HTMLElement>(app, '[data-role="usluga-szczegoly"]');
+      if (!szczegoly) return;
+      const bezRuchu = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      szczegoly.scrollIntoView({ block: 'center', behavior: bezRuchu ? 'auto' : 'smooth' });
+      const wiersz = szczegoly.previousElementSibling;
+      if (wiersz instanceof HTMLElement) {
+        wiersz.classList.add('row-fokus');
+        window.setTimeout(() => wiersz.classList.remove('row-fokus'), 1600);
+      }
+    }
+
+    function ustawLink(root: ParentNode, rola: string, href: string): void {
+      const link = q<HTMLAnchorElement>(root, `[data-role="${rola}"]`);
+      if (link) link.href = href;
+    }
+
+    /** Wiersz szczegółów usługi: dane, przyciski kopiowania, linki, przebieg 6 h. */
+    function zbudujSzczegoly(stack: Stack, service: Service): HTMLElement | null {
+      const row = instantiate('tpl-service-detail');
+      if (!row) return null;
+      row.dataset.stack = stack.name;
+      row.dataset.usluga = service.name;
+
+      const pelna = service.full_name ?? service.name;
+      setTextWithTitle(row, '[data-role="d-usluga"]', pelna);
+      setTextWithTitle(row, '[data-role="d-kontener"]', pelna);
+      const obraz = service.image ?? '';
+      setText(row, '[data-role="d-obraz"]', obraz || DASH);
+      const komorkaObrazu = q<HTMLElement>(row, '[data-role="d-obraz"]');
+      if (komorkaObrazu) {
+        if (obraz) komorkaObrazu.title = obraz;
+        else komorkaObrazu.removeAttribute('title');
+      }
+      setText(
+        row,
+        '[data-role="d-repliki"]',
+        service.replicas_text ?? `${service.running ?? DASH}/${service.desired ?? DASH}`,
+      );
+      setText(
+        row,
+        '[data-role="d-cpu"]',
+        service.cpu_percent === null ? DASH : fmtPercent(service.cpu_percent),
+      );
+      setText(row, '[data-role="d-ram"]', fmtBytes(service.mem_bytes));
+      setText(row, '[data-role="d-restarty"]', fmtInt(service.restarts_1h));
+
+      for (const [rola, tekst] of [
+        ['kopiuj-usluga', pelna],
+        ['kopiuj-kontener', pelna],
+        ['kopiuj-obraz', obraz],
+      ] as Array<[string, string]>) {
+        const przycisk = q<HTMLButtonElement>(row, `[data-role="${rola}"]`);
+        if (!przycisk) continue;
+        przycisk.dataset.kopiuj = tekst;
+        przycisk.disabled = tekst.length === 0;
+      }
+
+      /*
+       * Deep-linki do narzędzi z gotowymi zmiennymi dashboardów (`var-*`).
+       * Wszystkie adresy są WZGLĘDNE — ten sam origin, jedno logowanie i zero
+       * poświadczeń w URL.
+       */
+      const stackQ = encodeURIComponent(stack.name);
+      const uslugaQ = encodeURIComponent(service.name);
+      ustawLink(row, 'd-link-wykresy', `/grafana/d/vps-ruch?var-stack=${stackQ}&var-usluga=${uslugaQ}&kiosk`);
+      ustawLink(
+        row,
+        'd-link-aplikacje',
+        `/grafana/d/vps-applications?var-stack=${stackQ}&var-service=${uslugaQ}&kiosk`,
+      );
+      ustawLink(row, 'd-link-logi', `/grafana/d/vps-logs?var-stack=${stackQ}&var-service=${uslugaQ}&kiosk`);
+      const zapytanie = `swarm_container_cpu_percent{stack="${stack.name}", service="${service.name}"}`;
+      ustawLink(
+        row,
+        'd-link-prometheus',
+        `/prometheus/graph?g0.expr=${encodeURIComponent(zapytanie)}&g0.tab=0`,
+      );
+
+      void pokazPrzebieg(row, stack.name, service.name);
+      return row;
+    }
+
+    async function pobierzPrzebieg(
+      stack: string,
+      usluga: string,
+    ): Promise<{ cpu: number[]; ram: number[] } | null> {
+      const klucz = kluczFokusa(stack, usluga);
+      const zapisane = przebiegi.get(klucz);
+      if (zapisane) return zapisane;
+
+      const koniec = Math.floor(Date.now() / 1000);
+      const poczatek = koniec - 6 * 3600;
+      const seria = async (expr: string): Promise<number[]> => {
+        const url = `/prometheus/api/v1/query_range?query=${encodeURIComponent(expr)}&start=${poczatek}&end=${koniec}&step=300`;
+        const odpowiedz = await fetchWithTimeout(url);
+        if (!odpowiedz.ok) throw new Error(`HTTP ${odpowiedz.status}`);
+        const dane = (await odpowiedz.json()) as {
+          data?: { result?: Array<{ values?: Array<[number, string]> }> };
+        };
+        const punkty = dane.data?.result?.[0]?.values ?? [];
+        return punkty.map(([, wartosc]) => Number(wartosc)).filter((v) => Number.isFinite(v));
+      };
+
+      try {
+        const [cpu, ram] = await Promise.all([
+          seria(`sum(swarm_container_cpu_percent{stack="${stack}", service="${usluga}"})`),
+          seria(`sum(swarm_container_memory_bytes{stack="${stack}", service="${usluga}"})`),
+        ]);
+        const wynik = { cpu, ram };
+        przebiegi.set(klucz, wynik);
+        return wynik;
+      } catch {
+        // Brak Prometheusa nie może psuć panelu — szczegóły pokażą komunikat.
+        return null;
+      }
+    }
+
+    async function pokazPrzebieg(row: HTMLElement, stack: string, usluga: string): Promise<void> {
+      const opis = q<HTMLElement>(row, '[data-role="d-wykres-opis"]');
+      const liniaCpu = q<SVGElement>(row, '[data-role="d-spark-cpu"]');
+      const liniaRam = q<SVGElement>(row, '[data-role="d-spark-ram"]');
+      const dane = await pobierzPrzebieg(stack, usluga);
+      // Wiersz mógł zniknąć (zwinięcie stacka, zmiana filtra) — wtedy nic nie rób.
+      if (!row.isConnected) return;
+      if (!dane || (dane.cpu.length === 0 && dane.ram.length === 0)) {
+        if (opis) opis.textContent = 'Brak przebiegu w Prometheusie dla tej usługi (6 h).';
+        return;
+      }
+      if (liniaCpu) liniaCpu.setAttribute('points', punktySparkline(dane.cpu, 300, 40, { min: 0, max: 100 }));
+      if (liniaRam) liniaRam.setAttribute('points', punktySparkline(dane.ram, 300, 40));
+      if (opis) {
+        const maksCpu = dane.cpu.length > 0 ? Math.max(...dane.cpu) : null;
+        const ostatniRam = dane.ram.length > 0 ? dane.ram[dane.ram.length - 1] : null;
+        opis.textContent = `6 h · CPU maks. ${fmtPercent(maksCpu)} · RAM teraz ${fmtBytes(ostatniRam)}`;
+      }
+    }
+
+    function eksportCsv(): void {
+      if (!snapshot) return;
+      const widok = przygotujWidok(snapshot);
+      const wiersze: WierszCsv[] = widok.stacki.stacki.flatMap((stack) =>
+        stack.services.map((usluga) => ({
+          stack: stack.name,
+          usluga: usluga.name,
+          stan: stateLabel(usluga.state),
+          repliki:
+            usluga.replicas_text ?? `${usluga.running ?? DASH}/${usluga.desired ?? DASH}`,
+          cpu: usluga.cpu_percent === null ? '' : fmtPercent(usluga.cpu_percent),
+          ram: fmtBytes(usluga.mem_bytes),
+          restarty: fmtInt(usluga.restarts_1h),
+          obraz: usluga.image ?? '',
+        })),
+      );
+      const znacznik = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
+      const plik = new Blob([uslugiDoCsv(wiersze)], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(plik);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `monitoring-uslugi-${znacznik}.csv`;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    async function kopiuj(tekst: string, przycisk: HTMLElement): Promise<void> {
+      if (!tekst) return;
+      const pierwotny = przycisk.textContent ?? '';
+      try {
+        await navigator.clipboard.writeText(tekst);
+        przycisk.textContent = 'Skopiowano';
+      } catch {
+        przycisk.textContent = 'Nie udało się';
+      }
+      window.setTimeout(() => {
+        przycisk.textContent = pierwotny;
+      }, 1200);
+    }
+
+    function licznikiStanow(): Record<StanFiltra, number> {
+      const uslugi = (snapshot?.stacks ?? []).flatMap((stack) => stack.services);
+      return {
+        wszystko: uslugi.length,
+        problemy: uslugi.filter((u) => pasujeStan(u.state, 'problemy')).length,
+        krytyczne: uslugi.filter((u) => pasujeStan(u.state, 'krytyczne')).length,
+        zdrowe: uslugi.filter((u) => pasujeStan(u.state, 'zdrowe')).length,
+      };
+    }
+
+    function renderZmiany(): void {
+      const grid = section('changes');
+      if (!grid) return;
+      const lista: Zmiana[] = poprzedni && snapshot ? zmianyMiedzy(poprzedni, snapshot) : [];
+      // Wartości pochodzą ze stanów API, więc rzutowanie jest bezpieczne —
+      // `filtry.ts` nie zna słownika `State` (moduł jest samowystarczalny).
+      updateSection('changes', lista.map((zmiana) => zmiana.stan as State), String(lista.length));
+
+      const brak = q<HTMLElement>(grid, '[data-role="empty"]');
+      if (brak) brak.hidden = poprzedni !== null;
+      const czyste = q<HTMLElement>(grid, '[data-role="empty-clear"]');
+      if (czyste) czyste.hidden = !(poprzedni !== null && lista.length === 0);
+
+      if (!stale('changes', lista)) return;
+      const holder = q<HTMLElement>(grid, '[data-role="list"]');
+      if (!holder) return;
+      holder.replaceChildren();
+
+      for (const zmiana of lista) {
+        const row = instantiate('tpl-zmiana');
+        if (!row) continue;
+        row.dataset.state = zmiana.stan;
+        setTextWithTitle(row, '[data-role="tytul"]', zmiana.tytul);
+        setTextWithTitle(row, '[data-role="opis"]', zmiana.opis);
+        setText(row, '[data-role="czas"]', lastGoodAt ? fmtAgo(lastGoodAt) : '');
+        const pokaz = q<HTMLButtonElement>(row, '[data-role="pokaz"]');
+        if (pokaz) {
+          if (zmiana.fokus) {
+            pokaz.hidden = false;
+            pokaz.dataset.fokus = zmiana.fokus;
+          } else {
+            pokaz.hidden = true;
+            delete pokaz.dataset.fokus;
+          }
+        }
+        holder.append(row);
+      }
+    }
+
+    function ustawAriaSort(): void {
+      for (const naglowek of qa<HTMLElement>(app, '[data-section="stacks"] thead th')) {
+        const przycisk = q<HTMLElement>(naglowek, '[data-sort]');
+        const klucz = przycisk?.dataset.sort;
+        const aktywny = klucz === filtr.sort;
+        naglowek.setAttribute(
+          'aria-sort',
+          aktywny ? (filtr.kierunek === 'desc' ? 'descending' : 'ascending') : 'none',
+        );
+        if (przycisk) przycisk.dataset.kierunek = aktywny ? filtr.kierunek : '';
+      }
+    }
+
+    /**
+     * Korekta stanów pustych po sekcjach. Powód: sekcja wie tylko, ile dostała
+     * wierszy — nie wie, czy reszta wypadła przez filtr, czy jej w API nie ma.
+     */
+    function ustawPusteStany(widok: Widok): void {
+      const ustaw = (sekcja: string, pokazano: number, wszystkich: number): void => {
+        const el = section(sekcja);
+        if (!el) return;
+        const brakDanych = q<HTMLElement>(el, '[data-role="empty"]');
+        if (brakDanych) brakDanych.hidden = wszystkich > 0;
+        const poFiltrze = q<HTMLElement>(el, '[data-role="empty-filtr"]');
+        if (poFiltrze) poFiltrze.hidden = !(wszystkich > 0 && pokazano === 0);
+      };
+
+      ustaw('checks', widok.checki.pokazano, widok.checki.wszystkich);
+      ustaw('certs', widok.certy.pokazano, widok.certy.wszystkich);
+      ustaw('stacks', widok.stacki.pokazano, widok.stacki.wszystkich);
+      ustaw('alerts', widok.alerty.pokazano, widok.alerty.wszystkich);
+
+      // Alerty mają dodatkowy, „spokojny" stan — pokazujemy go tylko wtedy, gdy
+      // naprawdę nie ma alertów (filtr, który je ukrył, to inna sytuacja).
+      const czyste = q<HTMLElement>(app, '[data-section="alerts"] [data-role="empty-clear"]');
+      if (czyste) czyste.hidden = widok.alerty.wszystkich > 0;
+
+      const sec = section('security');
+      if (!sec) return;
+      const brakLogowan = q<HTMLElement>(sec, '[data-role="logins-empty"]');
+      if (brakLogowan) brakLogowan.hidden = widok.logowania.wszystkich > 0;
+      const logowaniaPoFiltrze = q<HTMLElement>(sec, '[data-role="logins-empty-filtr"]');
+      if (logowaniaPoFiltrze) {
+        logowaniaPoFiltrze.hidden = !(
+          widok.logowania.wszystkich > 0 && widok.logowania.pokazano === 0
+        );
+      }
+    }
+
+    function ustawLicznikiSekcji(widok: Widok): void {
+      const ustaw = (sekcja: string, pokazano: number, wszystkich: number): void => {
+        const el = section(sekcja);
+        if (!el) return;
+        const licznik = q<HTMLElement>(el, '[data-role="count-filtr"]');
+        if (!licznik) return;
+        const filtruje = pokazano !== wszystkich;
+        licznik.hidden = !filtruje;
+        licznik.textContent = filtruje ? `z ${wszystkich}` : '';
+      };
+
+      ustaw('checks', widok.checki.pokazano, widok.checki.wszystkich);
+      ustaw('certs', widok.certy.pokazano, widok.certy.wszystkich);
+      ustaw('stacks', widok.stacki.pokazano, widok.stacki.wszystkich);
+      ustaw('alerts', widok.alerty.pokazano, widok.alerty.wszystkich);
+    }
+
+    /** Wszystkie kontrolki filtra w jednym miejscu — stan jest jeden, źródło prawdy też. */
+    function renderFiltry(widok: Widok): void {
+      const pole = q<HTMLInputElement>(app, '[data-role="filter-input"]');
+      // Nie nadpisujemy tego, co użytkownik właśnie pisze.
+      if (pole && document.activeElement !== pole && pole.value !== filtr.q) pole.value = filtr.q;
+
+      const czysc = q<HTMLElement>(app, '[data-role="filter-clear"]');
+      if (czysc) czysc.hidden = !czyAktywny(filtr);
+
+      const liczniki = licznikiStanow();
+      for (const stan of STANY_FILTRA) {
+        const chip = q<HTMLElement>(app, `[data-action="filter-stan"][data-stan="${stan}"]`);
+        if (!chip) continue;
+        chip.setAttribute('aria-pressed', filtr.stan === stan ? 'true' : 'false');
+        setText(chip, '.chip-licznik', String(liczniki[stan]));
+      }
+
+      const wybor = q<HTMLSelectElement>(app, '[data-role="filter-sort"]');
+      if (wybor && wybor.value !== filtr.sort) wybor.value = filtr.sort;
+      setText(app, '[data-role="filter-dir"]', filtr.kierunek === 'desc' ? '↓' : '↑');
+
+      const podsumowanie = q<HTMLElement>(app, '[data-role="filter-count"]');
+      if (podsumowanie) {
+        podsumowanie.textContent = `${widok.stacki.pokazano} z ${widok.stacki.wszystkich} usług`;
+      }
+
+      const chipPaska = q<HTMLElement>(app, '[data-role="bar-filtr"]');
+      if (chipPaska) {
+        const opis = opisFiltra(filtr);
+        chipPaska.hidden = opis.length === 0;
+        setText(chipPaska, '[data-role="bar-filtr-tekst"]', opis);
+      }
+
+      ustawPusteStany(widok);
+      ustawLicznikiSekcji(widok);
+      ustawAriaSort();
+    }
+
     /* ---------------- zdarzenia ---------------- */
 
-    window.addEventListener('hashchange', applyRoute);
+    window.addEventListener('hashchange', () => {
+      wczytajStanZHasza();
+      odswiezWidok();
+    });
     document.addEventListener('fullscreenchange', renderFullscreenState);
 
     document.addEventListener('click', (event) => {
       const target = event.target;
       if (!(target instanceof Element)) return;
+
       const trigger = target.closest('[data-action]');
-      if (!(trigger instanceof HTMLElement)) return;
-      const action = trigger.dataset.action;
-      if (action === 'refresh' || action === 'retry') void load();
-      if (action === 'fullscreen') void toggleFullscreen();
+      if (trigger instanceof HTMLElement) {
+        const action = trigger.dataset.action;
+        if (action === 'refresh' || action === 'retry') void load();
+        if (action === 'fullscreen') void toggleFullscreen();
+        if (action === 'filter-stan') {
+          ustawStanFiltra((trigger.dataset.stan ?? 'wszystko') as StanFiltra);
+        }
+        if (action === 'filter-kierunek') {
+          filtr = { ...filtr, kierunek: filtr.kierunek === 'desc' ? 'asc' : 'desc' };
+          odswiezWidok();
+        }
+        if (action === 'filter-clear') wyczyscFiltr();
+        if (action === 'filter-csv') eksportCsv();
+        if (action === 'sortuj') ustawSortowanie(trigger.dataset.sort ?? 'stan');
+        if (action === 'stack-zwijanie') przelaczZwiniety(trigger.closest('[data-role="stack"]'));
+        if (action === 'stack-filtr') ustawFiltrStacka(trigger.dataset.stack ?? '');
+        if (action === 'usluga-fokus') {
+          przelaczFokus(trigger.dataset.stack ?? '', trigger.dataset.usluga ?? '');
+        }
+        if (action === 'pokaz-fokus') {
+          const czesci = rozbijFokus(trigger.dataset.fokus ?? null);
+          if (czesci) przelaczFokus(czesci.stack, czesci.usluga);
+        }
+        if (action === 'kopiuj') void kopiuj(trigger.dataset.kopiuj ?? '', trigger);
+        return;
+      }
+
+      // Klik w wiersz usługi poza przyciskami i linkami też rozwija szczegóły —
+      // trafienie w tabelę nie może wymagać celowania w samą nazwę.
+      const wiersz = target.closest('tr[data-role="service"]');
+      if (wiersz instanceof HTMLElement && !target.closest('a,button')) {
+        const nazwa = q<HTMLElement>(wiersz, '[data-role="name"]');
+        przelaczFokus(nazwa?.dataset.stack ?? '', nazwa?.dataset.usluga ?? '');
+      }
+    });
+
+    document.addEventListener('input', (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement) || target.dataset.role !== 'filter-input') return;
+      const wartosc = target.value;
+      // Debounce: przy 47 usługach przemalowanie sekcji na każde naciśnięcie
+      // klawisza to zauważalne miganie.
+      if (debounceFiltra !== null) window.clearTimeout(debounceFiltra);
+      debounceFiltra = window.setTimeout(() => {
+        debounceFiltra = null;
+        filtr = { ...filtr, q: wartosc };
+        odswiezWidok();
+      }, 120);
+    });
+
+    document.addEventListener('change', (event) => {
+      const target = event.target;
+      if (target instanceof HTMLSelectElement && target.dataset.role === 'filter-sort') {
+        // Wybór z listy to świadoma zmiana klucza — ustawiamy sensowny kierunek,
+        // a nie odwracamy obecny (to robi klik w nagłówek kolumny).
+        const klucz = target.value;
+        filtr = {
+          ...filtr,
+          sort: (KLUCZE_SORTOWANIA as readonly string[]).includes(klucz)
+            ? (klucz as KluczSortowania)
+            : filtr.sort,
+          kierunek: klucz === 'usluga' || klucz === 'obraz' ? 'asc' : 'desc',
+        };
+        odswiezWidok();
+      }
+    });
+
+    document.addEventListener('keydown', (event) => {
+      const aktywne = document.activeElement;
+      const wPolu =
+        aktywne instanceof HTMLInputElement ||
+        aktywne instanceof HTMLTextAreaElement ||
+        aktywne instanceof HTMLSelectElement;
+      if (event.key === '/' && !wPolu) {
+        event.preventDefault();
+        q<HTMLInputElement>(app, '[data-role="filter-input"]')?.focus();
+        return;
+      }
+      if (event.key === 'Escape') {
+        if (wPolu && aktywne instanceof HTMLElement) aktywne.blur();
+        wyczyscFiltr();
+      }
     });
 
     document.addEventListener('visibilitychange', () => {
@@ -1056,6 +1704,8 @@ import ToolGrid from '../components/ToolGrid.astro';
 
     /* ---------------- start ---------------- */
 
+    wczytajZwiete();
+    wczytajStanZHasza();
     renderMeta();
     applyRoute();
     void load();

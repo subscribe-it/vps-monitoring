@@ -859,3 +859,449 @@
     display: none;
   }
 }
+
+/* ===========================================================================
+ * Filtry, sortowanie, fokus — interakcje widoku stanu
+ * ===========================================================================
+ *
+ * Reguły trzymamy w warstwie `components` (a nie w utilitach Tailwinda), bo
+ * utilities wygrywają z tą warstwą niezależnie od specyficzności — sprawdzone
+ * w tej sesji: util `py-3` zjadł regułę widoku podglądu narzędzia.
+ */
+@layer components {
+  /* ---------- pasek filtrów ---------- */
+  .filters {
+    padding: 0.5rem 0.75rem 0.375rem;
+  }
+
+  .filters-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 0.75rem;
+  }
+
+  .filters-search {
+    display: flex;
+    flex: 1 1 16rem;
+    min-width: 12rem;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.25rem 0.5rem;
+    border: 1px solid var(--color-base-300);
+    border-radius: var(--radius-field);
+    background: color-mix(in oklab, var(--color-base-100) 55%, transparent);
+    transition: border-color 150ms ease;
+  }
+
+  .filters-search:focus-within {
+    border-color: color-mix(in oklab, var(--color-primary) 60%, var(--color-base-300));
+  }
+
+  .filters-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-size: 0.875rem;
+  }
+
+  .filters-input:focus {
+    outline: none;
+  }
+
+  .filters-input::placeholder {
+    color: color-mix(in oklab, var(--color-base-content) 55%, transparent);
+  }
+
+  .filters-clear {
+    display: grid;
+    place-items: center;
+    width: 1.5rem;
+    height: 1.5rem;
+    border-radius: 9999px;
+    color: color-mix(in oklab, var(--color-base-content) 70%, transparent);
+    background: color-mix(in oklab, var(--color-base-content) 8%, transparent);
+  }
+
+  .filters-clear:hover {
+    color: var(--color-base-content);
+    background: color-mix(in oklab, var(--color-base-content) 16%, transparent);
+  }
+
+  .filters-chips {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.25rem;
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    min-height: 1.75rem;
+    padding: 0.1875rem 0.5rem;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: color-mix(in oklab, var(--color-base-content) 82%, transparent);
+    background: color-mix(in oklab, var(--color-base-content) 6%, transparent);
+    border: 1px solid var(--color-base-300);
+    transition:
+      background-color 150ms ease,
+      border-color 150ms ease,
+      color 150ms ease;
+  }
+
+  .chip:hover {
+    background: color-mix(in oklab, var(--color-base-content) 12%, transparent);
+    color: var(--color-base-content);
+  }
+
+  .chip[aria-pressed="true"] {
+    color: var(--color-primary);
+    background: color-mix(in oklab, var(--color-primary) 14%, transparent);
+    border-color: color-mix(in oklab, var(--color-primary) 45%, var(--color-base-300));
+  }
+
+  .chip-licznik {
+    font-size: 0.6875rem;
+    opacity: 0.85;
+  }
+
+  .filters-sort {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+  }
+
+  .select-ops {
+    min-height: 1.75rem;
+    padding: 0.125rem 0.375rem;
+    border-radius: var(--radius-field);
+    border: 1px solid var(--color-base-300);
+    background: color-mix(in oklab, var(--color-base-100) 55%, transparent);
+    color: inherit;
+    font: inherit;
+    font-size: 0.8125rem;
+  }
+
+  .select-ops:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 1px;
+  }
+
+  .filters-dir {
+    min-width: 1.875rem;
+    font-family: var(--font-mono);
+  }
+
+  .filters-akcje {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-left: auto;
+  }
+
+  .filters-hint {
+    margin-top: 0.375rem;
+  }
+
+  .filters-hint kbd {
+    padding: 0.0625rem 0.3125rem;
+    border-radius: 0.25rem;
+    border: 1px solid var(--color-base-300);
+    background: color-mix(in oklab, var(--color-base-content) 8%, transparent);
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+  }
+
+  /* ---------- chip filtra w przyklejonym pasku ---------- */
+  .bar-filtr {
+    display: inline-flex;
+    min-width: 0;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.125rem 0.25rem 0.125rem 0.5rem;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    color: var(--color-primary);
+    background: color-mix(in oklab, var(--color-primary) 12%, transparent);
+    border: 1px solid color-mix(in oklab, var(--color-primary) 35%, transparent);
+  }
+
+  .bar-filtr-tekst {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .bar-filtr-x {
+    display: grid;
+    place-items: center;
+    width: 1.125rem;
+    height: 1.125rem;
+    border-radius: 9999px;
+    color: inherit;
+    background: color-mix(in oklab, var(--color-primary) 18%, transparent);
+  }
+
+  .bar-filtr-x:hover {
+    background: color-mix(in oklab, var(--color-primary) 32%, transparent);
+  }
+
+  /* ---------- nagłówek stacka: zwijanie + filtr ---------- */
+  .stack-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem 0.375rem;
+  }
+
+  .stack-toggle {
+    display: grid;
+    place-items: center;
+    width: 1.5rem;
+    height: 1.5rem;
+    border-radius: var(--radius-field);
+    color: color-mix(in oklab, var(--color-base-content) 70%, transparent);
+    background: color-mix(in oklab, var(--color-base-content) 6%, transparent);
+  }
+
+  .stack-toggle:hover {
+    color: var(--color-base-content);
+    background: color-mix(in oklab, var(--color-base-content) 14%, transparent);
+  }
+
+  .stack-chevron {
+    transition: transform 150ms ease;
+  }
+
+  [data-zwiniety="true"] .stack-chevron {
+    transform: rotate(-90deg);
+  }
+
+  .stack-name {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: inherit;
+    text-decoration: underline dotted transparent;
+    text-underline-offset: 0.2em;
+  }
+
+  .stack-name:hover {
+    color: var(--color-primary);
+    text-decoration-color: color-mix(in oklab, var(--color-primary) 60%, transparent);
+  }
+
+  /* ---------- sortowalne nagłówki ---------- */
+  .th-sort {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    min-height: 1.5rem;
+    font: inherit;
+    font-size: inherit;
+    font-weight: inherit;
+    text-transform: inherit;
+    letter-spacing: inherit;
+    color: inherit;
+    white-space: nowrap;
+  }
+
+  .th-sort:hover {
+    color: var(--color-base-content);
+  }
+
+  .th-sort[data-kierunek]:not([data-kierunek=""])::after {
+    content: "↓";
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--color-primary);
+  }
+
+  .th-sort[data-kierunek="asc"]::after {
+    content: "↑";
+  }
+
+  th[aria-sort="ascending"],
+  th[aria-sort="descending"] {
+    color: var(--color-base-content);
+  }
+
+  /* ---------- nazwa usługi jako przycisk ---------- */
+  .row-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font: inherit;
+    font-size: 0.875rem;
+    font-weight: 500;
+    text-align: left;
+    color: inherit;
+    text-decoration: underline dotted transparent;
+    text-underline-offset: 0.2em;
+  }
+
+  .row-name:hover {
+    color: var(--color-primary);
+    text-decoration-color: color-mix(in oklab, var(--color-primary) 55%, transparent);
+  }
+
+  tr[data-fokus="true"] > td {
+    background: color-mix(in oklab, var(--color-primary) 8%, transparent);
+  }
+
+  /* Błysk po wejściu w fokus — jedno autorskie „mrugnięcie", nie festiwal. */
+  .row-fokus > td {
+    animation: row-fokus 1.6s ease-out;
+  }
+
+  @keyframes row-fokus {
+    0% {
+      background: color-mix(in oklab, var(--color-primary) 26%, transparent);
+    }
+    100% {
+      background: transparent;
+    }
+  }
+
+  /* ---------- wiersz szczegółów usługi ---------- */
+  .detail-row > td {
+    padding: 0;
+    background: color-mix(in oklab, var(--color-base-300) 22%, transparent);
+    border-bottom: 1px solid var(--color-base-300);
+  }
+
+  .detail-grid {
+    display: grid;
+    gap: 0.75rem;
+    padding: 0.75rem 1rem;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  @media (width >= 60rem) {
+    .detail-grid {
+      grid-template-columns: minmax(0, 1.6fr) minmax(16rem, 1fr);
+      align-items: start;
+    }
+  }
+
+  .detail-linia {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.375rem 0.5rem;
+    font-size: 0.8125rem;
+    min-width: 0;
+  }
+
+  .detail-obraz {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .detail-liczby {
+    gap: 0.5rem 0.75rem;
+  }
+
+  .btn-kopiuj {
+    min-height: 1.5rem;
+    padding: 0.0625rem 0.4375rem;
+    font-size: 0.6875rem;
+  }
+
+  .detail-linki {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+    margin-top: 0.5rem;
+  }
+
+  .detail-wykres {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    min-width: 0;
+  }
+
+  .spark {
+    width: 100%;
+    height: 2.5rem;
+    border-radius: var(--radius-field);
+    background: color-mix(in oklab, var(--color-base-100) 60%, transparent);
+    border: 1px solid var(--color-base-300);
+  }
+
+  .spark-linia {
+    fill: none;
+    stroke: var(--color-primary);
+    stroke-width: 1.5;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .spark-linia-ram {
+    stroke: var(--color-secondary);
+    stroke-dasharray: 4 3;
+  }
+
+  .spark-legenda {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+  }
+
+  .spark-klucz {
+    display: inline-block;
+    width: 0.75rem;
+    height: 0.125rem;
+    border-radius: 9999px;
+  }
+
+  .spark-klucz-cpu {
+    background: var(--color-primary);
+  }
+
+  .spark-klucz-ram {
+    background: var(--color-secondary);
+  }
+}
+
+@layer components {
+  /*
+   * Obszary kliknięcia nowych kontrolek — zmierzone, nie „na oko":
+   * przy pierwszym pomiarze 68 elementów (47 nazw usług, 10 nazw stacków,
+   * 10 nagłówków sortowania, 1 „×" filtra) miało mniej niż 24 px w jednym
+   * z wymiarów. Powiększamy obszar, a wyrównanie trzymamy ujemnym marginesem,
+   * żeby wygląd się nie przesunął (ten sam trik co w `.link-ops`).
+   */
+  .row-name,
+  .stack-name {
+    min-height: 1.75rem;
+    padding-inline: 0.25rem;
+    /* Ujemne marginesy w OBIE osie: obszar kliknięcia rośnie do 28 px, ale
+       wiersz tabeli nie rośnie razem z nim (pomiar: samo `min-height` dodawało
+       7 px na każdy z 47 wierszy, czyli ~350 px przewijania). */
+    margin: -0.25rem;
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .th-sort {
+    min-width: 1.75rem;
+    justify-content: flex-start;
+  }
+
+  .bar-filtr-x {
+    width: 1.5rem;
+    height: 1.5rem;
+  }
+}

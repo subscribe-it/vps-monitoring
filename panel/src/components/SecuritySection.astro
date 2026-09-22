@@ -25,6 +25,10 @@ import StatBlock from './StatBlock.astro';
       <Icon name="lucide:circle-check" size={16} aria-hidden="true" />
       <span>Brak logowań w ostatnich 24 godzinach.</span>
     </div>
+    <div class="empty-ops" data-role="logins-empty-filtr" hidden>
+      <Icon name="lucide:search-x" size={16} aria-hidden="true" />
+      <span>Żadne logowanie nie pasuje do filtra.</span>
+    </div>
   </div>
   <div class="empty-ops" data-role="empty" hidden>
     <Icon name="lucide:inbox" size={16} aria-hidden="true" />

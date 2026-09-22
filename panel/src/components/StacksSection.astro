@@ -3,11 +3,15 @@
  * Sekcja (b): stacki z `stacks[]` wraz z tabelą usług
  * (repliki, CPU, RAM, restarty, obraz).
  *
- * Tabela jest gęsta (tekst 14 px, padding 7 px), a pełne identyfikatory
- * (nazwa kontenera, referencja obrazu) trafiają do atrybutu `title` — dzięki
- * temu nic nie jest „ucięte bez śladu”, a kolumny nie zabierają szerokości
- * potrzebnej na liczby. Na bardzo szerokich ekranach lista stacków łamie się
- * na dwie kolumny (patrz reguła `[data-section="stacks"]` w global.css).
+ * Trzy mechanizmy, które ułatwiają pracę przy 47 usługach:
+ *  1. **sortowanie** — klikalny nagłówek każdej kolumny (`aria-sort` na `<th>`),
+ *     ten sam stan co w pasku filtrów,
+ *  2. **zwijanie stacka** — przycisk z chevronem w nagłówku; nazwa stacka
+ *     zawęża widok do niego (jeden klik = „pokaż mi tylko ten stack"),
+ *  3. **focus usługi** — nazwa usługi to przycisk: rozwija wiersz szczegółów
+ *     (pełna nazwa, obraz, liczby, mini-wykres 6 h, linki do Grafany/Prometheusa).
+ *
+ * Pełne identyfikatory lądują też w `title`, więc nic nie ginie w przycięciu.
  */
 import { Icon } from 'astro-icon/components';
 import SectionCard from './SectionCard.astro';
@@ -19,13 +23,27 @@ import SectionCard from './SectionCard.astro';
     <Icon name="lucide:inbox" size={16} aria-hidden="true" />
     <span>Brak danych o stackach — API nie zwróciło listy usług.</span>
   </div>
+  <div class="empty-ops" data-role="empty-filtr" hidden>
+    <Icon name="lucide:search-x" size={16} aria-hidden="true" />
+    <span>Żadna usługa nie pasuje do filtra.</span>
+  </div>
 </SectionCard>
 
 <template id="tpl-stack">
   <section class="border-b border-base-300 last:border-b-0" data-role="stack" data-state="unknown">
-    <header class="flex flex-wrap items-center gap-2 px-4 pt-2.5 pb-1.5">
+    <header class="stack-head">
+      <button
+        type="button"
+        class="stack-toggle"
+        data-action="stack-zwijanie"
+        data-role="stack-toggle"
+        aria-expanded="true"
+        aria-label="Zwiń lub rozwiń stack"
+      >
+        <Icon name="lucide:chevron-right" size={14} class="stack-chevron" aria-hidden="true" />
+      </button>
       <span class="state-dot" aria-hidden="true"></span>
-      <h3 class="text-sm font-semibold" data-role="stack-name"></h3>
+      <button type="button" class="stack-name" data-action="stack-filtr" data-role="stack-name"></button>
       <span class="count-chip" data-role="stack-services"></span>
       <span
         class="state-pill ml-auto"
@@ -37,18 +55,32 @@ import SectionCard from './SectionCard.astro';
         <span data-role="stack-rollup-label">Nieznany</span>
       </span>
     </header>
-    <div class="table-wrap">
+    <div class="table-wrap" data-role="stack-tabela">
       <table class="table-ops">
         <caption class="sr-only" data-role="table-caption"></caption>
         <thead>
           <tr>
-            <th scope="col">Usługa</th>
-            <th scope="col">Stan</th>
-            <th scope="col" class="num">Repliki</th>
-            <th scope="col" class="num">CPU</th>
-            <th scope="col" class="num">RAM</th>
-            <th scope="col" class="num">Restarty 1 h</th>
-            <th scope="col" class="hidden md:table-cell">Obraz</th>
+            <th scope="col" aria-sort="none">
+              <button type="button" class="th-sort" data-action="sortuj" data-sort="usluga">Usługa</button>
+            </th>
+            <th scope="col" aria-sort="none">
+              <button type="button" class="th-sort" data-action="sortuj" data-sort="stan">Stan</button>
+            </th>
+            <th scope="col" class="num" aria-sort="none">
+              <button type="button" class="th-sort" data-action="sortuj" data-sort="repliki">Repliki</button>
+            </th>
+            <th scope="col" class="num" aria-sort="none">
+              <button type="button" class="th-sort" data-action="sortuj" data-sort="cpu">CPU</button>
+            </th>
+            <th scope="col" class="num" aria-sort="none">
+              <button type="button" class="th-sort" data-action="sortuj" data-sort="ram">RAM</button>
+            </th>
+            <th scope="col" class="num" aria-sort="none">
+              <button type="button" class="th-sort" data-action="sortuj" data-sort="restarty">Restarty 1 h</button>
+            </th>
+            <th scope="col" class="hidden md:table-cell" aria-sort="none">
+              <button type="button" class="th-sort" data-action="sortuj" data-sort="obraz">Obraz</button>
+            </th>
           </tr>
         </thead>
         <tbody data-role="services"></tbody>
@@ -62,7 +94,7 @@ import SectionCard from './SectionCard.astro';
     <td>
       <span class="flex items-center gap-2">
         <span class="state-dot" aria-hidden="true"></span>
-        <span class="truncate font-medium" data-role="name"></span>
+        <button type="button" class="row-name" data-action="usluga-fokus" data-role="name"></button>
       </span>
     </td>
     <td class="state-text text-xs font-semibold" data-role="state-label"></td>
@@ -72,6 +104,79 @@ import SectionCard from './SectionCard.astro';
     <td class="num" data-role="restarts"></td>
     <td class="hidden md:table-cell">
       <span class="num subtle block max-w-[34rem] truncate text-xs" data-role="image"></span>
+    </td>
+  </tr>
+</template>
+
+<template id="tpl-service-detail">
+  <tr class="detail-row" data-role="usluga-szczegoly" data-stack="" data-usluga="">
+    <td colspan="7">
+      <div class="detail-grid">
+        <div class="detail-dane">
+          <p class="detail-linia">
+            <span class="subtle">Usługa:</span>
+            <span class="num" data-role="d-usluga"></span>
+            <button type="button" class="btn-ops btn-kopiuj" data-action="kopiuj" data-role="kopiuj-usluga">
+              Kopiuj
+            </button>
+          </p>
+          <p class="detail-linia">
+            <span class="subtle">Kontener:</span>
+            <span class="num" data-role="d-kontener"></span>
+            <button type="button" class="btn-ops btn-kopiuj" data-action="kopiuj" data-role="kopiuj-kontener">
+              Kopiuj
+            </button>
+          </p>
+          <p class="detail-linia">
+            <span class="subtle">Obraz:</span>
+            <span class="num detail-obraz" data-role="d-obraz"></span>
+            <button type="button" class="btn-ops btn-kopiuj" data-action="kopiuj" data-role="kopiuj-obraz">
+              Kopiuj
+            </button>
+          </p>
+          <p class="detail-linia detail-liczby">
+            <span class="subtle">Repliki:</span> <span class="num" data-role="d-repliki"></span>
+            <span class="subtle">CPU:</span> <span class="num" data-role="d-cpu"></span>
+            <span class="subtle">RAM:</span> <span class="num" data-role="d-ram"></span>
+            <span class="subtle">Restarty 1 h:</span> <span class="num" data-role="d-restarty"></span>
+          </p>
+          <div class="detail-linki">
+            <a class="btn-ops" data-role="d-link-wykresy" target="_blank" rel="noopener">
+              <Icon name="lucide:chart-line" size={14} aria-hidden="true" />
+              <span>Wykresy</span>
+            </a>
+            <a class="btn-ops" data-role="d-link-aplikacje" target="_blank" rel="noopener">
+              <Icon name="lucide:layers" size={14} aria-hidden="true" />
+              <span>Repliki i sondy</span>
+            </a>
+            <a class="btn-ops" data-role="d-link-logi" target="_blank" rel="noopener">
+              <Icon name="lucide:scroll-text" size={14} aria-hidden="true" />
+              <span>Logi (nginx, app)</span>
+            </a>
+            <a class="btn-ops" data-role="d-link-prometheus" target="_blank" rel="noopener">
+              <Icon name="lucide:chart-area" size={14} aria-hidden="true" />
+              <span>Prometheus</span>
+            </a>
+          </div>
+        </div>
+        <div class="detail-wykres" data-role="d-wykres">
+          <p class="subtle text-xs" data-role="d-wykres-opis">Wczytywanie przebiegu…</p>
+          <svg
+            class="spark"
+            viewBox="0 0 300 40"
+            preserveAspectRatio="none"
+            role="img"
+            aria-label="Przebieg zużycia w ostatnich 6 godzinach"
+          >
+            <polyline class="spark-linia" data-role="d-spark-cpu" points=""></polyline>
+            <polyline class="spark-linia spark-linia-ram" data-role="d-spark-ram" points=""></polyline>
+          </svg>
+          <p class="subtle text-xs spark-legenda">
+            <span class="spark-klucz spark-klucz-cpu"></span> CPU
+            <span class="spark-klucz spark-klucz-ram"></span> RAM · 6 h
+          </p>
+        </div>
+      </div>
     </td>
   </tr>
 </template>

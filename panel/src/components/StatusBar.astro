@@ -18,6 +18,19 @@ import { Icon } from 'astro-icon/components';
   <span class="state-dot" aria-hidden="true"></span>
   <span class="text-sm font-semibold" data-role="sticky-label">—</span>
   <span class="muted text-xs" data-role="sticky-note"></span>
+  <span class="bar-filtr" data-role="bar-filtr" hidden>
+    <Icon name="lucide:filter" size={12} aria-hidden="true" />
+    <span class="bar-filtr-tekst" data-role="bar-filtr-tekst"></span>
+    <button
+      type="button"
+      class="bar-filtr-x"
+      data-action="filter-clear"
+      data-role="bar-filtr-x"
+      aria-label="Wyczyść filtr"
+    >
+      <Icon name="lucide:x" size={12} aria-hidden="true" />
+    </button>
+  </span>
   <span class="ml-auto flex shrink-0 items-center gap-2 sm:gap-3">
     <span
       class="subtle hidden items-center gap-1.5 text-xs sm:flex"

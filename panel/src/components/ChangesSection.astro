@@ -1,0 +1,37 @@
+---
+/**
+ * Sekcja „Ostatnie zmiany" — odpowiedź na pytanie „czy coś właśnie padło?".
+ *
+ * Źródłem jest porównanie dwóch kolejnych snapshotów `/status/api.json`
+ * (liczone w `lib/filtry.ts`, przetestowane). Panel nie zgaduje: pokazuje
+ * wyłącznie różnice, a gdy ich nie ma — mówi to wprost.
+ */
+import { Icon } from 'astro-icon/components';
+import SectionCard from './SectionCard.astro';
+---
+
+<SectionCard section="changes" title="Ostatnie zmiany" icon="lucide:history">
+  <div data-role="list"></div>
+  <div class="empty-ops" data-role="empty-clear" hidden>
+    <span class="state-dot" data-state="ok" aria-hidden="true"></span>
+    <span>Brak zmian od poprzedniego odświeżenia — stan spokojny.</span>
+  </div>
+  <div class="empty-ops" data-role="empty" hidden>
+    <Icon name="lucide:inbox" size={16} aria-hidden="true" />
+    <span>Jeszcze nie ma z czym porównać — pierwsze odświeżenie ustala punkt odniesienia.</span>
+  </div>
+</SectionCard>
+
+<template id="tpl-zmiana">
+  <div class="row-ops" data-role="zmiana" data-state="unknown">
+    <span class="state-dot" aria-hidden="true"></span>
+    <span class="min-w-0 flex-1">
+      <span class="block truncate text-sm font-medium" data-role="tytul"></span>
+      <span class="subtle block truncate text-xs" data-role="opis"></span>
+    </span>
+    <span class="subtle num shrink-0 text-xs" data-role="czas"></span>
+    <button type="button" class="link-ops shrink-0 text-xs" data-action="pokaz-fokus" data-role="pokaz" hidden>
+      Pokaż
+    </button>
+  </div>
+</template>

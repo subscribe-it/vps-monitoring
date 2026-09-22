@@ -1,0 +1,95 @@
+---
+/**
+ * Pasek filtrów: jedno miejsce, w którym zawężasz cały widok stanu.
+ *
+ * Świadome decyzje:
+ *  - chipy stanu liczą USŁUGI (największy zbiór), a podpis „usługi:" mówi to
+ *    wprost — inaczej liczniki wyglądają na nieprawdę;
+ *  - pole ma `type="search"` i własny przycisk czyszczenia, więc działa też
+ *    klawiatura systemowa (Esc w polu czyści) i czytnik ekranu;
+ *  - sortowanie siedzi tutaj, choć dotyczy tylko tabeli usług — jedno miejsce
+ *    na „jak patrzę na dane" jest lepsze niż kontrolki rozsiane po sekcjach.
+ *
+ * Wszystkie wartości wypełnia skrypt klienta (role `filter-*`).
+ */
+import { Icon } from 'astro-icon/components';
+---
+
+<section class="card-ops filters" data-section="filters" role="search" aria-label="Filtry widoku stanu">
+  <div class="filters-row">
+    <label class="filters-search">
+      <Icon name="lucide:search" size={15} class="subtle" aria-hidden="true" />
+      <input
+        type="search"
+        class="filters-input"
+        data-role="filter-input"
+        placeholder="Szukaj usługi, stacka, obrazu, hosta, alertu…"
+        aria-label="Szukaj w panelu"
+        autocomplete="off"
+        spellcheck="false"
+      />
+      <button
+        type="button"
+        class="filters-clear"
+        data-action="filter-clear"
+        data-role="filter-clear"
+        aria-label="Wyczyść filtr"
+        hidden
+      >
+        <Icon name="lucide:x" size={14} aria-hidden="true" />
+      </button>
+    </label>
+
+    <div class="filters-chips" role="group" aria-label="Filtr stanu usług">
+      <span class="subtle text-xs">usługi:</span>
+      <button type="button" class="chip" data-action="filter-stan" data-stan="wszystko" aria-pressed="true">
+        Wszystko <span class="chip-licznik num" data-role="licznik-wszystko">—</span>
+      </button>
+      <button type="button" class="chip" data-action="filter-stan" data-stan="problemy" aria-pressed="false">
+        Problemy <span class="chip-licznik num" data-role="licznik-problemy">—</span>
+      </button>
+      <button type="button" class="chip" data-action="filter-stan" data-stan="krytyczne" aria-pressed="false">
+        Krytyczne <span class="chip-licznik num" data-role="licznik-krytyczne">—</span>
+      </button>
+      <button type="button" class="chip" data-action="filter-stan" data-stan="zdrowe" aria-pressed="false">
+        Zdrowe <span class="chip-licznik num" data-role="licznik-zdrowe">—</span>
+      </button>
+    </div>
+
+    <div class="filters-sort">
+      <label class="subtle text-xs" for="filtr-sort">Sortuj</label>
+      <select class="select-ops" id="filtr-sort" data-role="filter-sort">
+        <option value="stan">Najgorszy stan</option>
+        <option value="usluga">Usługa</option>
+        <option value="repliki">Repliki</option>
+        <option value="cpu">CPU</option>
+        <option value="ram">RAM</option>
+        <option value="restarty">Restarty 1 h</option>
+        <option value="obraz">Obraz</option>
+      </select>
+      <button
+        type="button"
+        class="btn-ops filters-dir"
+        data-action="filter-kierunek"
+        data-role="filter-dir"
+        aria-label="Zmień kierunek sortowania"
+        title="Kierunek sortowania"
+      >
+        ↓
+      </button>
+    </div>
+
+    <div class="filters-akcje">
+      <span class="count-chip" data-role="filter-count" role="status" aria-live="polite">—</span>
+      <button type="button" class="btn-ops" data-action="filter-csv">
+        <Icon name="lucide:download" size={14} aria-hidden="true" />
+        <span>CSV</span>
+      </button>
+    </div>
+  </div>
+
+  <p class="subtle filters-hint text-xs">
+    Skrót <kbd>/</kbd> wchodzi w pole, <kbd>Esc</kbd> czyści filtr. Widok z filtrem
+    i fokusem siedzi w adresie — możesz wysłać komuś link do dokładnie tego, co widzisz.
+  </p>
+</section>

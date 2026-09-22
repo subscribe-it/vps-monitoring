@@ -21,6 +21,10 @@ import SectionCard from './SectionCard.astro';
     <Icon name="lucide:inbox" size={16} aria-hidden="true" />
     <span>Brak danych o alertach — API nie zwróciło tej sekcji.</span>
   </div>
+  <div class="empty-ops" data-role="empty-filtr" hidden>
+    <Icon name="lucide:search-x" size={16} aria-hidden="true" />
+    <span>Żaden alert nie pasuje do filtra.</span>
+  </div>
 </SectionCard>
 
 <template id="tpl-alert-row">
