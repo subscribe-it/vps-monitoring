@@ -51,9 +51,12 @@ import { Icon } from 'astro-icon/components';
   <div class="wykresy-szczegoly" data-role="wykresy-szczegoly" hidden></div>
 
   <p class="subtle wykresy-stopka text-xs">
-    Źródło: <span class="num">/status/api.json</span> (wartości bieżące) i
-    <span class="num">/prometheus/api/v1/query_range</span> (przebiegi). Sieć nie ma limitu —
-    pokazujemy przepustowość, nie procent. Limit CPU nie jest wystawiany przez API.
+    Źródło: <span class="num">/status/api.json</span> (wartości bieżące i limity
+    <span class="num">cpu_limit_cores</span> / <span class="num">mem_limit_bytes</span> ze spec usługi)
+    oraz <span class="num">/prometheus/api/v1/query_range</span> (przebiegi). Limit RAM bierzemy z API,
+    a gdy go nie ma — z metryki <span class="num">swarm_container_memory_limit_bytes</span>.
+    Sieć nie ma limitu, więc pokazujemy przepustowość, nie procent. Gdy limit nie jest ustawiony,
+    piszemy wprost „limit: brak w API".
   </p>
 </section>
 

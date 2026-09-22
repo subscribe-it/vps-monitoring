@@ -86,11 +86,21 @@ def make_config(**env):
 
 
 def make_service(name, labels=None, image="nginx:1.27", mode=None, replicas=None,
-                 updated_at="2026-09-21T19:40:00.123456789Z"):
+                 updated_at="2026-09-21T19:40:00.123456789Z", limits=None):
+    szablon = {"ContainerSpec": {"Image": image}}
+    if limits is not None:
+        # limits={"cpus": 0.25, "memory": 536870912} — tak wygląda to w spec
+        # usługi Swarm: NanoCPUs (1e9 = 1 vCPU) i MemoryBytes.
+        zasoby = {}
+        if limits.get("cpus") is not None:
+            zasoby["NanoCPUs"] = int(round(float(limits["cpus"]) * 1_000_000_000))
+        if limits.get("memory") is not None:
+            zasoby["MemoryBytes"] = int(limits["memory"])
+        szablon["Resources"] = {"Limits": zasoby}
     spec = {
         "Name": name,
         "Labels": labels or {},
-        "TaskTemplate": {"ContainerSpec": {"Image": image}},
+        "TaskTemplate": szablon,
         "Mode": {},
     }
     if replicas is not None:
@@ -1128,6 +1138,57 @@ class SecurityFromLokiTests(unittest.TestCase):
         self.assertEqual(sekcja["ssh_failed_24h"], 11)
         self.assertEqual(sekcja["ssh_bans_24h"], 4)
         self.assertEqual(sekcja["state"], "ok")
+
+
+class ServiceLimitsTests(unittest.TestCase):
+    """Limity zasobów per usługa w API — panel liczy z nich „teraz vs limit".
+
+    Limity żyją TYLKO w spec usługi Swarm (`Resources.Limits`), więc bez
+    wystawienia ich w `/status/api.json` panel nie ma z czego policzyć procentu
+    (wcześniej CPU w ogóle nie miało limitu, a RAM brał go z metryki).
+    """
+
+    def _usluga(self, **kwargs):
+        docker = FakeDocker(
+            services=[make_service("monitoring_panel", **kwargs)],
+            tasks=[make_task("svc-monitoring_panel")],
+            containers=[make_container("c1", "monitoring_panel", stack="monitoring")],
+        )
+        service = build_service(docker)
+        service.refresh()
+        return service.api_json()["stacks"][0]["services"][0]
+
+    def test_limity_z_spec_uslugi_trafiaja_do_api(self):
+        usluga = self._usluga(limits={"cpus": 0.25, "memory": 536_870_912})
+        self.assertEqual(usluga["cpu_limit_cores"], 0.25)
+        self.assertEqual(usluga["mem_limit_bytes"], 536_870_912)
+
+    def test_brak_limitow_to_none_a_nie_zero(self):
+        # Usługi bez limitów są normą (cudze stacki) — zero znaczyłoby „limit
+        # 0 vCPU" i panel liczyłby procent z zera.
+        usluga = self._usluga()
+        self.assertIsNone(usluga["cpu_limit_cores"])
+        self.assertIsNone(usluga["mem_limit_bytes"])
+
+    def test_zerowe_limity_traktujemy_jak_brak(self):
+        usluga = self._usluga(limits={"cpus": 0, "memory": 0})
+        self.assertIsNone(usluga["cpu_limit_cores"])
+        self.assertIsNone(usluga["mem_limit_bytes"])
+
+    def test_sam_limit_pamieci_nie_udaje_limitu_cpu(self):
+        usluga = self._usluga(limits={"memory": 134_217_728})
+        self.assertIsNone(usluga["cpu_limit_cores"])
+        self.assertEqual(usluga["mem_limit_bytes"], 134_217_728)
+
+    def test_helper_liczy_nanocpus_i_odporny_jest_na_smieci(self):
+        self.assertEqual(
+            discovery.service_limits({"Resources": {"Limits": {"NanoCPUs": 250_000_000, "MemoryBytes": 1}}}),
+            (0.25, 1),
+        )
+        # Śmieci (tekst, None, bool) nie mogą udawać limitu ani wywalić odświeżania.
+        for smieci in ({"NanoCPUs": "250000000"}, {"NanoCPUs": None}, {"NanoCPUs": True}, {}):
+            self.assertEqual(discovery.service_limits({"Resources": {"Limits": smieci}}), (None, None), smieci)
+        self.assertEqual(discovery.service_limits(None), (None, None))
 
 
 if __name__ == "__main__":

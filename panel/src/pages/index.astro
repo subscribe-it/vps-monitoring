@@ -142,6 +142,7 @@ import WykresyView from '../components/WykresyView.astro';
   } from '../lib/filtry';
   import { spriteHref } from '../lib/icons';
   import {
+    czyLiczba,
     czyTrasaWykresow,
     doHaszaWykresow,
     etykietyCzasu,
@@ -150,6 +151,7 @@ import WykresyView from '../components/WykresyView.astro';
     formatujPrzeplywnosc,
     graniceWykresu,
     kluczSerii,
+    limitCpuProcent,
     opisCpu,
     opisRam,
     opisSieci,
@@ -1591,20 +1593,37 @@ import WykresyView from '../components/WykresyView.astro';
     interface MetrykiUslugi {
       cpu: number[];
       ram: number[];
+      /** Limit RAM w bajtach (API → fallback na metrykę Prometheusa). */
       limit: number | null;
+      /** Limit CPU w rdzeniach z API (`cpu_limit_cores`); `null` = brak limitu. */
+      limitCpu: number | null;
       rx: number[];
       tx: number[];
     }
 
-    function metrykiUslugi(dane: SerieZbioru, stack: string, usluga: string): MetrykiUslugi {
-      const limitSerii = seriaZ(dane, 'limit', stack, usluga);
-      const limit = limitSerii.length > 0 ? (limitSerii[limitSerii.length - 1] as number) : null;
+    /**
+     * Serie czasowe + limity jednej usługi.
+     *
+     * Kolejność źródeł limitu RAM jest świadoma: najpierw `/status/api.json`
+     * (`mem_limit_bytes` ze spec usługi Swarm — to samo, czym Swarm zabija
+     * kontener), a dopiero gdy API go nie zna, bierzemy metrykę
+     * `swarm_container_memory_limit_bytes` (pochodzi z `docker stats`).
+     * Limit CPU bierzemy wyłącznie z API — metryki go nie mają.
+     */
+    function metrykiUslugi(dane: SerieZbioru, stack: string, usluga: Service): MetrykiUslugi {
+      const limitSerii = seriaZ(dane, 'limit', stack, usluga.name);
+      const limitZMetrki = limitSerii.length > 0 ? (limitSerii[limitSerii.length - 1] as number) : null;
+      const limitZApi = usluga.mem_limit_bytes;
+      const limit = czyLiczba(limitZApi) && limitZApi > 0
+        ? limitZApi
+        : (limitZMetrki !== null && limitZMetrki > 0 ? limitZMetrki : null);
       return {
-        cpu: seriaZ(dane, 'cpu', stack, usluga),
-        ram: seriaZ(dane, 'ram', stack, usluga),
-        limit: limit !== null && limit > 0 ? limit : null,
-        rx: seriaZ(dane, 'rx', stack, usluga),
-        tx: seriaZ(dane, 'tx', stack, usluga),
+        cpu: seriaZ(dane, 'cpu', stack, usluga.name),
+        ram: seriaZ(dane, 'ram', stack, usluga.name),
+        limit,
+        limitCpu: usluga.cpu_limit_cores ?? null,
+        rx: seriaZ(dane, 'rx', stack, usluga.name),
+        tx: seriaZ(dane, 'tx', stack, usluga.name),
       };
     }
 
@@ -1633,6 +1652,11 @@ import WykresyView from '../components/WykresyView.astro';
       const stTx = statystyki(metryki.tx);
       const terazCpu = usluga.cpu_percent ?? stCpu.teraz;
       const terazRam = usluga.mem_bytes ?? stRam.teraz;
+      const limitCpuProc = limitCpuProcent(metryki.limitCpu);
+      const graniceCpu = graniceWykresu(
+        [...metryki.cpu, ...(limitCpuProc === null ? [] : [limitCpuProc])],
+        { odZera: true },
+      );
       const graniceRam = graniceWykresu([
         ...metryki.ram,
         ...(metryki.limit === null ? [] : [metryki.limit]),
@@ -1642,11 +1666,11 @@ import WykresyView from '../components/WykresyView.astro';
       return [
         {
           tytul: 'CPU',
-          liczby: opisCpu(terazCpu, stCpu.maks),
-          statystyki: statystykiCpu(stCpu, terazCpu),
+          liczby: opisCpu(terazCpu, metryki.limitCpu, stCpu.maks),
+          statystyki: statystykiCpu(stCpu, metryki.limitCpu, terazCpu),
           serie: [{ rola: 'wyk-linia', wartosci: metryki.cpu }],
-          limit: null,
-          granice: graniceWykresu(metryki.cpu, { odZera: true }),
+          limit: limitCpuProc === null ? null : [limitCpuProc, limitCpuProc],
+          granice: graniceCpu,
           jednostka: (v) => formatujProcent(v, 1),
           aria: `Zużycie CPU usługi ${usluga.name}`,
         },
@@ -1871,7 +1895,7 @@ import WykresyView from '../components/WykresyView.astro';
 
         const siatka = q<HTMLElement>(karta, '[data-role="wyk-siatka"]');
         if (siatka) {
-          for (const opis of opisFigur(metrykiUslugi(null, para.stack.name, para.usluga.name), para.usluga)) {
+          for (const opis of opisFigur(metrykiUslugi(null, para.stack.name, para.usluga), para.usluga)) {
             const figura = instantiate('tpl-wykres');
             if (!figura) continue;
             rysujFigure(figura, opis, false);
@@ -1908,7 +1932,7 @@ import WykresyView from '../components/WykresyView.astro';
       const czas = etykietyCzasu(zakres, Math.floor(Date.now() / 1000));
       const siatka = q<HTMLElement>(kontener, '[data-role="wyk-duze"]');
       if (siatka) {
-        for (const opis of opisFigur(metrykiUslugi(null, stack, usluga.name), usluga)) {
+        for (const opis of opisFigur(metrykiUslugi(null, stack, usluga), usluga)) {
           const figura = instantiate('tpl-wykres-duzy');
           if (!figura) continue;
           rysujFigure(figura, opis, true);
@@ -1938,7 +1962,7 @@ import WykresyView from '../components/WykresyView.astro';
         if (!znaleziona) return;
         const stack = znaleziona.stack;
         const usluga = znaleziona.usluga;
-        const opisy = opisFigur(metrykiUslugi(dane, stack, usluga.name), usluga);
+        const opisy = opisFigur(metrykiUslugi(dane, stack, usluga), usluga);
         qa<HTMLElement>(kontener, '[data-role="wyk-figura"]').forEach((figura, indeks) => {
           const opis = opisy[indeks];
           if (!opis) return;
@@ -1962,7 +1986,7 @@ import WykresyView from '../components/WykresyView.astro';
         const nazwa = karta.dataset.usluga ?? '';
         const para = pary.find((p) => p.stack.name === stack && p.usluga.name === nazwa);
         if (!para) continue;
-        const opisy = opisFigur(metrykiUslugi(dane, stack, nazwa), para.usluga);
+        const opisy = opisFigur(metrykiUslugi(dane, stack, para.usluga), para.usluga);
         qa<HTMLElement>(karta, '[data-role="wyk-figura"]').forEach((figura, indeks) => {
           const opis = opisy[indeks];
           if (opis) rysujFigure(figura, opis, false);

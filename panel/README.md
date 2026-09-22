@@ -176,7 +176,10 @@ przeskoczyć „ta usługa, ale w 24 h".
 - **Lista** (`#/wykresy`) — karta na każdą usługę widoczną po filtrach
   (filtrowanie i sortowanie per stack działa jak w widoku stanu): CPU, RAM
   (z linią limitu) i sieć rx/tx. Pod każdym wykresem liczby tekstem, np.
-  `RAM: 51,0 MiB / 512,0 MiB · 10,0% limitu · maks. 47,5 MiB`.
+  `RAM: 51,0 MiB / 512,0 MiB · 10,0% limitu · maks. 47,5 MiB` oraz
+  `CPU: 12,00% · limit 0,25 vCPU · 48,0% limitu` (linia limitu także na
+  wykresie CPU — limit z API przeliczamy na procent jednego rdzenia: 0,25 vCPU
+  = 25%).
 - **Szczegóły** (`#/wykresy/<stack>/<usługa>?zakres=…`) — trzy duże wykresy
   z osią czasu (UTC), statystykami (`teraz / maks. / średnia`) oraz przyciskami
   zakresu 1 h / 6 h / 24 h / 7 d. Stan zakresu siedzi w haszu, więc link do
@@ -187,11 +190,13 @@ przeskoczyć „ta usługa, ale w 24 h".
   wszystkie serie jednym `sum by (stack, service) (…)`, a panel wybiera swoją
   usługę. Wynik trzymamy w cache 60 s, więc przełączanie usług nie młóci
   Prometheusa.
-- **Czego NIE pokazujemy**: procentu limitu CPU. Limitu CPU nie ma ani
-  w `/status/api.json`, ani w metrykach (`swarm_container_memory_limit_bytes`
-  dotyczy tylko RAM), więc CPU jest wartością bezwzględną, a brak limitu jest
-  nazwany wprost w interfejsie i w kodzie (`// TODO: [待确认]` w
-  `src/lib/wykresy.ts`). Sieć nie ma limitu z definicji — pokazujemy B/s.
+- **Limity**: CPU i RAM bierzemy z `/status/api.json` (`cpu_limit_cores`,
+  `mem_limit_bytes`) — discovery czyta je ze spec usługi Swarm
+  (`Resources.Limits.NanoCPUs` / `MemoryBytes`), bo metryki znają wyłącznie
+  limit RAM z `docker stats`. Kolejność źródeł dla RAM: API → metryka
+  `swarm_container_memory_limit_bytes` (fallback). Gdy limit jest `null`,
+  interfejs pisze wprost „limit: brak w API" — **nie zgadujemy progu**.
+  Sieć nie ma limitu z definicji, więc pokazujemy B/s.
 - **Rysowanie**: własne `<polyline>` w SVG (jak sparkline w tabeli usług),
   zero zewnętrznych bibliotek; każdy wykres ma `role="img"` i `aria-label`.
 - **Czysta logika** (zakresy, formatowanie, procenty limitów, osie, geometria,

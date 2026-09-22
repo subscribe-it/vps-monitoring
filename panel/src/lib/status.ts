@@ -68,6 +68,13 @@ export interface Service {
   image: string | null;
   cpu_percent: number | null;
   mem_bytes: number | null;
+  /**
+   * Limit CPU z spec usługi Swarm w rdzeniach (`NanoCPUs / 1e9`); `null` =
+   * limit nieustawiony. Potrzebne do „teraz vs limit" na wykresie CPU.
+   */
+  cpu_limit_cores: number | null;
+  /** Limit RAM z spec usługi Swarm w bajtach; `null` = brak limitu. */
+  mem_limit_bytes: number | null;
   restarts_1h: number | null;
   replicas_text: string | null;
 }
@@ -483,6 +490,10 @@ function parseServices(raw: unknown): Service[] {
     image: str(row.image),
     cpu_percent: num(row.cpu_percent),
     mem_bytes: num(row.mem_bytes),
+    // `num()` zamienia brak/None na null — panel dzięki temu mówi „brak limitu",
+    // a nie „0 vCPU" (usługi bez limitów w cudzych stackach są normą).
+    cpu_limit_cores: num(row.cpu_limit_cores),
+    mem_limit_bytes: num(row.mem_limit_bytes),
     restarts_1h: num(row.restarts_1h),
     replicas_text: str(row.replicas_text),
   }));

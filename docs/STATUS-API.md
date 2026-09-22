@@ -26,6 +26,7 @@ w takim przypadku pola uzupełniane są zerami, a `overall` degraduje się do `w
         { "name": "api", "full_name": "ventiplan-prod_api", "state": "ok",
           "desired": 1, "running": 1, "image": "ghcr.io/…:prod",
           "cpu_percent": 1.2, "mem_bytes": 125829120,
+          "cpu_limit_cores": 0.25, "mem_limit_bytes": 536870912,
           "restarts_1h": 0, "replicas_text": "1/1" }
       ] }
   ],
@@ -60,6 +61,14 @@ w takim przypadku pola uzupełniane są zerami, a `overall` degraduje się do `w
   (pomiar na produkcji: 319 px szerokości odzyskane dla wykresów).
 - Pole `tools[].url` wewnętrznych narzędzi jest **względne** (`/grafana`) — dzięki temu
   panel działa niezależnie od domeny.
+- Limity per usługa pochodzą ze spec usługi Swarm
+  (`Spec.TaskTemplate.Resources.Limits`): `cpu_limit_cores` = `NanoCPUs / 1e9`
+  (np. 250000000 → 0.25 vCPU), `mem_limit_bytes` = `MemoryBytes`. **Brak limitu
+  to `null`, nigdy `0`** — panel odróżnia „limit nieustawiony" (pisze wprost
+  „limit: brak w API") od „limit zero", którym nie da się liczyć procentu.
+  Panel używa `mem_limit_bytes` jako pierwszego źródła limit RAM, a metrykę
+  `swarm_container_memory_limit_bytes` (z `docker stats`) tylko jako fallback;
+  limit CPU ma wyłącznie tutaj (metryki go nie wystawiają).
 - Sekcja `security` liczy się z Loki (`LOKI_URL`), bo promtail zbiera journald
   hosta: `ssh_failed_24h` to `count_over_time` linii „Failed password"
   z jednostki `ssh.service`, a `logins_24h` to ostatnie 20 linii „Accepted"

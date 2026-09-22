@@ -8,19 +8,23 @@
  *
  * Skąd dane (sprawdzone na produkcji 22.09.2026):
  *  - `/status/api.json` — wartości BIEŻĄCE per usługa (`cpu_percent`,
- *    `mem_bytes`). Uwaga: API NIE wystawia limitów (ani CPU, ani RAM),
+ *    `mem_bytes`) oraz LIMITY z spec usługi Swarm: `cpu_limit_cores`
+ *    (NanoCPUs / 1e9) i `mem_limit_bytes` (MemoryBytes); `null` = limit
+ *    nieustawiony (nie zero!),
  *  - Prometheus — szeregi czasowe przez `/prometheus/api/v1/query_range`:
  *    `sum by (stack, service) (swarm_container_cpu_percent)`,
- *    `…_memory_bytes`, `…_memory_limit_bytes` (limit RAM jest TYLKO tutaj)
- *    oraz `rate(…_network_receive/transmit_bytes_total[5m])` w B/s.
+ *    `…_memory_bytes`, `…_memory_limit_bytes` oraz
+ *    `rate(…_network_receive/transmit_bytes_total[5m])` w B/s.
  *
- * LIMIT CPU: nie ma go ani w API, ani w metrykach (limity CPU żyją w specyfikacji
- * usługi Swarm i nie są eksportowane). Dlatego CPU pokazujemy jako wartość
- * bezwzględną w procentach, a nie jako „% limitu".
+ * KOLEJNOŚĆ ŹRÓDEŁ LIMITÓW (świadoma, patrz `index.astro`):
+ *  1. RAM — `mem_limit_bytes` z API (to samo, co widzi Swarm w spec usługi),
+ *     a gdy API nie ma limitu, fallback na metrykę `swarm_container_memory_limit_bytes`,
+ *  2. CPU — `cpu_limit_cores` z API przeliczony na procent jednego rdzenia
+ *     (`× 100`, bo `cpu_percent` jest w procentach rdzenia),
+ *  3. brak limitu w API = „limit: brak w API" — nie zgadujemy progu.
  *
- * // TODO: [待确认] limit CPU nie jest wystawiany przez API — pokazujemy %
- * // bezwzględny; gdy discovery zacznie eksportować limit (albo dojdzie metryka
- * // `swarm_service_cpu_limit`), wrócić tutaj i dorysować procent limitu.
+ * Uwaga o jednostkach: `NanoCPUs` 250000000 = 0,25 vCPU = 25% jednego rdzenia,
+ * więc limit na wykresie CPU rysujemy na `cpu_limit_cores * 100` procentach.
  */
 
 /* ------------------------------------------------------------------ *
@@ -128,6 +132,17 @@ export function formatujPrzeplywnosc(bajtyNaSekunde: number | null | undefined, 
   return `${formatujBajty(bajtyNaSekunde, miejsca)}/s`;
 }
 
+/**
+ * Limit CPU w procentach jednego rdzenia (250000000 NanoCPUs → 25).
+ *
+ * `cpu_percent` z Dockera jest w procentach rdzenia, więc tylko po takim
+ * przeliczeniu procent limitu ma sens. Brak limitu → `null`.
+ */
+export function limitCpuProcent(limitCores: number | null | undefined): number | null {
+  if (!czyLiczba(limitCores) || limitCores <= 0) return null;
+  return limitCores * 100;
+}
+
 /** Ile procent limitu zajmuje wartość; brak sensownego limitu → `null`. */
 export function procentLimitu(
   wartosc: number | null | undefined,
@@ -138,15 +153,26 @@ export function procentLimitu(
 }
 
 /**
- * Linia z liczbami pod wykresem CPU.
+ * Linia z liczbami pod wykresem CPU: „teraz … · maks. … · limit 0,25 vCPU · 48%".
  *
- * Limit CPU nie istnieje w danych (patrz nagłówek pliku) — mówimy to wprost,
- * zamiast pokazywać procent, którego nie ma z czego policzyć.
+ * Gdy API nie zna limitu (`cpu_limit_cores` = null), mówimy wprost
+ * „limit: brak w API" — nie zgadujemy progu ani nie liczymy procentu z niczego.
  */
-export function opisCpu(teraz: number | null, maks: number | null = null): string {
+export function opisCpu(
+  teraz: number | null,
+  limitCores: number | null = null,
+  maks: number | null = null,
+): string {
   const czesci = [`teraz ${formatujProcent(teraz)}`];
   if (czyLiczba(maks)) czesci.push(`maks. ${formatujProcent(maks)}`);
-  czesci.push('limit: brak w API');
+  const limitProc = limitCpuProcent(limitCores);
+  if (limitProc === null) {
+    czesci.push('limit: brak w API');
+  } else {
+    czesci.push(`limit ${formatujLiczbe(limitCores as number, 2)} vCPU`);
+    const procent = procentLimitu(teraz, limitProc);
+    czesci.push(procent === null ? 'brak danych o zużyciu' : `${formatujLiczbe(procent, 1)}% limitu`);
+  }
   return czesci.join(' · ');
 }
 
@@ -184,13 +210,21 @@ export function opisSieci(
  * jej nie ma — z serii. Limit CPU nie istnieje w danych, więc zamiast procentu
  * mówimy wprost, że go nie ma.
  */
-export function statystykiCpu(st: Statystyki, teraz: number | null = null): string {
+export function statystykiCpu(
+  st: Statystyki,
+  limitCores: number | null = null,
+  teraz: number | null = null,
+): string {
   const biezace = czyLiczba(teraz) ? teraz : st.teraz;
+  const limitProc = limitCpuProcent(limitCores);
+  const procent = limitProc === null ? null : procentLimitu(biezace, limitProc);
   return [
     `teraz ${formatujProcent(biezace)}`,
     `maks. ${formatujProcent(st.maks)}`,
     `średnia ${formatujProcent(st.srednia)}`,
-    'limit: brak w API',
+    procent === null
+      ? 'limit: brak w API'
+      : `limit ${formatujLiczbe(limitCores as number, 2)} vCPU (${formatujLiczbe(procent, 1)}%)`,
   ].join(' · ');
 }
 

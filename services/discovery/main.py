@@ -984,6 +984,33 @@ def desired_replicas(spec, running_tasks):
     return int(running_tasks or 0)
 
 
+def service_limits(task_template):
+    """Limity zasobów z spec usługi Swarm: `(rdzenie CPU, bajty RAM)`.
+
+    Źródło: `Spec.TaskTemplate.Resources.Limits` — `NanoCPUs` (1e9 = 1 vCPU)
+    i `MemoryBytes`. Panel potrzebuje ich, żeby pokazać „teraz vs limit":
+    wcześniej limitów nie było w API, a metryki znają wyłącznie limit RAM
+    (z `docker stats`) — limit CPU nie miał żadnego źródła.
+
+    Brak limitu zwracamy jako `None`, a NIE jako 0 — inaczej panel pokazałby
+    „0,00 vCPU" i liczył procent z zera. Usługi bez limitów (cudze stacki)
+    są normą, więc to nie jest przypadek brzegowy.
+    """
+    zasoby = as_dict(
+        as_dict(as_dict(task_template, "TaskTemplate").get("Resources"), "Resources usługi").get("Limits"),
+        "Limits usługi",
+    )
+    nano = zasoby.get("NanoCPUs")
+    pamiec = zasoby.get("MemoryBytes")
+    cpu = None
+    if isinstance(nano, (int, float)) and not isinstance(nano, bool) and nano > 0:
+        cpu = float(nano) / 1_000_000_000
+    mem = None
+    if isinstance(pamiec, (int, float)) and not isinstance(pamiec, bool) and pamiec > 0:
+        mem = int(pamiec)
+    return cpu, mem
+
+
 def compute_cpu_percent(stats):
     """Dokładnie jak Docker: (cpu_delta / system_delta) * online_cpus * 100."""
     stats = stats or {}
@@ -1556,6 +1583,9 @@ class DiscoveryService:
                 "failed_1h": stats["failed_1h"],
                 "updated_at": updated.timestamp() if updated else 0.0,
             }
+            # Limity z spec usługi (NanoCPUs/MemoryBytes) — panel pokazuje nimi
+            # „teraz vs limit"; `None` = limit nieustawiony, nie zero.
+            entry["cpu_limit_cores"], entry["mem_limit_bytes"] = service_limits(task_template)
             entry["replicas_text"] = "%d/%d" % (entry["running"], entry["desired"])
             snapshot.services.append(entry)
             snapshot.stacks.setdefault(stack, []).append(entry)
@@ -1805,6 +1835,8 @@ class DiscoveryService:
                         "image": service["image"],
                         "cpu_percent": round(cpu, 2),
                         "mem_bytes": int(memory),
+                        "cpu_limit_cores": service.get("cpu_limit_cores"),
+                        "mem_limit_bytes": service.get("mem_limit_bytes"),
                         "restarts_1h": service["failed_1h"],
                         "replicas_text": service["replicas_text"],
                     }

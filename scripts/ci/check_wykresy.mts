@@ -24,6 +24,7 @@ import {
   formatujPrzeplywnosc,
   graniceWykresu,
   kluczSerii,
+  limitCpuProcent,
   opisCpu,
   opisRam,
   opisSieci,
@@ -110,7 +111,16 @@ rowne(procentLimitu(256, 0), null, 'limit: zero nie daje procentu (nie dzielimy 
 rowne(procentLimitu(256, null), null, 'limit: brak limitu → null');
 rowne(procentLimitu(null, 512), null, 'limit: brak wartości → null');
 
-rowne(opisCpu(3.84, 12.1), 'teraz 3,84% · maks. 12,10% · limit: brak w API', 'opis CPU mówi wprost o braku limitu');
+rowne(opisCpu(3.84, null, 12.1), 'teraz 3,84% · maks. 12,10% · limit: brak w API', 'opis CPU bez limitu mówi o tym wprost');
+// Limit CPU przychodzi z API w rdzeniach (NanoCPUs/1e9), a `cpu_percent` jest
+// w procentach jednego rdzenia — stąd przelicznik ×100 i „% limitu".
+rowne(limitCpuProcent(0.25), 25, 'limit CPU: 0,25 vCPU to 25% jednego rdzenia');
+rowne(limitCpuProcent(null), null, 'limit CPU: brak limitu → null (nie zero)');
+rowne(limitCpuProcent(0), null, 'limit CPU: zero traktujemy jak brak limitu');
+rowne(opisCpu(12, 0.25), 'teraz 12,00% · limit 0,25 vCPU · 48,0% limitu', 'opis CPU: teraz vs limit i procent');
+rowne(opisCpu(50, 0.5, 80), 'teraz 50,00% · maks. 80,00% · limit 0,50 vCPU · 100,0% limitu', 'opis CPU: maks. i limit razem');
+ok(opisCpu(12, 0.25).includes('vCPU'), 'opis CPU: jednostka limitu jest nazwana');
+ok(opisCpu(null, 0.25).includes('brak danych o zużyciu'), 'opis CPU: brak wartości „teraz" nie udaje procentu');
 rowne(opisRam(82599936, 536870912, 90000000), '78,8 MiB / 512,0 MiB · 15,4% limitu · maks. 85,8 MiB', 'opis RAM: teraz/limit i procent');
 ok(opisRam(1, null).includes('brak limitu'), 'opis RAM: bez limitu mówi o tym wprost');
 ok(opisSieci(92.2, 127.1).includes('brak limitu'), 'opis sieci: sieć nie ma limitu');
@@ -127,9 +137,17 @@ rowne(
 rowne(statystyki([5, 5, 5]).srednia, 5, 'statystyki: średnia z płaskiej serii');
 
 const stCpu = statystyki([1, 2, 3]);
-ok(statystykiCpu(stCpu, 2.5).includes('teraz 2,50%'), 'statystyki CPU: „teraz" z API ma pierwszeństwo');
+ok(statystykiCpu(stCpu, null, 2.5).includes('teraz 2,50%'), 'statystyki CPU: „teraz" z API ma pierwszeństwo');
 ok(statystykiCpu(stCpu).includes('teraz 3,00%'), 'statystyki CPU: bez API bierze ostatni punkt');
 ok(statystykiCpu(stCpu).includes('limit: brak w API'), 'statystyki CPU: brak limitu nazwany wprost');
+ok(
+  statystykiCpu(stCpu, 0.25, 12).includes('limit 0,25 vCPU (48,0%)'),
+  'statystyki CPU: limit z API i procent zużycia',
+);
+ok(
+  statystykiCpu(statystyki([50]), 0.25).includes('limit 0,25 vCPU (200,0%)'),
+  'statystyki CPU: przekroczenie limitu pokazujemy jako >100%',
+);
 ok(
   statystykiRam(statystyki([100]), 400, 200).includes('limit 400 B (50,0%)'),
   'statystyki RAM: limit i procent',
