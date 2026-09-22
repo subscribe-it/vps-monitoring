@@ -84,6 +84,11 @@ class Config:
         self.docker_socket = _normalize_docker_host(env.get("DOCKER_HOST", ""))
         self.hc_ping_all_ok = (env.get("HC_PING_ALL_OK", "") or "").strip()
         self.hc_ping_backup = (env.get("HC_PING_BACKUP", "") or "").strip()
+        # Sprawdzenia pomijane w pingach do healthchecks.io (np. `backup`,
+        # dopóki backupy nie są skonfigurowane). Pomijamy je w werdykcie
+        # `all_ok` i w ogóle nie pingujemy ich własnego checka — inaczej
+        # czerwonemu checkowi nie da się „zazielenić" bez naprawy backupu.
+        self.ping_ignored = set(_env_csv(env, "PING_IGNORED_CHECKS", ""))
         self.interval_seconds = _env_float(env, "INTERVAL_SECONDS", 120.0, minimum=10.0)
         self.prometheus_url = (env.get("PROMETHEUS_URL", DEFAULT_PROMETHEUS_URL) or "").rstrip("/")
         self.discovery_url = (env.get("DISCOVERY_URL", DEFAULT_DISCOVERY_URL) or "").rstrip("/")
@@ -1115,7 +1120,8 @@ class HealthPing:
         for name in missing:  # bezpieczeństwo: zawsze komplet wyników
             results[name] = CheckOutcome(False, "sprawdzenie nie zostało wykonane")
 
-        all_ok = all(results[name].ok for name in CHECKS)
+        all_ok = all(results[name].ok for name in CHECKS
+                     if name not in self.config.ping_ignored)
         with self._lock:
             self.results = results
             self.all_ok = all_ok
@@ -1161,12 +1167,16 @@ class HealthPing:
         return all_ok
 
     def send_pings(self, results, all_ok):
-        failing = [name for name in CHECKS if not results[name].ok]
+        failing = [name for name in CHECKS
+                   if not results[name].ok and name not in self.config.ping_ignored]
         if all_ok:
             message = "OK"
         else:
             message = "PROBLEM: " + "; ".join("%s: %s" % (name, results[name].detail) for name in failing)
         self._do_ping("all_ok", self.config.hc_ping_all_ok, all_ok, message)
+        if "backup" in self.config.ping_ignored:
+            log("Ping backupu pominięty — `backup` jest w PING_IGNORED_CHECKS")
+            return
         backup_ok = results["backup"].ok
         self._do_ping(
             "backup",

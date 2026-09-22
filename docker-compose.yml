@@ -461,6 +461,9 @@ services:
       - TZ=${TZ:-Europe/Warsaw}
       - HC_PING_ALL_OK=${HC_PING_ALL_OK:-}
       - HC_PING_BACKUP=${HC_PING_BACKUP:-}
+      # Sprawdzenia pomijane w pingach do healthchecks.io (np. `backup`,
+      # dopóki backupy nie są skonfigurowane) — patrz services/health-ping.
+      - PING_IGNORED_CHECKS=${PING_IGNORED_CHECKS:-}
       - INTERVAL_SECONDS=${HEALTH_PING_INTERVAL_SECONDS:-120}
       - PROMETHEUS_URL=http://prometheus:9090
       - DISCOVERY_URL=http://discovery:8080
