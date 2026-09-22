@@ -54,8 +54,14 @@ def klient(url, klucz):
         req = urllib.request.Request(baza + sciezka, data=cialo, method=metoda, headers=naglowki)
         try:
             with urllib.request.urlopen(req, timeout=30, context=kontekst) as odp:
-                tresc = odp.read().decode("utf-8", "replace")
-                if surowy or not tresc.strip():
+                bajty = odp.read()
+                if surowy:
+                    # Logi Dockera to strumień z ramkami binarnymi — dekodowanie
+                    # ich do tekstu psuje długości ramek (bajty >127 stają się
+                    # znakami zastępczymi i licznik się rozjeżdża).
+                    return odp.status, bajty
+                tresc = bajty.decode("utf-8", "replace")
+                if not tresc.strip():
                     return odp.status, tresc
                 try:
                     return odp.status, json.loads(tresc)
