@@ -145,7 +145,14 @@ services:
       - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?Ustaw GRAFANA_ADMIN_PASSWORD w env stacka}
       - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_AUTH_ANONYMOUS_ENABLED=false
+      # Prometheus zbiera `/metrics` Grafany, a Grafana nie podaje metryk bez
+      # uwierzytelnienia (401 → alerty ScrapeTargetDown i GrafanaDown, zmierzone).
+      # Dostęp anonimowy = rola Viewer, ale WYŁĄCZNIE wewnątrz naszej domeny:
+      # router `/grafana` stoi za ForwardAuth, więc najpierw trzeba się zalogować
+      # do panelu. Użytkownicy z nagłówkiem X-User (czyli po naszym auth) dostają
+      # swoją rolę jak dotąd.
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
       - GF_SERVER_ROOT_URL=https://${MONITORING_DOMAIN:-monitoring.subscribeit.pl}/grafana
       - GF_SERVER_SERVE_FROM_SUB_PATH=true
       - GF_SECURITY_ALLOW_EMBEDDING=true
