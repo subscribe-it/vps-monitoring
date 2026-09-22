@@ -12,23 +12,39 @@ permissions:
 
 jobs:
   deploy:
-    name: Wywołanie webhooka Portainera
+    name: Redeploy stacku w Portainerze
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     steps:
-      - name: Sprawdzenie sekretu
+      - uses: actions/checkout@v4
+
+      - name: Sprawdzenie sekretów
         id: check
         run: |
-          if [ -z "${{ secrets.PORTAINER_MONITORING_WEBHOOK }}" ]; then
-            echo "::warning::Brak sekretu PORTAINER_MONITORING_WEBHOOK — pomijam wdrożenie. Dodaj go w Settings → Secrets and variables → Actions, aby włączyć automatyczny redeploy."
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "ready=true" >> "$GITHUB_OUTPUT"
+          tryb=brak
+          if [ -n "${{ secrets.PORTAINER_URL }}" ] && [ -n "${{ secrets.PORTAINER_API_KEY }}" ]; then
+            tryb=api
+          elif [ -n "${{ secrets.PORTAINER_MONITORING_WEBHOOK }}" ]; then
+            tryb=webhook
+          fi
+          echo "tryb=$tryb" >> "$GITHUB_OUTPUT"
+          echo "Tryb wdrożenia: $tryb"
+          if [ "$tryb" = "brak" ]; then
+            echo "::warning::Brak danych do wdrożenia — pomijam. Dodaj sekrety PORTAINER_URL i PORTAINER_API_KEY (zalecane: pozwalają też sprawdzić i wystartować stack), albo PORTAINER_MONITORING_WEBHOOK."
+          elif [ "$tryb" = "webhook" ]; then
+            echo "::notice::Tryb webhooka. Zalecane PORTAINER_URL + PORTAINER_API_KEY — pozwalają sprawdzić ścieżkę compose i wystartować stack, nie tylko wywołać redeploy."
           fi
 
-      - name: Wywołanie webhooka (pull + redeploy stacku)
+      - name: Redeploy przez API Portainera (zalecane)
+        if: steps.check.outputs.tryb == 'api'
+        env:
+          PORTAINER_URL: ${{ secrets.PORTAINER_URL }}
+          PORTAINER_API_KEY: ${{ secrets.PORTAINER_API_KEY }}
+        run: python3 scripts/portainer/bootstrap.py --start --redeploy --pull
+
+      - name: Wywołanie webhooka (tryb zapasowy)
         id: hook
-        if: steps.check.outputs.ready == 'true'
+        if: steps.check.outputs.tryb == 'webhook'
         run: |
           code=$(curl -s -o /tmp/hook.out -w '%{http_code}' --max-time 180 \
             -X POST "${{ secrets.PORTAINER_MONITORING_WEBHOOK }}")
@@ -54,7 +70,7 @@ jobs:
           exit 1
 
       - name: Smoke test łańcucha publicznego (oczekujemy 401 = usługa żyje, wymaga logowania)
-        if: steps.check.outputs.ready == 'true'
+        if: steps.check.outputs.tryb != 'brak'
         run: |
           for i in $(seq 1 24); do
             code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 https://monitoring.subscribeit.pl/ || true)
@@ -66,7 +82,7 @@ jobs:
           exit 1
 
       - name: Powiadomienie o niepowodzeniu
-        if: failure() && steps.check.outputs.ready == 'true'
+        if: failure() && steps.check.outputs.tryb != 'brak'
         run: |
           if [ -n "${{ secrets.NOTIFIER_TOKEN }}" ]; then
             curl -s --max-time 15 -X POST "https://monitoring.subscribeit.pl/status/alert" \

@@ -181,7 +181,7 @@ jobs:
           python-version: '3.13'
       - name: Kompilacja i testy
         run: |
-          python3 -m compileall -q services
+          python3 -m compileall -q services scripts
           python3 -m unittest discover -s tests -v
 
   panel:

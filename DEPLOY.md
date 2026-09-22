@@ -46,14 +46,35 @@ GitHub → Settings → Developer settings → **Fine-grained token**:
 | `HC_PING_ALL_OK`, `HC_PING_MONITORING`, `HC_PING_BACKUP` | healthchecks.io → trzy checki typu **Simple**: `vps-all-ok` (5 min/5 min), `monitoring-alive` (5 min/5 min), `backup-ventiplan` (1 dzień/2 h) → skopiuj ping URL-e |
 | `NOTIFIER_TOKEN` | dowolny długi losowy ciąg |
 
-## 5. Webhook deployu
+## 5. Sterowanie stackiem z Akcji (zalecane)
 
-1. Portainer → stack `monitoring` → **Webhooks → Add webhook** → skopiuj URL.
-2. GitHub → repo → Settings → Secrets → Actions → **`PORTAINER_MONITORING_WEBHOOK`**.
-3. Opcjonalnie dodaj `NOTIFIER_TOKEN` (ten sam co w env), żeby dostawać powiadomienie o nieudanym deployu.
+Publiczny webhook stacka da się utworzyć **tylko w UI** Portainera (API 2.33 nie ma
+trasy tworzącej webhook stacka — sprawdzone w źródłach i na żywym Portainerze).
+Dlatego zalecana droga to klucz API, który pozwala z Akcji zrobić więcej:
 
-Od tego momentu **każdy push do `main`** przechodzi przez:
-`validate` → `build images` → `webhook Portainera` → `smoke test (oczekiwany kod 401)`.
+1. Portainer → **My account → Access tokens → Add access token** → skopiuj token.
+2. GitHub → repo → Settings → Secrets → Actions:
+   - **`PORTAINER_URL`** — np. `https://57.129.41.248:9443` (albo `http://…:9000`),
+   - **`PORTAINER_API_KEY`** — token z punktu 1.
+3. Uruchom workflow **Portainer (stack monitoring)** z akcją `check` — powie, czy
+   stack istnieje, czy działa i **na jaki plik compose wskazuje**.
+
+> **Uwaga, częsta pułapka:** ścieżkę compose ustawia się **tylko przy tworzeniu
+> stacka**. Jeśli stack wskazuje np. na `portainer-complete-stack.yml` (stara
+> nazwa, usunięta z repo), to redeploy się nie powiedzie, a API tego nie poprawi —
+> trzeba usunąć stack i utworzyć go ponownie z `Compose path: docker-compose.yml`.
+> Workflow `Portainer (stack monitoring)` → `check` wykrywa to i mówi wprost.
+
+Od tego momentu każdy push do `main` przechodzi przez:
+`validate` → `build images` → **redeploy stacku przez API Portainera** →
+`smoke test (oczekiwany kod 401)`.
+
+Tryb zapasowy (jeśli wolisz webhook): stack → **Webhooks → Add webhook** → URL do
+sekretu `PORTAINER_MONITORING_WEBHOOK`. Workflow użyje go tylko wtedy, gdy nie ma
+`PORTAINER_URL`/`PORTAINER_API_KEY`.
+
+Opcjonalnie dodaj `NOTIFIER_TOKEN` (ten sam co w env), żeby dostawać powiadomienie
+o nieudanym deployu.
 
 ## 6. Weryfikacja po wdrożeniu
 

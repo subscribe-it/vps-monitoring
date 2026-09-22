@@ -25,6 +25,8 @@ Zasada: jeśli czegoś tu nie ma, nie zakładaj, że działa — sprawdź.
 | Tytuł ntfy z znakami spoza latin-1 | realny ntfy.sh, tytuł z „—" i „ł" | **przed poprawką**: `UnicodeEncodeError` przed wysłaniem → alert nie dochodził; po: `HTTP 200` |
 | Serwer SMTP (OVH) | surowy `EHLO` na `ssl0.ovh.net:465` i `:587` | `8BITMIME`, `AUTH LOGIN PLAIN`, `SIZE 100 MB`; TLS 1.3 (465) / 1.2 (587) — treść 8bit i polskie znaki są poprawne |
 | Temat e-maila z polskimi znakami | serializacja jak `smtplib.send_message` i odczyt z powrotem | `Subject` jako RFC 2047 (`=?utf-8?b?…?=`), po odczytaniu **znak w znak** równy oryginałowi |
+| API Portainera (sterowanie stackiem) | żywy Portainer 2.33 lokalnie: `--check`, `--start`, `--redeploy`, złe ścieżki | stack znaleziony, `Env` (2 zmienne) przekazane do redeployu, stop → `--start` → HTTP 200 i status 1, zła ścieżka compose → kod 2 z instrukcją |
+| Trasy API Portainera 2.33 | źródła Portainera (rejestracja tras) + próby na żywym API | start/stop wymagają `?endpointId`; webhooka **stacka** nie da się utworzyć przez API (tylko UI); `/api/webhooks` dotyczy usług Swarm, nie stacków; ścieżka compose jest niezmienialna po utworzeniu |
 | Kontrakt healthchecks.io | `POST` na `hc-ping.com/<losowy-uuid>` | `HTTP 400 invalid url format` → literówka w UUID zawodzi głośno, a nie cicho |
 | Watchdog healthchecks.io | atrapa hc.io | `POST /ping/<uuid>` z treścią |
 | Blackbox: moduły sond | `probe?module=…` na żywym eksporterze | `http_expect_auth` 401→sukces, 200→porażka; `tcp_connect`; certyfikaty |

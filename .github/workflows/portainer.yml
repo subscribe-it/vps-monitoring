@@ -1,0 +1,63 @@
+# Sterowanie stackiem `monitoring` w Portainerze przez API.
+#
+# Po co: publiczny webhook stacka da się utworzyć tylko w UI Portainera, a my
+# chcemy, żeby wszystko szło z Akcji. Uwierzytelnione API Portainera pozwala
+# zrobić więcej niż webhook: sprawdzić, na jaki plik compose wskazuje stack,
+# wystartować go i wymusić redeploy z Gita.
+#
+# Wymagane sekrety (Settings → Secrets and variables → Actions):
+#   PORTAINER_URL      np. https://57.129.41.248:9443  (albo http://…:9000)
+#   PORTAINER_API_KEY  Portainer → My account → Access tokens → Add access token
+#
+# Nic nie dzieje się automatycznie — workflow uruchamiasz ręcznie.
+name: Portainer (stack monitoring)
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Co zrobić ze stackiem"
+        required: true
+        default: check
+        type: choice
+        options:
+          - check
+          - start
+          - redeploy
+          - start-and-redeploy
+
+permissions:
+  contents: read
+
+jobs:
+  stack:
+    name: Stack monitoring (${{ inputs.action }})
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sprawdzenie sekretów
+        run: |
+          brak=0
+          [ -n "${{ secrets.PORTAINER_URL }}" ] || { echo "::error::Brak sekretu PORTAINER_URL"; brak=1; }
+          [ -n "${{ secrets.PORTAINER_API_KEY }}" ] || { echo "::error::Brak sekretu PORTAINER_API_KEY (Portainer → My account → Access tokens)"; brak=1; }
+          [ "$brak" -eq 0 ] || exit 1
+
+      - name: Działanie na stacku
+        env:
+          PORTAINER_URL: ${{ secrets.PORTAINER_URL }}
+          PORTAINER_API_KEY: ${{ secrets.PORTAINER_API_KEY }}
+        run: |
+          set -o pipefail
+          args=""
+          case "${{ inputs.action }}" in
+            start)              args="--start" ;;
+            redeploy)           args="--redeploy --pull" ;;
+            start-and-redeploy) args="--start --redeploy --pull" ;;
+          esac
+          python3 scripts/portainer/bootstrap.py $args
+          kod=$?
+          if [ "$kod" -eq 2 ]; then
+            echo "::error::Stack wskazuje zły plik compose. Wejdź w Portainer → Stacks → monitoring i ustaw compose path na docker-compose.yml (API nie pozwala tego zmienić)."
+          fi
+          exit "$kod"
