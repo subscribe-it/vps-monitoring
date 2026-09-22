@@ -139,6 +139,11 @@ jobs:
           exit 1
 
       # Smoke test skrócony do ~2 min: job, który śpi, też zajmuje minuty.
+      # Sam kod 401 na domenie to za mało: 22.09.2026 wdrożenie było
+      # „udane” przy stacku z zerem usług. Ten krok pyta Swarma wprost.
+      - name: Kontrola kompletności stacku (12 usług z pełnymi replikami)
+        run: python3 scripts/ci/check_stack.py
+
       - name: Smoke test (oczekujemy 401 = usługa żyje, wymaga logowania)
         if: steps.check.outputs.tryb != 'brak'
         run: |
