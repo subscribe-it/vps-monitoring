@@ -50,6 +50,15 @@ def main() -> int:
         if any("traefik." in l for l in w_deploy) and not any(l.startswith("traefik.enable=true") for l in w_deploy):
             bledy.append(f"{nazwa}: labelki Traefika bez traefik.enable=true")
 
+        # Odwołania do middleware BEZ sufiksu `@provider`. Zmierzone na tym rojniku:
+        # nasze odwołania z `@swarm` dawały w Traefiku „middleware does not exist"
+        # (router wywalony → domena 404), a działające aplikacje — także te
+        # odwołujące się do middleware z innej usługi — używają nazwy bez sufiksu.
+        for etykieta in w_deploy:
+            if ".middlewares=" in etykieta and "@" in etykieta.split("=", 1)[1]:
+                bledy.append(f"{nazwa}: odwołanie do middleware z sufiksem @provider "
+                             f"({etykieta.split('=', 1)[1]}) — na tym rojniku działają nazwy bez sufiksu")
+
     if bledy:
         for b in bledy:
             print(f"  ✗ {b}")

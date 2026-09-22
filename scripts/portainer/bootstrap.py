@@ -181,6 +181,8 @@ def main() -> int:
     p.add_argument("--spec", metavar="WZORZEC",
                    help="wersja usługi, ForceUpdate i stan zdrowia kontenerów zadań (kto aktualizuje usługę)")
     p.add_argument("--sieci", action="store_true", help="lista sieci w rojniku (nazwy, naprawdę widziane przez Docker)")
+    p.add_argument("--backup", metavar="PLIK",
+                   help="zapisz kopię konfiguracji i zmiennych stacka (uprawnienia 600, ZAWIERA SEKRETY)")
     p.add_argument("--labelki", metavar="WZORZEC",
                    help="pokaż labelki traefik.* usługi pasującej do wzorca (co naprawdę dostał Traefik)")
     args = p.parse_args()
@@ -285,6 +287,27 @@ def main() -> int:
             sieci_uslugi = [nazwy.get(n.get("Target"), n.get("Target", "?"))
                             for n in ((spec.get("TaskTemplate") or {}).get("Networks") or [])]
             print(f"    {spec.get('Name'):38s} {', '.join(sieci_uslugi)}")
+
+    if args.backup:
+        # Kopia na wypadek pomyłki: konfiguracja stacka + jego zmienne środowiskowe
+        # (te istnieją TYLKO w Portainerze — repo ich nie ma). Plik zawiera sekrety,
+        # więc zapisujemy go z uprawnieniami 600 i NIE pokazujemy wartości.
+        import datetime
+        import pathlib as _p
+        kopia = {
+            "kiedy": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+            "portainer": url,
+            "stack": {k: v for k, v in stack.items() if k != "Env"},
+            "env": stack.get("Env") or [],
+        }
+        sciezka = _p.Path(args.backup).expanduser()
+        sciezka.parent.mkdir(parents=True, exist_ok=True)
+        zapis = sciezka.open("w", encoding="utf-8")
+        os.chmod(sciezka, 0o600)
+        with zapis:
+            json.dump(kopia, zapis, ensure_ascii=False, indent=2, default=str)
+        print(f"  ✓ kopia: {sciezka} (uprawnienia 600, {len(kopia['env'])} zmiennych, id={sid})")
+        print("    plik zawiera SEKRETY — trzymaj poza repozytorium")
 
     if args.labelki:
         filtr = urllib.parse.quote(json.dumps({"name": [args.labelki]}))
