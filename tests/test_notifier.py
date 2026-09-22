@@ -315,7 +315,7 @@ class EmailDecisionTests(unittest.TestCase):
         self.assertEqual(status, "skipped")
         self.assertIn("NTFY_TOPIC", detail)
 
-    def test_send_ntfy_headers_and_body(self):
+    def test_send_ntfy_json_payload(self):
         sent = {}
 
         def poster(url, body, headers, timeout):
@@ -329,12 +329,43 @@ class EmailDecisionTests(unittest.TestCase):
             poster,
         )
         self.assertEqual(status, "sent")
-        self.assertEqual(sent["url"], "https://ntfy.sh/monitoring")
-        self.assertEqual(sent["headers"]["Title"], "[CRITICAL] A · b")
-        self.assertEqual(sent["headers"]["Priority"], "urgent")
-        self.assertEqual(sent["headers"]["Tags"], "rotating_light")
+        # Temat jedzie w treści (JSON API), nie w ścieżce URL.
+        self.assertEqual(sent["url"], "https://ntfy.sh")
+        self.assertEqual(sent["headers"]["Content-Type"], "application/json")
         self.assertEqual(sent["headers"]["Authorization"], "Bearer tk_123")
-        self.assertEqual(sent["body"], "treść")
+        dane = json.loads(sent["body"])
+        self.assertEqual(dane["topic"], "monitoring")
+        self.assertEqual(dane["title"], "[CRITICAL] A · b")
+        self.assertEqual(dane["message"], "treść")
+        self.assertEqual(dane["priority"], 5)  # JSON API nie zna nazw priorytetów
+        self.assertEqual(dane["tags"], ["rotating_light"])
+
+    def test_send_ntfy_survives_non_latin1_title(self):
+        """Regresja: nagłówki HTTP są kodowane latin-1, więc tytuł z „—" albo „ł"
+        wywalał UnicodeEncodeError PRZED wysłaniem i alert nie dochodził.
+        Poster poniżej koduje tak jak urllib — na starym kodzie ten test pada."""
+
+        def urllib_like_poster(url, body, headers, timeout):
+            for nazwa, wartosc in headers.items():
+                str(wartosc).encode("latin-1")  # tak robi urllib.request
+            str(body).encode("utf-8")
+            return 200
+
+        tytul = "[CRITICAL] Baza — zażółć gęślą jaźń ł · produkcja"
+        status, detail = notifier.send_ntfy(
+            {"title": tytul, "priority": "min", "tags": "warning", "body": "b"},
+            make_config(),
+            urllib_like_poster,
+        )
+        self.assertEqual(status, "sent", detail)
+
+    def test_ntfy_priority_int_mapping(self):
+        for nazwa, liczba in [("urgent", 5), ("max", 5), ("high", 4), ("default", 3), ("low", 2), ("min", 1)]:
+            self.assertEqual(notifier.ntfy_priority_int(nazwa), liczba, nazwa)
+        self.assertEqual(notifier.ntfy_priority_int("4"), 4)   # liczba jako tekst
+        self.assertEqual(notifier.ntfy_priority_int("9"), 5)   # przycięcie do zakresu
+        self.assertEqual(notifier.ntfy_priority_int("bzdura"), 3)  # nieznane -> default
+        self.assertEqual(notifier.ntfy_priority_int(""), 3)
 
     def test_send_ntfy_without_token_has_no_authorization(self):
         sent = {}

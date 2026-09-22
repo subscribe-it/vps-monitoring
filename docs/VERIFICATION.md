@@ -20,7 +20,12 @@ Zasada: jeśli czegoś tu nie ma, nie zakładaj, że działa — sprawdź.
 | Ruler faktycznie wczytał reguły | `scripts/ci/check_ruler_loaded.py` przeciw działającemu Loki | 15 reguł w 4 grupach = dokładnie tyle, ile w plikach |
 | Potok access logu Traefika | prawdziwy plik → promtail (`| json`) → Loki | zapytanie reguły zwraca 4 błędy z 7 wpisów (kontrola negatywna OK) |
 | Journald → Loki | promtail z realnym journalem | strumienie `{job="journald", transport="kernel"}`, `unit=…` |
-| Kanał ntfy | atrapa serwera ntfy | `Title`, `Priority: urgent`, `Authorization: Bearer`, treść grupowa |
+| Kanał ntfy | atrapa serwera ntfy | temat i tytuł w treści JSON, `priority` jako liczba, `Authorization: Bearer`, treść grupowa |
+| Kanał ntfy — **prawdziwy ntfy.sh** | `tests/integration/verify_ntfy_real.py`: notifier publikuje, test czyta wiadomości z powrotem i porównuje | 4/4 dotarło, priorytety 5/2/1 dokładnie jak w konfiguracji, tytuły bez zniekształceń (także `Baza—zażółćłóśźż`) |
+| Tytuł ntfy z znakami spoza latin-1 | realny ntfy.sh, tytuł z „—" i „ł" | **przed poprawką**: `UnicodeEncodeError` przed wysłaniem → alert nie dochodził; po: `HTTP 200` |
+| Serwer SMTP (OVH) | surowy `EHLO` na `ssl0.ovh.net:465` i `:587` | `8BITMIME`, `AUTH LOGIN PLAIN`, `SIZE 100 MB`; TLS 1.3 (465) / 1.2 (587) — treść 8bit i polskie znaki są poprawne |
+| Temat e-maila z polskimi znakami | serializacja jak `smtplib.send_message` i odczyt z powrotem | `Subject` jako RFC 2047 (`=?utf-8?b?…?=`), po odczytaniu **znak w znak** równy oryginałowi |
+| Kontrakt healthchecks.io | `POST` na `hc-ping.com/<losowy-uuid>` | `HTTP 400 invalid url format` → literówka w UUID zawodzi głośno, a nie cicho |
 | Watchdog healthchecks.io | atrapa hc.io | `POST /ping/<uuid>` z treścią |
 | Blackbox: moduły sond | `probe?module=…` na żywym eksporterze | `http_expect_auth` 401→sukces, 200→porażka; `tcp_connect`; certyfikaty |
 | Grafana: provisioning | uruchomiona Grafana | 4 dashboardy, `database: ok` |

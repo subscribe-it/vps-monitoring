@@ -75,6 +75,7 @@ wszystkie walidacje statyczne — patrz `docs/VERIFICATION.md`):
 python3 scripts/ci/check_loki_regex.py     # wzorce, które w Loki dopasują NIC
 python3 tests/integration/verify_log_patterns.py   # każda gałąź regexu vs realna linia (wymaga Loki)
 LOKI_URL=… python3 scripts/ci/check_ruler_loaded.py # ile reguł ruler FAKTYCZNIE wczytał
+python3 tests/integration/verify_ntfy_real.py       # prawdziwy ntfy.sh: czy powiadomienie dochodzi (wymaga internetu)
 ```
 
 Uwagi do środowiska lokalnego: `discovery` potrzebuje **menedżera Swarma** (na zwykłym

@@ -78,3 +78,18 @@ Nadpisania per usługa (labele w Portainerze):
 Wszystko trafia do telefonu, ale **hałasuje wyłącznie `critical`** — ostrzeżenie
 o 3:00 w nocy ma poczekać do rana i być widoczne.
 - `none` — tylko watchdog (nie jest awarią)
+
+## Jak wychodzą powiadomienia (i dlaczego tak)
+
+**ntfy: publikacja JSON-em, nie nagłówkami.** Notifier robi `POST` na adres
+serwera z treścią `{"topic", "title", "message", "priority", "tags"}`. Powód jest
+zmierzony: nagłówki HTTP koduje się jako latin-1, więc tytuł z „·" docierał jako
+znak zastępczy, a tytuł z „—" albo polską literą wywalał `UnicodeEncodeError`
+**przed wysłaniem** — alert krytyczny nie dochodził wcale. JSON jest UTF-8.
+Priorytet w JSON API musi być **liczbą** 1–5 (nazwa `urgent`/`low`/`min` kończy
+się `HTTP 400`), więc `NTFY_PRIORITY_*` z konfiguracji jest tłumaczone na liczbę.
+
+**E-mail:** `EmailMessage` + `send_message`, temat kodowany jako RFC 2047 (polskie
+znaki w tytule alertu przechodzą bez zmian), treść jako UTF-8 8bit — serwer OVH
+na 465 i 587 ogłasza `8BITMIME`, więc to poprawne.
+

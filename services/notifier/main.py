@@ -300,6 +300,19 @@ def ntfy_priority(severity, config):
     return config.ntfy_priority_info or "min"
 
 
+# Nazwy priorytetów ntfy -> liczby. JSON API przyjmuje WYŁĄCZNIE liczby:
+# wysłanie `"priority": "urgent"` kończy się HTTP 400 (zmierzone na ntfy.sh).
+NTFY_PRIORYTETY = {"max": 5, "urgent": 5, "high": 4, "default": 3, "normal": 3, "low": 2, "min": 1}
+
+
+def ntfy_priority_int(priority):
+    """Nazwa priorytetu z konfiguracji -> liczba 1–5 wymagana przez JSON API."""
+    tekst = str(priority or "").strip().lower()
+    if tekst.isdigit():
+        return min(5, max(1, int(tekst)))
+    return NTFY_PRIORYTETY.get(tekst, 3)
+
+
 def ntfy_tags(group, severity):
     if group.status == "resolved":
         return "white_check_mark"
@@ -417,20 +430,34 @@ def http_post(url, body, headers=None, timeout=10.0, method="POST"):
 
 
 def send_ntfy(message, config, poster=None):
-    """('sent'|'failed'|'skipped', szczegóły)."""
+    """('sent'|'failed'|'skipped', szczegóły).
+
+    Wysyłka idzie przez JSON API ntfy (POST na root, temat w treści), a NIE przez
+    nagłówki. Powód zmierzony na prawdziwym ntfy.sh: nagłówki HTTP koduje się
+    jako latin-1, więc tytuł z „·" docierał jako znak zastępczy, a tytuł
+    z „—" albo polską literą (np. „ł") wywalał `UnicodeEncodeError` PRZED
+    wysłaniem — czyli powiadomienie krytyczne nie dochodziło wcale.
+    Treść JSON jest UTF-8, więc wszystko przechodzi bez zmian.
+    """
     if not config.ntfy_topic:
         return "skipped", "NTFY_TOPIC nie jest ustawione"
     poster = poster or http_post
-    url = "%s/%s" % (config.ntfy_url.rstrip("/"), urllib.parse.quote(config.ntfy_topic))
-    headers = {
-        "Title": message["title"],
-        "Priority": str(message["priority"]),
-        "Tags": message["tags"],
+    payload = {
+        "topic": config.ntfy_topic,
+        "title": message["title"],
+        "message": message["body"],
+        # JSON API nie zna nazw priorytetów — tylko liczby (inaczej HTTP 400).
+        "priority": ntfy_priority_int(message["priority"]),
     }
+    if message.get("tags"):
+        payload["tags"] = [message["tags"]]
+    headers = {"Content-Type": "application/json"}
     if config.ntfy_token:
         headers["Authorization"] = "Bearer %s" % config.ntfy_token
+    url = config.ntfy_url.rstrip("/")
     try:
-        status = poster(url, message["body"], headers, config.timeout)
+        body = json.dumps(payload, ensure_ascii=False)
+        status = poster(url, body, headers, config.timeout)
     except Exception as exc:  # noqa: BLE001 - kanał nie może wywalić całości
         log_error("ntfy: wysyłka nie powiodła się: %s", exc)
         return "failed", str(exc)
