@@ -60,7 +60,7 @@ jobs:
           echo "Ustawiono: $ile z $(echo "$pakiety" | wc -l)"
           if [ "$ile" -eq 0 ]; then
             {
-              echo "### Pakiety zostały prywatne — potrzebna jedna z dwóch rzeczy"
+              echo "### Pakiety zostały prywatne — potrzebne jedno z trzech wyjść"
               echo
               echo "**A. Token do tego workflow (jednorazowo).** Utwórz klasyczny PAT z zakresem \`write:packages\`"
               echo "i dodaj go jako sekret \`GHCR_ADMIN_TOKEN\` w tym repo, potem uruchom ten workflow ponownie."
