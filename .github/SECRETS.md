@@ -49,7 +49,7 @@ wyjścia — wybierz jedno:
 
 | Wyjście | Co zrobić | Pakiety |
 | --- | --- | --- |
-| **C. Rejestr w Portainerze — zalecane** | Portainer → **Registries → Add registry → Custom**: URL `ghcr.io`, użytkownik `DawidXXX`, hasło = PAT (wystarczy `read:packages`, wystarczy też `write:packages`). Portainer przekazuje te poświadczenia przy deployu stacka w Swarmie (`DeploySwarmStack(..., registries, ...)` — sprawdzone w źródłach 2.33) | zostają prywatne |
+| **C. Rejestr w Portainerze — zalecane** | Portainer → **Registries → Add registry → Custom**: URL `ghcr.io`, użytkownik `Dawid268`, hasło = PAT (wystarczy `read:packages`, wystarczy też `write:packages`). Portainer przekazuje te poświadczenia przy deployu stacka w Swarmie (`DeploySwarmStack(..., registries, ...)` — sprawdzone w źródłach 2.33) | zostają prywatne |
 | **B. UI** | organizacja → **Packages** → pakiet → **Package settings** → Danger Zone → **Change visibility** (11 pakietów, ręcznie) | stają się publiczne |
 | **A. Ten sekret** | klasyczny PAT z `write:packages` → sekret `GHCR_ADMIN_TOKEN` → workflow `Package visibility` | **nie zadziałało** (patrz niżej) |
 
