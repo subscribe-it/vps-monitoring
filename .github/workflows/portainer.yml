@@ -27,6 +27,7 @@ on:
           - logi
           - labelki
           - sieci
+          - spec
           - start
           - redeploy
           - start-and-redeploy
@@ -73,6 +74,7 @@ jobs:
             logi)               args=(--logi "$WZORZEC" --linii "${LINIE:-60}") ;;
             labelki)            args=(--labelki "$WZORZEC") ;;
             sieci)              args=(--sieci) ;;
+            spec)               args=(--spec "$WZORZEC") ;;
             start)              args=(--start) ;;
             redeploy)           args=(--redeploy --pull) ;;
             start-and-redeploy) args=(--start --redeploy --pull) ;;

@@ -178,6 +178,8 @@ def main() -> int:
     p.add_argument("--logi", metavar="WZORZEC",
                    help="pokaż ostatnie linie logów usługi pasującej do wzorca (dowolny stack)")
     p.add_argument("--linii", type=int, default=40, help="ile linii logu (domyślnie 40)")
+    p.add_argument("--spec", metavar="WZORZEC",
+                   help="wersja usługi, ForceUpdate i stan zdrowia kontenerów zadań (kto aktualizuje usługę)")
     p.add_argument("--sieci", action="store_true", help="lista sieci w rojniku (nazwy, naprawdę widziane przez Docker)")
     p.add_argument("--labelki", metavar="WZORZEC",
                    help="pokaż labelki traefik.* usługi pasującej do wzorca (co naprawdę dostał Traefik)")
@@ -238,6 +240,29 @@ def main() -> int:
     if args.uslugi:
         print()
         pokaz_uslugi(api, eid, args.stack)
+
+    if args.spec:
+        filtr = urllib.parse.quote(json.dumps({"name": [args.spec]}))
+        kod, uslugi = api("GET", f"/api/endpoints/{eid}/docker/services?filters={filtr}")
+        if kod != 200 or not uslugi:
+            print(f"  ✗ nie znalazłem usługi „{args.spec}”")
+        for u in (uslugi or [])[:3]:
+            nazwa = (u.get("Spec") or {}).get("Name")
+            wersja = (u.get("Version") or {}).get("Index")
+            force = ((u.get("Spec") or {}).get("TaskTemplate") or {}).get("ForceUpdate")
+            print(f"\n  --- {nazwa}: Version.Index={wersja}, ForceUpdate={force} ---")
+            filtr2 = urllib.parse.quote(json.dumps({"service": {"ID": u.get("ID")}}))
+            _k, zadania = api("GET", f"/api/endpoints/{eid}/docker/tasks?filters={filtr2}")
+            for z in sorted(zadania or [], key=lambda x: (x.get("CreatedAt") or ""), reverse=True)[:5]:
+                st = z.get("Status") or {}
+                kont = (st.get("ContainerStatus") or {}).get("ContainerID")
+                zdrowie = ""
+                if kont:
+                    _kk, c = api("GET", f"/api/endpoints/{eid}/docker/containers/{kont}/json")
+                    if isinstance(c, dict):
+                        h = ((c.get("State") or {}).get("Health") or {})
+                        zdrowie = " health=%s (%d prób)" % (h.get("Status"), h.get("FailingStreak") or 0)
+                print(f"    {st.get('State'):9s} desired={z.get('DesiredState'):9s} @{(z.get('CreatedAt') or '')[11:19]}{zdrowie}")
 
     if args.sieci:
         kod, sieci = api("GET", f"/api/endpoints/{eid}/docker/networks")
