@@ -39,7 +39,11 @@ drugi jest tym, którego Prometheus używa jako parametru sondy.
 `swarm_service_tasks`, `swarm_service_failed_tasks_1h`, `swarm_service_info`,
 `swarm_service_updated_at`, `swarm_container_cpu_percent`,
 `swarm_container_memory_bytes`, `swarm_container_memory_limit_bytes`,
-`swarm_container_health`, `discovery_probe_success`, `discovery_probe_latency_seconds`,
+`swarm_container_health`,
+`swarm_container_network_receive_bytes_total`, `swarm_container_network_transmit_bytes_total`
+(liczniki narastające — w zapytaniach liczymy z nich `rate()`, więc wykresy pokazują B/s),
+`swarm_container_block_read_bytes_total`, `swarm_container_block_write_bytes_total`,
+`discovery_probe_success`, `discovery_probe_latency_seconds`,
 `discovery_cert_days_left`, `discovery_http_targets`, `discovery_stacks`,
 `discovery_services`, `discovery_up`, `discovery_last_refresh_timestamp_seconds`,
 `discovery_new_services_total`, `docker_images_reclaimable_bytes`,

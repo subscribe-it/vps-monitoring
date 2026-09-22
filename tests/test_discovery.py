@@ -945,5 +945,47 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.probe_timeout, 0.5)
 
 
+class ContainerUsageTests(unittest.TestCase):
+    """Ruch sieciowy i I/O dysku kontenera liczone z payloadu `docker stats`.
+
+    Te wartości zasilają wykresy „ruch i obciążenie per usługa", więc muszą być
+    odporne na brakujące pola — Docker nie zawsze zwraca wszystkie sekcje.
+    """
+
+    def test_network_sums_all_interfaces(self):
+        stats = {"networks": {
+            "eth0": {"rx_bytes": 1000, "tx_bytes": 2000},
+            "eth1": {"rx_bytes": 500, "tx_bytes": 700},
+        }}
+        self.assertEqual(discovery.container_network(stats), (1500.0, 2700.0))
+
+    def test_network_tolerates_missing_sections(self):
+        for stats in ({}, None, {"networks": None}, {"networks": {"eth0": None}},
+                      {"networks": {"eth0": {}}}):
+            self.assertEqual(discovery.container_network(stats), (0.0, 0.0), stats)
+
+    def test_blockio_sums_read_and_write(self):
+        stats = {"blkio_stats": {"io_service_bytes_recursive": [
+            {"op": "Read", "value": 4096},
+            {"op": "Write", "value": 8192},
+            {"op": "read", "value": 1024},
+            {"op": "Sync", "value": 999},
+        ]}}
+        self.assertEqual(discovery.container_blockio(stats), (5120.0, 8192.0))
+
+    def test_blockio_tolerates_missing_sections(self):
+        for stats in ({}, None, {"blkio_stats": None},
+                      {"blkio_stats": {"io_service_bytes_recursive": None}}):
+            self.assertEqual(discovery.container_blockio(stats), (0.0, 0.0), stats)
+
+    def test_metrics_are_registered(self):
+        nazwy = {n for n, _, _ in discovery.METRIC_FAMILIES}
+        for oczekiwana in ("swarm_container_network_receive_bytes_total",
+                           "swarm_container_network_transmit_bytes_total",
+                           "swarm_container_block_read_bytes_total",
+                           "swarm_container_block_write_bytes_total"):
+            self.assertIn(oczekiwana, nazwy)
+
+
 if __name__ == "__main__":
     unittest.main()

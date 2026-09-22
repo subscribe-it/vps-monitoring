@@ -90,6 +90,15 @@ Uwagi do środowiska lokalnego: `discovery` potrzebuje **menedżera Swarma** (na
 demonie `/services` zwraca 503 → `discovery_up 0`, co jest poprawne), a sondy
 `blackbox-monitoring` będą `down`, bo domena monitoringu nie ma tam jeszcze routingu.
 
+## Wykresy
+
+W Grafanze są cztery dashboardy przekrojowe (`VPS ovh-vps-1`, `Aplikacje`,
+`Host`, `Logi`) oraz **„Ruch i obciążenie — per usługa i aplikacja"**: CPU, RAM,
+ruch sieciowy (RX/TX w B/s), I/O dysku, repliki i nieudane zadania **na wybraną
+usługę**, a obok ruch HTTP z access logów Traefika — żądania na minutę per
+aplikacja i per usługa backendu, kody odpowiedzi, odsetek 5xx, p95 czasu
+odpowiedzi i najczęstsze ścieżki.
+
 ## Struktura
 
 ```

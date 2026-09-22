@@ -1006,6 +1006,32 @@ def container_memory(stats):
     return float(memory.get("usage") or 0), float(memory.get("limit") or 0)
 
 
+def container_network(stats):
+    """Suma ruchu ze wszystkich interfejsów kontenera (liczniki narastające).
+
+    Docker podaje `networks.<iface>.rx_bytes/tx_bytes` — to liczniki, więc
+    w Prometheusie liczymy z nich `rate()`, żeby pokazać ruch w B/s.
+    """
+    rx = tx = 0.0
+    for interfejs in ((stats or {}).get("networks") or {}).values():
+        rx += float((interfejs or {}).get("rx_bytes") or 0)
+        tx += float((interfejs or {}).get("tx_bytes") or 0)
+    return rx, tx
+
+
+def container_blockio(stats):
+    """Odczyt/zapis dysku kontenera (liczniki narastające, z blkio_stats)."""
+    odczyt = zapis = 0.0
+    for wpis in (((stats or {}).get("blkio_stats") or {}).get("io_service_bytes_recursive") or []):
+        operacja = str((wpis or {}).get("op") or "").lower()
+        wartosc = float((wpis or {}).get("value") or 0)
+        if operacja == "read":
+            odczyt += wartosc
+        elif operacja == "write":
+            zapis += wartosc
+    return odczyt, zapis
+
+
 def docker_df_summary(raw_df):
     """
     Obrazy: suma Size dla obrazów nieużywanych (Images[].Containers == 0).
@@ -1091,6 +1117,14 @@ METRIC_FAMILIES = (
     ("swarm_container_memory_bytes", "gauge", "Zużycie RAM kontenera w bajtach."),
     ("swarm_container_memory_limit_bytes", "gauge", "Limit RAM kontenera w bajtach."),
     ("swarm_container_health", "gauge", "Stan healthchecku kontenera (zawsze 1)."),
+    ("swarm_container_network_receive_bytes_total", "counter",
+     "Odebrane bajty przez interfejsy kontenera (licznik narastający)."),
+    ("swarm_container_network_transmit_bytes_total", "counter",
+     "Wysłane bajty przez interfejsy kontenera (licznik narastający)."),
+    ("swarm_container_block_read_bytes_total", "counter",
+     "Bajty odczytane z dysku przez kontener (licznik narastający)."),
+    ("swarm_container_block_write_bytes_total", "counter",
+     "Bajty zapisane na dysk przez kontener (licznik narastający)."),
     ("discovery_probe_success", "gauge", "Wynik własnej sondy HTTP (1 = ok)."),
     ("discovery_probe_latency_seconds", "gauge", "Czas odpowiedzi własnej sondy HTTP."),
     ("discovery_cert_days_left", "gauge", "Dni do wygaśnięcia certyfikatu TLS hosta."),
@@ -1184,6 +1218,10 @@ def render_metrics(snapshot):
         add("swarm_container_memory_bytes", base, container.get("mem") or 0)
         add("swarm_container_memory_limit_bytes", base, container.get("mem_limit") or 0)
         add("swarm_container_health", dict(base, health=container.get("health") or "none"), 1)
+        add("swarm_container_network_receive_bytes_total", base, container.get("net_rx") or 0)
+        add("swarm_container_network_transmit_bytes_total", base, container.get("net_tx") or 0)
+        add("swarm_container_block_read_bytes_total", base, container.get("blk_read") or 0)
+        add("swarm_container_block_write_bytes_total", base, container.get("blk_write") or 0)
     for target in snapshot.targets:
         if target.severity == "skip":
             continue
@@ -1444,6 +1482,8 @@ class DiscoveryService:
             data = self.docker.container_stats(container["id"])
             container["cpu"] = compute_cpu_percent(data)
             container["mem"], container["mem_limit"] = container_memory(data)
+            container["net_rx"], container["net_tx"] = container_network(data)
+            container["blk_read"], container["blk_write"] = container_blockio(data)
 
         for container, outcome in zip(running_containers, parallel_map(inspect, running_containers)):
             if isinstance(outcome, Exception):
