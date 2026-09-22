@@ -44,19 +44,27 @@ def pierwszy_argument(argumenty: str) -> str:
 
 
 def zapytanie_ok(url, params, timeout=15):
-    dane = urllib.parse.urlencode(params).encode()
+    """(ok, komunikat, czy_endpoint_niedostepny).
+
+    Trzeci element odróżnia „nie mam z czym gadać" od „zapytanie jest błędne".
+    Bez tego lokalne `make validate` bez uruchomionego Prometheusa meldowało
+    „Unauthorized" zamiast powiedzieć wprost, że nie ma czego sprawdzić.
+    """
+    dane = urllib.parse.urlencode(params)
     try:
-        with urllib.request.urlopen(url + "?" + dane.decode(), timeout=timeout) as r:
+        with urllib.request.urlopen(url + "?" + dane, timeout=timeout) as r:
             body = json.loads(r.read())
-        return body.get("status") != "error", body.get("error") or ""
+        return body.get("status") != "error", body.get("error") or "", False
     except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            return False, f"HTTP {e.code} — to nie wygląda na nasze API", True
         try:
             body = json.loads(e.read())
-            return False, body.get("error") or f"HTTP {e.code}"
+            return False, body.get("error") or f"HTTP {e.code}", False
         except Exception:  # noqa: BLE001
-            return False, f"HTTP {e.code}"
+            return False, f"HTTP {e.code}", False
     except Exception as e:  # noqa: BLE001
-        return False, f"{type(e).__name__}: {e}"
+        return False, f"{type(e).__name__}: {e}", True
 
 
 def zbierz_zapytania():
@@ -100,10 +108,13 @@ def zbierz_zapytania():
 def main() -> int:
     prom, loki = zbierz_zapytania()
     bledy = []
+    niedostepne = set()
     if PROM:
         for plik, tytul, expr in prom:
-            ok, err = zapytanie_ok(PROM + "/api/v1/query", {"query": expr})
-            if not ok:
+            ok, err, brak = zapytanie_ok(PROM + "/api/v1/query", {"query": expr})
+            if brak:
+                niedostepne.add("Prometheus")
+            elif not ok:
                 bledy.append(f"PROMQL {plik} / {tytul}: {err}\n      {expr[:110]}")
     if LOKI:
         for plik, tytul, expr in loki:
@@ -111,14 +122,20 @@ def main() -> int:
             # ("log queries are not supported as an instant query type"),
             # dlatego walidujemy je przez query_range — to NIE jest błąd zapytania.
             teraz = int(time.time() * 1_000_000_000)
-            ok, err = zapytanie_ok(
+            ok, err, brak = zapytanie_ok(
                 LOKI + "/loki/api/v1/query_range",
                 {"query": expr, "start": str(teraz - 300_000_000_000), "end": str(teraz), "limit": "10"},
             )
-            if not ok:
+            if brak:
+                niedostepne.add("Loki")
+            elif not ok:
                 bledy.append(f"LOGQL  {plik} / {tytul}: {err}\n      {expr[:110]}")
 
     print(f"  zapytań PromQL: {len(prom)} | LogQL: {len(loki)}")
+    if niedostepne and not bledy:
+        print(f"  ! pominięto: {', '.join(sorted(niedostepne))} niedostępne — "
+              "uruchom Prometheusa i Loki, żeby sprawdzić zapytania (w CI robi to job `dashboards`)")
+        return 0
     if bledy:
         for b in bledy:
             print(f"  ✗ {b}")
