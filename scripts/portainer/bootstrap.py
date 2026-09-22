@@ -227,8 +227,19 @@ def main() -> int:
         kod, sieci = api("GET", f"/api/endpoints/{eid}/docker/networks")
         if kod != 200:
             print(f"  ✗ HTTP {kod}: {str(sieci)[:200]}")
+        nazwy = {s.get("Id"): s.get("Name") for s in (sieci or [])}
         for s in sorted(sieci or [], key=lambda x: x.get("Name", "")):
             print(f"    {s.get('Name'):45s} driver={s.get('Driver'):10s} scope={s.get('Scope')}")
+        # Do jakich sieci są NAPRAWDĘ podłączone nasze usługi — bez tego nie da się
+        # stwierdzić, czy Traefik i usługi mają wspólną sieć.
+        print("\n  sieci naszych usług:")
+        filtr = urllib.parse.quote(json.dumps({"label": ["com.docker.stack.namespace=%s" % args.stack]}))
+        kod, uslugi = api("GET", f"/api/endpoints/{eid}/docker/services?filters={filtr}")
+        for u in sorted(uslugi or [], key=lambda x: (x.get("Spec") or {}).get("Name", "")):
+            spec = u.get("Spec") or {}
+            sieci_uslugi = [nazwy.get(n.get("Target"), n.get("Target", "?"))
+                            for n in ((spec.get("TaskTemplate") or {}).get("Networks") or [])]
+            print(f"    {spec.get('Name'):38s} {', '.join(sieci_uslugi)}")
 
     if args.labelki:
         filtr = urllib.parse.quote(json.dumps({"name": [args.labelki]}))
