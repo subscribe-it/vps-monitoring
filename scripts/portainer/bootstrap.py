@@ -277,7 +277,10 @@ def main() -> int:
             "PullImage": bool(args.pull),
             "StackName": stack.get("Name"),
         }
-        kod, odp = api("PUT", f"/api/stacks/{sid}/git/redeploy", cialo)
+        # `endpointId` MUSI być w adresie: bez niego Portainer szuka środowiska
+        # o id=0 i zwraca 404 „Unable to find the environment associated to the
+        # stack” (zmierzone na 2.33.3) — mimo że stack zna swoje EndpointId.
+        kod, odp = api("PUT", f"/api/stacks/{sid}/git/redeploy?endpointId={eid}", cialo)
         ok = kod == 200
         print(f"  redeploy z Gita → HTTP {kod} {'✓' if ok else '✗ ' + str(odp)[:200]}")
         print(f"    (przekazano {len(env)} zmiennych środowiskowych stacka)")
