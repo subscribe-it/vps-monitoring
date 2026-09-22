@@ -13,13 +13,25 @@ import yaml
 WZORZEC = re.compile(r"-{1,2}config\.file=(\S+)")
 
 
+def obraz_z_planisty(nazwa):
+    """Dockerfile obrazu — z planisty budowy (jedno źródło prawdy o obrazach).
+
+    Wcześniej ten skrypt parsował statyczną macierz z workflow; po przejściu na
+    macierz dynamiczną (tylko zmienione obrazy) mapa mieszka w plan_builds.py.
+    """
+    import importlib.util
+    import pathlib
+    plik = pathlib.Path(__file__).with_name("plan_builds.py")
+    spec = importlib.util.spec_from_file_location("plan_builds", plik)
+    modul = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(modul)
+    return {f"ghcr.io/subscribe-it/vps-monitoring-{n}:main": i
+            for n, i in modul.mapa_obrazow().items()}
+
+
 def main() -> int:
     compose = yaml.safe_load(open("docker-compose.yml", encoding="utf-8"))
-    matrix = yaml.safe_load(open(".github/workflows/build-images.yml", encoding="utf-8"))
-    obrazy = {
-        f"ghcr.io/subscribe-it/vps-monitoring-{i['name']}:main": i
-        for i in matrix["jobs"]["build"]["strategy"]["matrix"]["include"]
-    }
+    obrazy = obraz_z_planisty(None)
 
     bledy = []
     for nazwa, usluga in compose["services"].items():

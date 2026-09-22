@@ -40,6 +40,10 @@ on:
         required: false
         default: "60"
 
+concurrency:
+  group: portainer-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 

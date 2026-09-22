@@ -10,7 +10,49 @@ on:
   pull_request:
     branches: [main]
 
+# Nowy push anuluje poprzednią walidację tego samego brancha — bez tego seria
+# commitów uruchamiała kilka pełnych zestawów 9 jobów równolegle.
+concurrency:
+  group: validate-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  # Ciężkie joby (kontenery Loki/Prometheus/Alertmanager, build panelu) uruchamiamy
+  # tylko wtedy, gdy zmieniły się pliki, które one sprawdzają. Reszta jobów jest
+  # tania (kilkanaście sekund), więc chodzi zawsze.
+  zmiany:
+    name: Co się zmieniło
+    runs-on: ubuntu-latest
+    outputs:
+      dashboards: ${{ steps.f.outputs.dashboards }}
+      panel: ${{ steps.f.outputs.panel }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: f
+        name: Które zestawy testów mają sens
+        run: |
+          set -uo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git diff --name-only "origin/${{ github.base_ref }}...HEAD" > /tmp/z 2>/dev/null || echo ALL > /tmp/z
+          elif git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" > /tmp/z 2>/dev/null; then
+            :
+          else
+            echo ALL > /tmp/z
+          fi
+          if grep -q '^ALL$' /tmp/z || grep -q '^.github/workflows/validate.yml$' /tmp/z; then
+            echo "wszystko (zmiana workflowu albo nie wiem, co się zmieniło)"
+            d=true; p=true
+          else
+            grep -qE '^(config/(prometheus|loki|grafana)/|scripts/ci/check_dashboard_queries.py|scripts/ci/check_ruler_loaded.py|tests/integration/verify_log)' /tmp/z && d=true || d=false
+            grep -q '^panel/' /tmp/z && p=true || p=false
+          fi
+          echo "dashboards=$d" >> "$GITHUB_OUTPUT"
+          echo "panel=$p" >> "$GITHUB_OUTPUT"
+          echo "  dashboardy: $d | panel: $p"
+
   compose:
     name: Compose / zasady stacku
     runs-on: ubuntu-latest
@@ -105,6 +147,8 @@ jobs:
 
   dashboards:
     name: Dashboardy (składnia zapytań PromQL i LogQL)
+    needs: zmiany
+    if: needs.zmiany.outputs.dashboards == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -194,6 +238,8 @@ jobs:
 
   panel:
     name: Panel (Astro build)
+    needs: zmiany
+    if: needs.zmiany.outputs.panel == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

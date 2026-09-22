@@ -20,6 +20,10 @@ on:
         type: choice
         options: [public, private]
 
+concurrency:
+  group: package-visibility-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   packages: write
   contents: read

@@ -5,38 +5,67 @@ on:
     branches: [main]
     paths:
       - 'docker-compose.yml'
+      - '.dockerignore'
       - 'config/**'
       - 'dockerfiles/**'
       - 'services/**'
       - 'panel/**'
+      - 'scripts/ci/plan_builds.py'
       - '.github/workflows/build-images.yml'
   workflow_dispatch:
+
+# Nowy push na main anuluje poprzedni przebieg. Bez tego każdy commit budował
+# 11 obrazów obok poprzedniego zestawu — najdroższa pozycja w całym CI.
+concurrency:
+  group: build-images-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
   packages: write
 
 jobs:
+  # Które obrazy naprawdę trzeba przebudować? Mapę zależności (obraz ← pliki)
+  # wylicza skrypt z linii COPY w Dockerfile'ach: scripts/ci/plan_builds.py.
+  zmiany:
+    name: Co się zmieniło
+    runs-on: ubuntu-latest
+    outputs:
+      macierz: ${{ steps.plan.outputs.macierz }}
+      ile: ${{ steps.plan.outputs.ile }}
+      wdrazaj: ${{ steps.plan.outputs.wdrazaj }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Wylicz obrazy do przebudowy
+        id: plan
+        run: |
+          set -uo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "uruchomienie ręczne — buduję wszystko"
+            echo "ZMIENIONE_PLIKI=ALL" >> "$GITHUB_ENV"
+          elif git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" > /tmp/zmiany 2>/dev/null; then
+            # `github.event.before` bywa zerowe (nowa gałąź, force push) — wtedy
+            # schodzimy do gałęzi `else`, czyli budowy wszystkiego.
+            echo "zmienionych plików: $(wc -l < /tmp/zmiany)"
+            { echo "ZMIENIONE_PLIKI<<EOF"; cat /tmp/zmiany; echo "EOF"; } >> "$GITHUB_ENV"
+          else
+            echo "nie umiem policzyć różnicy — buduję wszystko"
+            echo "ZMIENIONE_PLIKI=ALL" >> "$GITHUB_ENV"
+          fi
+          python3 scripts/ci/plan_builds.py
+
   build:
     name: ${{ matrix.name }}
+    needs: zmiany
+    if: needs.zmiany.outputs.ile != '0'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { name: prometheus,   dockerfile: dockerfiles/prometheus/Dockerfile,   context: . }
-          - { name: alertmanager, dockerfile: dockerfiles/alertmanager/Dockerfile, context: . }
-          - { name: loki,         dockerfile: dockerfiles/loki/Dockerfile,         context: . }
-          - { name: promtail,     dockerfile: dockerfiles/promtail/Dockerfile,     context: . }
-          - { name: grafana,      dockerfile: dockerfiles/grafana/Dockerfile,      context: . }
-          - { name: auth,         dockerfile: dockerfiles/auth/Dockerfile,         context: . }
-          - { name: blackbox,     dockerfile: dockerfiles/blackbox/Dockerfile,     context: . }
-          # te obrazy mają własny kontekst (kopiują tylko swój katalog),
-          # ale `file` w buildx jest liczony od katalogu repo, nie od kontekstu
-          - { name: discovery,    dockerfile: services/discovery/Dockerfile,       context: services/discovery }
-          - { name: notifier,     dockerfile: services/notifier/Dockerfile,        context: services/notifier }
-          - { name: health-ping,  dockerfile: services/health-ping/Dockerfile,     context: services/health-ping }
-          - { name: panel,        dockerfile: panel/Dockerfile,                    context: panel }
+        include: ${{ fromJSON(needs.zmiany.outputs.macierz) }}
     steps:
       - uses: actions/checkout@v4
 
@@ -55,9 +84,82 @@ jobs:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
           push: true
-          tags: |
-            ghcr.io/subscribe-it/vps-monitoring-${{ matrix.name }}:main
-            ghcr.io/subscribe-it/vps-monitoring-${{ matrix.name }}:sha-${{ github.sha }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
           provenance: false
+          tags: |
+            ghcr.io/subscribe-it/vps-monitoring-${{ matrix.name }}:main
+            ghcr.io/subscribe-it/vps-monitoring-${{ matrix.name }}:sha-${{ github.sha }}
+
+  # Deploy w tym samym przebiegu co budowa: jedno uruchomienie zamiast dwóch
+  # i zero czekania w kolejce workflow_run.
+  deploy:
+    name: Redeploy stacku
+    needs: [zmiany, build]
+    # Wdrażamy tylko gdy jest co wdrażać (nowe obrazy albo zmiana compose)
+    # i gdy budowa się nie wysypała. Zmiana samego workflowu/CI nic nie wdraża.
+    if: |
+      always() && needs.zmiany.outputs.wdrazaj == 'true'
+      && (needs.build.result == 'success' || needs.zmiany.outputs.ile == '0')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sprawdzenie sekretów
+        id: check
+        run: |
+          tryb=brak
+          if [ -n "${{ secrets.PORTAINER_URL }}" ] && [ -n "${{ secrets.PORTAINER_API_KEY }}" ]; then
+            tryb=api
+          elif [ -n "${{ secrets.PORTAINER_MONITORING_WEBHOOK }}" ]; then
+            tryb=webhook
+          fi
+          echo "tryb=$tryb" >> "$GITHUB_OUTPUT"
+          echo "Tryb wdrożenia: $tryb"
+          if [ "$tryb" = "brak" ]; then
+            echo "::warning::Brak danych do wdrożenia — pomijam. Dodaj PORTAINER_URL i PORTAINER_API_KEY."
+          fi
+
+      - name: Redeploy przez API Portainera (zalecane)
+        if: steps.check.outputs.tryb == 'api'
+        env:
+          PORTAINER_URL: ${{ secrets.PORTAINER_URL }}
+          PORTAINER_API_KEY: ${{ secrets.PORTAINER_API_KEY }}
+        run: python3 scripts/portainer/bootstrap.py --start --redeploy --pull
+
+      - name: Wywołanie webhooka (tryb zapasowy)
+        if: steps.check.outputs.tryb == 'webhook'
+        run: |
+          kod=$(curl -s -o /tmp/hook.out -w '%{http_code}' --max-time 180 \
+            -X POST "${{ secrets.PORTAINER_MONITORING_WEBHOOK }}")
+          echo "HTTP $kod"
+          if [ "$kod" = "200" ] || [ "$kod" = "204" ]; then exit 0; fi
+          head -c 400 /tmp/hook.out || true
+          exit 1
+
+      # Smoke test skrócony do ~2 min: job, który śpi, też zajmuje minuty.
+      - name: Smoke test (oczekujemy 401 = usługa żyje, wymaga logowania)
+        if: steps.check.outputs.tryb != 'brak'
+        run: |
+          for i in $(seq 1 12); do
+            kod=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 https://monitoring.subscribeit.pl/ || true)
+            echo "próba $i: HTTP $kod"
+            if [ "$kod" = "401" ]; then
+              echo "✅ stack odpowiada za ForwardAuth"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::Po 2 minutach brak oczekiwanej odpowiedzi 401"
+          exit 1
+
+      - name: Powiadomienie o niepowodzeniu
+        if: failure() && steps.check.outputs.tryb != 'brak'
+        run: |
+          if [ -n "${{ secrets.NOTIFIER_TOKEN }}" ]; then
+            curl -s --max-time 15 -X POST "https://monitoring.subscribeit.pl/status/alert" \
+              -H "Content-Type: application/json" \
+              -H "X-Auth-Token: ${{ secrets.NOTIFIER_TOKEN }}" \
+              -d '{"title":"Nieudany deploy monitoringu","severity":"warning","message":"Workflow Build Images zakończył się błędem wdrożenia. Sprawdź Actions.","url":"https://github.com/subscribe-it/vps-monitoring/actions"}' \
+              || true
+          fi

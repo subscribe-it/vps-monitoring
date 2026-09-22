@@ -1,11 +1,14 @@
 name: Deploy to Portainer
 
+# Ręczny redeploy (bez przebudowy obrazów). Automatyczny deploy po zbudowaniu
+# obrazów jest teraz jobem w `build-images.yml` — jedno uruchomienie zamiast
+# dwóch i bez czekania w kolejce `workflow_run`.
 on:
-  workflow_run:
-    workflows: ["Build Images"]
-    types: [completed]
-    branches: [main]
   workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -13,7 +16,6 @@ permissions:
 jobs:
   deploy:
     name: Redeploy stacku w Portainerze
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
