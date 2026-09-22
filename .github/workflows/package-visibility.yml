@@ -1,11 +1,11 @@
 # Ustawia widoczność pakietów w ghcr.io (domyślnie: publiczne).
 #
 # Po co: stack w Portainerze pobiera obrazy z ghcr.io. Dopóki pakiety są
-# prywatne, anonimowy pull kończy się HTTP 403 i wdrożenie stoi. Publiczne
+# prywatne, anonimowy pull kończy się odmową i wdrożenie stoi. Publiczne
 # pakiety = zero konfiguracji rejestru po stronie Portainera.
 #
-# W obrazach nie ma żadnych sekretów (wszystko wrażliwe idzie zmiennymi
-# środowiskowymi w czasie działania) — to ten sam kod, co w publicznym repo.
+# W obrazach nie ma sekretów — wszystko wrażliwe idzie zmiennymi środowiskowymi
+# w czasie działania, a obrazy powstają z tego samego (publicznego) repo.
 #
 # Uruchamiane wyłącznie ręcznie (workflow_dispatch) — nic nie dzieje się samo.
 name: Package visibility
@@ -29,43 +29,58 @@ jobs:
     name: Widoczność pakietów (${{ inputs.visibility }})
     runs-on: ubuntu-latest
     steps:
-      - name: Ustaw widoczność wszystkich pakietów kontenerów
+      - uses: actions/checkout@v4
+
+      - name: Ustaw widoczność pakietów
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ORG: ${{ github.repository_owner }}
           VIS: ${{ inputs.visibility }}
         run: |
-          set -euo pipefail
-          echo "Organizacja: $ORG | docelowa widoczność: $VIS"
-          if ! pakiety=$(gh api "/orgs/$ORG/packages?package_type=container" --jq '.[].name' 2>/tmp/blad); then
-            echo "::warning::Nie udało się wylistować pakietów: $(cat /tmp/blad)"
-            echo "Ustaw widoczność ręcznie: GitHub → organizacja $ORG → Packages → wybierz pakiet → Package settings → Danger Zone → Change visibility."
-            exit 0
-          fi
+          set -uo pipefail
+          # Nazwy bierzemy z compose — lista nie może się rozjechać z tym, co wdrażamy.
+          pakiety=$(grep -oE "ghcr\.io/$ORG/[a-z0-9-]+" docker-compose.yml | sed "s|ghcr.io/$ORG/||" | sort -u)
+          echo "Organizacja: $ORG | widoczność: $VIS | pakietów: $(echo "$pakiety" | wc -l)"
           ile=0
           for nazwa in $pakiety; do
-            wynik=$(gh api --method PATCH "/orgs/$ORG/packages/container/$nazwa" -f "visibility=$VIS" --jq '.visibility' 2>/tmp/blad) \
-              && { echo "  ✓ $nazwa → $wynik"; ile=$((ile+1)); } \
-              || echo "  ✗ $nazwa → $(cat /tmp/blad | head -1)"
+            if wynik=$(gh api --method PATCH "/orgs/$ORG/packages/container/$nazwa" -f "visibility=$VIS" --jq '.visibility' 2>/tmp/blad); then
+              echo "  ✓ $nazwa → $wynik"
+              ile=$((ile + 1))
+            else
+              echo "  ✗ $nazwa → $(head -2 /tmp/blad | tr '\n' ' ')"
+            fi
           done
-          echo "Ustawiono: $ile pakietów na $VIS"
+          echo "Ustawiono: $ile z $(echo "$pakiety" | wc -l)"
           if [ "$ile" -eq 0 ]; then
-            echo "::warning::Żaden pakiet nie został zmieniony — sprawdź uprawnienia (wymagane packages: write) albo ustaw widoczność w UI."
+            echo "::warning::Token Actions nie może zmieniać widoczności pakietów. Ustaw ręcznie: GitHub → organizacja $ORG → zakładka Packages → pakiet → Package settings → Danger Zone → Change visibility → $VIS."
           fi
 
-      - name: Sprawdź anonimowy pull (czy Portainer pobierze bez danych logowania)
+      - name: Czy anonimowy pull działa (Portainer bez danych logowania)
         env:
           ORG: ${{ github.repository_owner }}
           VIS: ${{ inputs.visibility }}
         run: |
           set -euo pipefail
-          obraz="monitoring-loki"
-          token=$(curl -s "https://ghcr.io/token?scope=repository:$ORG/$obraz:pull&service=ghcr.io" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("token",""))')
-          kod=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $token" \
-            -H "Accept: application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json" \
-            "https://ghcr.io/v2/$ORG/$obraz/manifests/latest")
-          echo "Anonimowy pull $ORG/$obraz:latest → HTTP $kod"
-          if [ "$VIS" = "public" ] && [ "$kod" != "200" ]; then
-            echo "::error::Pakiety nadal nie są publiczne (HTTP $kod) — Portainer nie pobierze obrazów bez danych logowania."
+          # Rozstrzygające pytanie do rejestru: czy wyda token anonimowemu klientowi?
+          #   "authentication required" = pakiet istnieje, ale jest prywatny
+          #   "DENIED"                  = pakietu nie ma (albo brak dostępu)
+          #   token wydany              = pakiet publiczny, pull zadziała
+          zle=0
+          for nazwa in $(grep -oE "ghcr\.io/$ORG/[a-z0-9-]+" docker-compose.yml | sed "s|ghcr.io/$ORG/||" | sort -u); do
+            odp=$(curl -s "https://ghcr.io/token?scope=repository:$ORG/$nazwa:pull&service=ghcr.io")
+            token=$(echo "$odp" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("token",""))' 2>/dev/null || true)
+            if [ -n "$token" ]; then
+              kod=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $token" \
+                -H "Accept: application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json" \
+                "https://ghcr.io/v2/$ORG/$nazwa/manifests/latest")
+              echo "  ✓ $nazwa: publiczny, manifest → HTTP $kod"
+            else
+              powod=$(echo "$odp" | head -c 80)
+              echo "  ✗ $nazwa: anonimowo niedostępny ($powod)"
+              zle=$((zle + 1))
+            fi
+          done
+          if [ "$VIS" = "public" ] && [ "$zle" -gt 0 ]; then
+            echo "::error::$zle pakietów nie jest publicznych — Portainer nie pobierze obrazów bez danych logowania."
             exit 1
           fi
