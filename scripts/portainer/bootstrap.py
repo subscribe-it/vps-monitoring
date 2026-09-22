@@ -251,9 +251,13 @@ def main() -> int:
             wersja = (u.get("Version") or {}).get("Index")
             force = ((u.get("Spec") or {}).get("TaskTemplate") or {}).get("ForceUpdate")
             print(f"\n  --- {nazwa}: Version.Index={wersja}, ForceUpdate={force} ---")
-            filtr2 = urllib.parse.quote(json.dumps({"service": {"ID": u.get("ID")}}))
+            filtr2 = urllib.parse.quote(json.dumps({"label": ["com.docker.stack.namespace=%s" % args.stack]}))
             _k, zadania = api("GET", f"/api/endpoints/{eid}/docker/tasks?filters={filtr2}")
-            for z in sorted(zadania or [], key=lambda x: (x.get("CreatedAt") or ""), reverse=True)[:5]:
+            if not isinstance(zadania, list):   # API potrafi zwrócić dict z błędem
+                print(f"    ✗ nie mogę pobrać zadań: {str(zadania)[:120]}")
+                zadania = []
+            zadania = [z for z in zadania if z.get("ServiceID") == u.get("ID")]
+            for z in sorted(zadania, key=lambda x: (x.get("CreatedAt") or ""), reverse=True)[:5]:
                 st = z.get("Status") or {}
                 kont = (st.get("ContainerStatus") or {}).get("ContainerID")
                 zdrowie = ""
