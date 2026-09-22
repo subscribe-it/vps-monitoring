@@ -1,0 +1,53 @@
+groups:
+  - name: slo
+    interval: 30s
+    rules:
+
+      # ---------------------------------------------------------------------
+      # Degradacja WZGLĘDNA — uzupełnienie `AppSlow` (próg bezwzględny 3 s).
+      #
+      # Powód istnienia (incydent 22.09.2026): klienci zgłosili wolne strony,
+      # zanim cokolwiek zadzwoniło. Strona, która schodzi z 0,2 s do 1,2 s, jest
+      # dla użytkownika odczuwalnie zepsuta, ale progu 3 s nigdy nie przekroczy.
+      # Ten alert patrzy na własną normę domeny, więc łapie trzykrotną regresję
+      # niezależnie od skali — i to wcześnie, bo zanim zrobi się naprawdę źle.
+      #
+      # Bazą jest ostatnie 6 godzin, nie tydzień: to alert WCZESNEGO ostrzegania,
+      # a długotrwałe spowolnienie łapie `AppSlow` (próg bezwzględny 3 s).
+      # Dłuższe okno adaptowałoby się do degradacji i po dobie przestało
+      # dzwonić — czyli dokładnie wtedy, gdy najbardziej trzeba.
+      #
+      # Próg 0,5 s w drugim warunku jest celowy: bez niego domena z medianą
+      # 20 ms alarmowałaby przy każdym drgnięciu do 70 ms.
+      # ---------------------------------------------------------------------
+      - alert: AppMuchSlowerThanUsual
+        expr: |
+          probe_duration_seconds{job=~"blackbox-(public|monitoring)", severity!="skip"}
+            > 3 * quantile_over_time(0.5, probe_duration_seconds{job=~"blackbox-(public|monitoring)", severity!="skip"}[6h])
+            and probe_duration_seconds{job=~"blackbox-(public|monitoring)", severity!="skip"} > 0.5
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Strona wolniejsza niż zwykle: {{ $labels.instance }}"
+          description: "Czas odpowiedzi utrzymuje się powyżej trzykrotności mediany z 6 godzin (i powyżej 0,5 s) przez 15 minut. Panel „Wydajność i dostępność (SLO)” w Grafanie pokazuje, o ile dokładnie."
+          runbook: "#appslow"
+
+      # ---------------------------------------------------------------------
+      # Częściowa awaria — `AppDown` wymaga CAŁKOWITEGO braku odpowiedzi,
+      # więc witryna, która odpowiada co drugie żądanie, nie alarmowała.
+      # Dla klienta to jednak „raz działa, raz nie”, czyli awaria.
+      #
+      # Brak etykiety `severity` jest celowy: dziedziczymy ją z serii
+      # (discovery nadaje poziom na podstawie stacka i labeli usługi), a serie
+      # z `severity="skip"` są wykluczone w zapytaniu.
+      # ---------------------------------------------------------------------
+      - alert: AppFlakyAvailability
+        expr: |
+          avg_over_time(probe_success{job="blackbox-public", severity!="skip"}[15m]) < 0.9
+            and avg_over_time(probe_success{job="blackbox-public", severity!="skip"}[15m]) > 0
+        for: 10m
+        annotations:
+          summary: "Aplikacja odpowiada niestabilnie: {{ $labels.instance }}"
+          description: "Część prób w ostatnich 15 minutach nie przeszła — klienci widzą błędy na części żądań, choć sonda nie milczy całkowicie. Sprawdź logi usługi i kolejkę zadań."
+          runbook: "#appslow"

@@ -1,0 +1,106 @@
+rule_files:
+  - ../alerts/slo.yml
+evaluation_interval: 1m
+
+# Testy progów „na sucho": promtool podstawia serie i sprawdza, czy alert
+# faktycznie się zapala (albo nie zapala). Bez tego próg 3× mediany byłby
+# obietnicą, a nie gwarancją — a właśnie brak takiego alertu sprawił, że
+# degradację 22.09.2026 zauważyli klienci, a nie monitoring.
+#
+# Uwaga o krokach: promtool sprawdza `for: 15m` poprawnie tylko przy kroku
+# 1 min (zmierzone: przy kroku 10 min i 1 h alert nie zapalał się mimo
+# spełnionego warunku). Dlatego okno bazowe reguły to 6 h — mieści się
+# w testach 1-minutowych bez wywracania limitu pamięci zapytania.
+
+tests:
+  - name: trzykrotna regresja wobec mediany z 6 godzin -> alert
+    interval: 1m
+    input_series:
+      - series: 'probe_duration_seconds{job="blackbox-public",instance="https://app.ventiplan.pl/",stack="ventiplan-prod",service="web",severity="critical",module="http_2xx"}'
+        values: '0.2x300 1.2x60'
+    alert_rule_test:
+      - eval_time: 360m
+        alertname: AppMuchSlowerThanUsual
+        exp_alerts:
+          - exp_labels:
+              job: blackbox-public
+              instance: https://app.ventiplan.pl/
+              stack: ventiplan-prod
+              service: web
+              severity: warning
+              module: http_2xx
+            exp_annotations:
+              summary: 'Strona wolniejsza niż zwykle: https://app.ventiplan.pl/'
+              description: 'Czas odpowiedzi utrzymuje się powyżej trzykrotności mediany z 6 godzin (i powyżej 0,5 s) przez 15 minut. Panel „Wydajność i dostępność (SLO)” w Grafanie pokazuje, o ile dokładnie.'
+              runbook: '#appslow'
+
+  - name: wolno, ale w granicach własnej normy -> cisza
+    interval: 1m
+    input_series:
+      - series: 'probe_duration_seconds{job="blackbox-public",instance="https://star-sign.pl/",stack="star-sign",service="frontend",severity="critical",module="http_2xx"}'
+        values: '1.0x360'
+    alert_rule_test:
+      - eval_time: 360m
+        alertname: AppMuchSlowerThanUsual
+        exp_alerts: []
+
+  - name: domena z mediana 20 ms drgnela do 0,3 s -> jeszcze nie alarmujemy
+    interval: 1m
+    input_series:
+      - series: 'probe_duration_seconds{job="blackbox-public",instance="https://kosmetix.pl/",stack="kosmetix-staging",service="web",severity="warning",module="http_2xx"}'
+        values: '0.02x300 0.3x60'
+    alert_rule_test:
+      - eval_time: 360m
+        alertname: AppMuchSlowerThanUsual
+        exp_alerts: []
+
+  - name: usługa z severity=skip nie generuje alertu o regresji
+    interval: 1m
+    input_series:
+      - series: 'probe_duration_seconds{job="blackbox-public",instance="https://wewnetrzne.example/",stack="staging",service="worker",severity="skip",module="http_2xx"}'
+        values: '0.2x300 2.0x60'
+    alert_rule_test:
+      - eval_time: 360m
+        alertname: AppMuchSlowerThanUsual
+        exp_alerts: []
+
+  - name: odpowiada co drugie żądanie -> alert o niestabilności (z etykietą z discovery)
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="blackbox-public",instance="https://api.star-sign.pl/health",stack="star-sign",service="api",severity="critical",module="http_2xx"}'
+        values: '1x2 0x2 1x2 0x2 1x2 0x2 1x2 0x2 1x2 0x2 1x2 0x2 1x2 0x2 1x2 0x2 1x2 0x2 1x2 0x2 1x2 0x2 1x2 0x2'
+    alert_rule_test:
+      - eval_time: 48m
+        alertname: AppFlakyAvailability
+        exp_alerts:
+          - exp_labels:
+              job: blackbox-public
+              instance: https://api.star-sign.pl/health
+              stack: star-sign
+              service: api
+              severity: critical
+              module: http_2xx
+            exp_annotations:
+              summary: 'Aplikacja odpowiada niestabilnie: https://api.star-sign.pl/health'
+              description: 'Część prób w ostatnich 15 minutach nie przeszła — klienci widzą błędy na części żądań, choć sonda nie milczy całkowicie. Sprawdź logi usługi i kolejkę zadań.'
+              runbook: '#appslow'
+
+  - name: stabilna odpowiedź -> cisza
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="blackbox-public",instance="https://app.ventiplan.pl/health",stack="ventiplan-prod",service="api",severity="critical",module="http_2xx"}'
+        values: '1x48'
+    alert_rule_test:
+      - eval_time: 48m
+        alertname: AppFlakyAvailability
+        exp_alerts: []
+
+  - name: niestabilność na usłudze z severity=skip -> cisza
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="blackbox-public",instance="https://wewnetrzne.example/health",stack="staging",service="worker",severity="skip",module="http_2xx"}'
+        values: '1x2 0x2 1x2 0x2 1x2 0x2 1x2 0x2 1x2 0x2 1x2 0x2 1x2 0x2 1x2 0x2 1x2 0x2 1x2 0x2 1x2 0x2 1x2 0x2'
+    alert_rule_test:
+      - eval_time: 48m
+        alertname: AppFlakyAvailability
+        exp_alerts: []
