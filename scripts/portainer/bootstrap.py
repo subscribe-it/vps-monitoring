@@ -181,6 +181,10 @@ def main() -> int:
     p.add_argument("--spec", metavar="WZORZEC",
                    help="wersja usługi, ForceUpdate i stan zdrowia kontenerów zadań (kto aktualizuje usługę)")
     p.add_argument("--sieci", action="store_true", help="lista sieci w rojniku (nazwy, naprawdę widziane przez Docker)")
+    p.add_argument("--set-env", metavar="KLUCZ=WARTOŚĆ", action="append", default=[],
+                   help="zmień jedną zmienną środowiskową stacka i wdróż (wymaga --tak)")
+    p.add_argument("--tak", action="store_true",
+                   help="potwierdzenie dla operacji zmieniających: bez tego tylko pokazuję plan")
     p.add_argument("--backup", metavar="PLIK",
                    help="zapisz kopię konfiguracji i zmiennych stacka (uprawnienia 600, ZAWIERA SEKRETY)")
     p.add_argument("--labelki", metavar="WZORZEC",
@@ -287,6 +291,49 @@ def main() -> int:
             sieci_uslugi = [nazwy.get(n.get("Target"), n.get("Target", "?"))
                             for n in ((spec.get("TaskTemplate") or {}).get("Networks") or [])]
             print(f"    {spec.get('Name'):38s} {', '.join(sieci_uslugi)}")
+
+    if args.set_env:
+        # Zmiana zmiennej środowiskowej stacka. Env istnieje TYLKO w Portainerze,
+        # więc najpierw kopia, potem podmiana jednego klucza i redeploy z KOMPLETEM
+        # zmiennych (pusta lista skasowałaby wszystkie — patrz niżej).
+        import datetime
+        import pathlib as _p
+        zmiany = {}
+        for wpis in args.set_env:
+            if "=" not in wpis:
+                raise SystemExit(f"  ✗ oczekuję KLUCZ=WARTOŚĆ, dostałem: {wpis}")
+            k, v = wpis.split("=", 1)
+            zmiany[k.strip()] = v.strip()
+        env = [dict(x) for x in (stack.get("Env") or [])]
+        obecne = {x.get("name"): x for x in env}
+        print("  zmiana env:")
+        for k, v in zmiany.items():
+            bylo = (obecne.get(k) or {}).get("value")
+            print(f"    {k}: {'(brak)' if bylo is None else bylo!r} → {v!r}")
+            if k in obecne:
+                obecne[k]["value"] = v
+            else:
+                env.append({"name": k, "value": v})
+        if not args.tak:
+            print("  (plan — dodaj --tak, żeby zapisać i wdrożyć)")
+            return 0
+        kopia = _p.Path(f"~/.config/monitoring-stack-backup-{datetime.datetime.now():%Y%m%d-%H%M%S}.json").expanduser()
+        kopia.parent.mkdir(parents=True, exist_ok=True)
+        with kopia.open("w", encoding="utf-8") as f:
+            os.chmod(kopia, 0o600)
+            json.dump({"kiedy": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+                       "portainer": url, "stack": {k: v for k, v in stack.items() if k != "Env"},
+                       "env": stack.get("Env") or []}, f, ensure_ascii=False, indent=2, default=str)
+        print(f"  ✓ kopia PRZED zmianą: {kopia}")
+        # Najpierw zapis env (bez wdrożenia), potem redeploy — dwie wyraźne operacje.
+        # `endpointId` również tutaj — bez niego Portainer szuka środowiska o id=0.
+        kod, odp = api("POST", f"/api/stacks/{sid}/git?endpointId={eid}", {
+            "Env": env, "Prune": True, "RepositoryReferenceName": stack.get("RepositoryReferenceName"),
+            "RepositoryAuthentication": bool(stack.get("RepositoryAuthentication")),
+            "RepositoryUsername": stack.get("RepositoryUsername") or "", "RepositoryPassword": ""})
+        print(f"  zapis env → HTTP {kod} {'✓' if kod == 200 else '✗ ' + str(odp)[:150]}")
+        if kod != 200:
+            return 3
 
     if args.backup:
         # Kopia na wypadek pomyłki: konfiguracja stacka + jego zmienne środowiskowe

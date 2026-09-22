@@ -47,6 +47,34 @@ modules:
       follow_redirects: false
       preferred_ip_protocol: ip4
 
+  # Automatycznie wykryte aplikacje: liczy się to, że usługa ODPOWIADA, a nie
+  # jaki kod zwraca na zgadywanej ścieżce. Discovery bierze ścieżkę z reguły
+  # routera (`PathPrefix(/api)`, `/xmlrpc.php`, `/.well-known/acme-challenge`),
+  # a na takich adresach GET zwraca legalnie 404/405 — przy module `http_2xx`
+  # raportowaliśmy zdrowe aplikacje jako padnięte (zmierzone 2026-09-22: alerty
+  # AppDown dla ventiplan-prod i bugsink poszły na telefon).
+  # Tu 4xx = żyje (routing działa, usługa odpowiada), a 5xx lub brak odpowiedzi
+  # = padła. To kryterium jest celowo łagodniejsze od `http_2xx`: przy
+  # automatycznym wykrywaniu nie znamy poprawnej ścieżki aplikacji. Aplikacja
+  # może podać własną przez `monitoring.io/probe-path` (patrz
+  # docs/ONBOARDING-APP.md) — wtedy sonda trafia w sensowny adres, a nie w
+  # przypadkowy PathPrefix z reguły routera.
+  # TODO: dla aplikacji z `probe-path` zaostrzyć kryterium do 2xx (osobny job
+  # w Prometheusie + `__param_module` z relabelingu) — wtedy 404 znowu znaczy
+  # awarię, ale tylko tam, gdzie znamy adres.
+  http_liveness:
+    prober: http
+    timeout: 10s
+    http:
+      valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+      valid_status_codes: [200, 201, 202, 203, 204, 205, 206, 300, 301, 302, 303,
+                           304, 305, 306, 307, 308, 400, 401, 402, 403, 404, 405,
+                           406, 407, 408, 409, 410, 411, 412, 413, 414, 415, 416,
+                           417, 418, 421, 422, 423, 424, 425, 426, 428, 429, 431, 451]
+      method: GET
+      follow_redirects: true
+      preferred_ip_protocol: ip4
+
   tcp_connect:
     prober: tcp
     timeout: 5s
