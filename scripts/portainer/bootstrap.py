@@ -401,22 +401,59 @@ def main() -> int:
         # Env MUSI wrócić w payloadzie: pole jest nadpisywane tym, co przyślemy,
         # więc pusta lista skasowałaby zmienne środowiskowe stacka.
         env = stack.get("Env") or []
-        cialo = {
-            "RepositoryReferenceName": stack.get("RepositoryReferenceName") or "refs/heads/main",
-            "RepositoryAuthentication": bool(stack.get("RepositoryAuthentication")),
-            "RepositoryUsername": stack.get("RepositoryUsername") or "",
-            "RepositoryPassword": "",
-            "Env": env,
-            "Prune": True,
-            "PullImage": bool(args.pull),
-            "StackName": stack.get("Name"),
-        }
-        # `endpointId` MUSI być w adresie: bez niego Portainer szuka środowiska
-        # o id=0 i zwraca 404 „Unable to find the environment associated to the
-        # stack” (zmierzone na 2.33.3) — mimo że stack zna swoje EndpointId.
-        kod, odp = api("PUT", f"/api/stacks/{sid}/git/redeploy?endpointId={eid}", cialo)
-        ok = kod == 200
-        print(f"  redeploy z Gita → HTTP {kod} {'✓' if ok else '✗ ' + str(odp)[:200]}")
+        ma_git = bool(stack.get("RepositoryURL") or stack.get("GitConfig"))
+        if ma_git:
+            cialo = {
+                "RepositoryReferenceName": stack.get("RepositoryReferenceName") or "refs/heads/main",
+                "RepositoryAuthentication": bool(stack.get("RepositoryAuthentication")),
+                "RepositoryUsername": stack.get("RepositoryUsername") or "",
+                "RepositoryPassword": "",
+                "Env": env,
+                "Prune": True,
+                "PullImage": bool(args.pull),
+                "StackName": stack.get("Name"),
+            }
+            # `endpointId` MUSI być w adresie: bez niego Portainer szuka środowiska
+            # o id=0 i zwraca 404 „Unable to find the environment associated to the
+            # stack” (zmierzone na 2.33.3) — mimo że stack zna swoje EndpointId.
+            kod, odp = api("PUT", f"/api/stacks/{sid}/git/redeploy?endpointId={eid}", cialo)
+            ok = kod == 200
+            print(f"  redeploy z GITA → HTTP {kod} {'✓' if ok else '✗ ' + str(odp)[:200]}")
+        else:
+            # Stack oparty na PLIKU (bez repozytorium w Portainerze — tak wygląda
+            # po odtworzeniu z pliku). Wdrażamy treść z katalogu roboczego, czyli
+            # dokładnie ten commit, który zbudował CI. Powód: ścieżka `git/redeploy`
+            # na takim stacku nic nie robi (a `POST /stacks/{id}/start` odpowiada
+            # „Stack is already active”), przez co wdrożenie wygląda na udane,
+            # a obrazy zostają stare — zmierzone 22.09.2026.
+            #
+            # KLUCZOWE: najpierw wymuszamy pobranie obrazów. Swarm tworzy nowe
+            # zadania z obrazu rozwiązanego lokalnie po tagu `:main`, więc bez
+            # świeżego pullu wstaje ten sam, stary digest (wdrożenie „udane”,
+            # kod stary — zmierzone).
+            kod, svc = api("GET", f"/api/endpoints/{eid}/docker/services")
+            obrazy = set()
+            if kod == 200 and isinstance(svc, list):
+                for s in svc:
+                    if not str(s["Spec"]["Name"]).startswith(str(stack.get("Name")) + "_"):
+                        continue
+                    obraz = (s["Spec"].get("TaskTemplate") or {}).get("ContainerSpec", {}).get("Image", "")
+                    if obraz and "@" not in obraz:
+                        obrazy.add(obraz)
+            for obraz in sorted(obrazy):
+                repo, _, tag = obraz.partition(":")
+                kod, _ = api("POST", f"/api/endpoints/{eid}/docker/images/create"
+                                     f"?fromImage={urllib.parse.quote(repo, safe='')}&tag={urllib.parse.quote(tag or 'latest', safe='')}")
+                print(f"    pull {obraz} → HTTP {kod} {'✓' if kod == 200 else '✗ (użyję lokalnej wersji)'}")
+
+            tresc = open(plik, encoding="utf-8").read()
+            kod, odp = api("PUT", f"/api/stacks/{sid}?endpointId={eid}", {
+                "stackFileContent": tresc,
+                "env": env,
+                "prune": False,
+            })
+            ok = kod in (200, 201)
+            print(f"  redeploy z PLIKU ({plik}) → HTTP {kod} {'✓' if ok else '✗ ' + str(odp)[:200]}")
         print(f"    (przekazano {len(env)} zmiennych środowiskowych stacka)")
         if not ok:
             return 3
