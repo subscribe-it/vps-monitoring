@@ -142,6 +142,10 @@ jobs:
       # Sam kod 401 na domenie to za mało: 22.09.2026 wdrożenie było
       # „udane” przy stacku z zerem usług. Ten krok pyta Swarma wprost.
       - name: Kontrola kompletności stacku (12 usług z pełnymi replikami)
+        if: steps.check.outputs.tryb == 'api'
+        env:
+          PORTAINER_URL: ${{ secrets.PORTAINER_URL }}
+          PORTAINER_API_KEY: ${{ secrets.PORTAINER_API_KEY }}
         run: python3 scripts/ci/check_stack.py
 
       - name: Smoke test (oczekujemy 401 = usługa żyje, wymaga logowania)
