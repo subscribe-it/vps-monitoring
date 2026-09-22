@@ -67,14 +67,6 @@ services:
       restart_policy:
         condition: any
         delay: 10s
-      labels:
-        - "traefik.enable=true"
-        - "traefik.swarm.network=traefik-public"
-        # Middleware ForwardAuth — nazwa w Swarmie dostaje prefiks stacku,
-        # dlatego routery odwołują się do "mon-auth".
-        - "traefik.http.middlewares.mon-auth.forwardauth.address=http://auth:8080/verify"
-        - "traefik.http.middlewares.mon-auth.forwardauth.authResponseHeaders=X-User"
-        - "traefik.http.middlewares.mon-auth.forwardauth.trustForwardHeader=true"
     networks:
       - monitoring
       - traefik-public
@@ -107,6 +99,15 @@ services:
         delay: 10s
       labels:
         - "traefik.enable=true"
+        # Middleware ForwardAuth definiujemy TU, a nie w usłudze `auth`:
+        # Traefik (provider swarm) rejestruje middleware WYŁĄCZNIE z usług,
+        # które same mają router. Sprawdzone na tym rojniku: 22 z 22 działających
+        # middleware są na usługach z routerem, a nasze `mon-auth` w `auth`
+        # (usługa bez routera) nie było rejestrowane wcale — Traefik logował
+        # „middleware mon-auth does not exist" i wywalał wszystkie routery (404).
+        - "traefik.http.middlewares.mon-auth.forwardauth.address=http://auth:8080/verify"
+        - "traefik.http.middlewares.mon-auth.forwardauth.authResponseHeaders=X-User"
+        - "traefik.http.middlewares.mon-auth.forwardauth.trustForwardHeader=true"
         - "traefik.swarm.network=traefik-public"
         - "traefik.http.routers.mon-panel.rule=Host(`${MONITORING_DOMAIN:-monitoring.subscribeit.pl}`)"
         - "traefik.http.routers.mon-panel.entrypoints=websecure"
