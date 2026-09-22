@@ -25,6 +25,7 @@ on:
           - show-env
           - uslugi
           - logi
+          - labelki
           - start
           - redeploy
           - start-and-redeploy
@@ -69,6 +70,7 @@ jobs:
             show-env)           args=(--show-env) ;;
             uslugi)             args=(--uslugi) ;;
             logi)               args=(--logi "$WZORZEC" --linii "${LINIE:-60}") ;;
+            labelki)            args=(--labelki "$WZORZEC") ;;
             start)              args=(--start) ;;
             redeploy)           args=(--redeploy --pull) ;;
             start-and-redeploy) args=(--start --redeploy --pull) ;;

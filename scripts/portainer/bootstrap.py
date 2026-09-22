@@ -165,6 +165,8 @@ def main() -> int:
     p.add_argument("--logi", metavar="WZORZEC",
                    help="pokaż ostatnie linie logów usługi pasującej do wzorca (dowolny stack)")
     p.add_argument("--linii", type=int, default=40, help="ile linii logu (domyślnie 40)")
+    p.add_argument("--labelki", metavar="WZORZEC",
+                   help="pokaż labelki traefik.* usługi pasującej do wzorca (co naprawdę dostał Traefik)")
     args = p.parse_args()
 
     url = (os.environ.get("PORTAINER_URL") or "").strip()
@@ -219,6 +221,18 @@ def main() -> int:
     if args.uslugi:
         print()
         pokaz_uslugi(api, eid, args.stack)
+
+    if args.labelki:
+        filtr = urllib.parse.quote(json.dumps({"name": [args.labelki]}))
+        kod, uslugi = api("GET", f"/api/endpoints/{eid}/docker/services?filters={filtr}")
+        if kod != 200 or not uslugi:
+            print(f"  ✗ nie znalazłem usługi „{args.labelki}”")
+        for u in (uslugi or [])[:5]:
+            spec = u.get("Spec") or {}
+            print(f"\n  --- labelki: {spec.get('Name')} ---")
+            for klucz, wartosc in sorted((spec.get("Labels") or {}).items()):
+                if klucz.startswith("traefik."):
+                    print(f"    {klucz}={wartosc}")
 
     if args.logi:
         # Szukamy po WSZYSTKICH usługach w rojniku — dzięki temu można zajrzeć
