@@ -31,49 +31,88 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Gdy PATCH zwraca 404, trzeba wiedzieć DLACZEGO: zły typ tokenu, brak
+      # zakresu, brak roli w organizacji czy pakiet pod innym właścicielem.
+      # Ten krok nic nie zmienia — tylko odpowiada na te pytania.
+      - name: Diagnoza tokenu i pakietów
+        env:
+          GH_TOKEN: ${{ secrets.GHCR_ADMIN_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          ORG="${{ github.repository_owner }}"
+          if [ -n "${{ secrets.GHCR_ADMIN_TOKEN }}" ]; then
+            echo "Sekret GHCR_ADMIN_TOKEN: ustawiony"
+          else
+            echo "::warning::Brak sekretu GHCR_ADMIN_TOKEN — używam tokenu Actions, którym widoczności pakietów nie zmienisz"
+          fi
+
+          echo "--- właściciel tokenu ---"
+          gh api /user --jq '"  login: \(.login), typ: \(.type)"' || echo "  ✗ nie mogę odczytać /user"
+
+          echo "--- typ tokenu i zakresy ---"
+          zakresy=$(gh api -i /user 2>/dev/null | grep -i '^x-oauth-scopes:' || true)
+          if [ -n "$zakresy" ]; then
+            echo "  klasyczny PAT, zakresy:${zakresy#*:}"
+            case "$zakresy" in
+              *write:packages*) echo "  ✓ ma write:packages" ;;
+              *) echo "  ✗ BRAK zakresu write:packages — dodaj go w Settings → Developer settings → Tokens (classic)" ;;
+            esac
+          else
+            echo "  token fine-grained (brak nagłówka X-Oauth-Scopes)"
+            echo "  ! dla pakietów ORGANIZACJI fine-grained token musi mieć zgodę organizacji"
+            echo "    i uprawnienie „Packages: Read and write” — klasyczny PAT jest prostszy"
+          fi
+
+          echo "--- rola w organizacji $ORG ---"
+          gh api "/orgs/$ORG/membership" --jq '"  rola: \(.role)  (admin = może zmieniać pakiety)"' \
+            || echo "  ✗ nie odczytam roli (token bez read:org) — sprawdź ręcznie: Organization → People"
+
+          echo "--- gdzie żyją pakiety ---"
+          for baza in "/orgs/$ORG/packages/container" "/user/packages/container"; do
+            kod=$(gh api -i "$baza/vps-monitoring-loki" 2>/dev/null | head -1 | awk '{print $2}')
+            echo "  $baza/vps-monitoring-loki → HTTP ${kod:-brak}"
+          done
+          echo "  200 = pakiet tu jest; 404 = inny właściciel albo brak uprawnień do niego"
+
       - name: Ustaw widoczność pakietów
         env:
-          # Token Actions NIE MA dostępu do pakietów (PATCH zwraca 404 — zmierzone),
-          # więc jeśli w sekretach jest klasyczny PAT z `write:packages`, używamy jego.
           GH_TOKEN: ${{ secrets.GHCR_ADMIN_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           set -uo pipefail
           ORG="${{ github.repository_owner }}"
           VIS="${{ inputs.visibility }}"
-          if [ -n "${{ secrets.GHCR_ADMIN_TOKEN }}" ]; then
-            echo "Token: GHCR_ADMIN_TOKEN (PAT z write:packages)"
-          else
-            echo "Token: GITHUB_TOKEN (Actions) — pakietów nim nie zmienisz, to tylko podgląd"
-          fi
           # Nazwy bierzemy z compose — lista nie może się rozjechać z tym, co wdrażamy.
           pakiety=$(grep -oE "ghcr\.io/$ORG/[a-z0-9-]+" docker-compose.yml | sed "s|ghcr.io/$ORG/||" | sort -u)
-          echo "Organizacja: $ORG | widoczność: $VIS | pakietów: $(echo "$pakiety" | wc -l)"
-          ile=0
+          ile=$(echo "$pakiety" | wc -l)
+          echo "Organizacja: $ORG | widoczność: $VIS | pakietów: $ile"
+
+          # Pakiety mogą należeć do organizacji albo do użytkownika. Wybieramy bazę,
+          # która faktycznie je widzi (200), zamiast zakładać jedną z nich.
+          dziala=""
+          for baza in "/orgs/$ORG/packages/container" "/user/packages/container"; do
+            kod=$(gh api -i "$baza/$(echo "$pakiety" | head -1)" 2>/dev/null | head -1 | awk '{print $2}')
+            if [ "$kod" = "200" ]; then dziala="$baza"; break; fi
+          done
+          if [ -z "$dziala" ]; then
+            echo "::error::Token nie widzi pakietów (żadna baza nie zwróciła 200) — zobacz krok „Diagnoza tokenu i pakietów”."
+            echo "Droga przez UI: GitHub → organizacja $ORG → Packages → pakiet → Package settings → Danger Zone → Change visibility → $VIS"
+            exit 1
+          fi
+          echo "Pakiety znalezione pod: $dziala"
+
+          udane=0
           for nazwa in $pakiety; do
-            if wynik=$(gh api --method PATCH "/orgs/$ORG/packages/container/$nazwa" -f "visibility=$VIS" --jq '.visibility' 2>/tmp/blad); then
+            if wynik=$(gh api --method PATCH "$dziala/$nazwa" -f "visibility=$VIS" --jq '.visibility' 2>/tmp/blad); then
               echo "  ✓ $nazwa → $wynik"
-              ile=$((ile + 1))
+              udane=$((udane + 1))
             else
               echo "  ✗ $nazwa → $(head -2 /tmp/blad | tr '\n' ' ')"
             fi
           done
-          echo "Ustawiono: $ile z $(echo "$pakiety" | wc -l)"
-          if [ "$ile" -eq 0 ]; then
-            {
-              echo "### Pakiety zostały prywatne — potrzebne jedno z trzech wyjść"
-              echo
-              echo "**A. Token do tego workflow (jednorazowo).** Utwórz klasyczny PAT z zakresem \`write:packages\`"
-              echo "i dodaj go jako sekret \`GHCR_ADMIN_TOKEN\` w tym repo, potem uruchom ten workflow ponownie."
-              echo
-              echo "**B. Ustaw widoczność w UI.** Organizacja \`"$ORG"\` → zakładka **Packages** → pakiet →"
-              echo "**Package settings** → Danger Zone → **Change visibility** → \`$VIS\` (11 pakietów)."
-              echo
-              echo "**C. Zostaw pakiety prywatne.** Dodaj w Portainerze rejestr \`ghcr.io\` z PAT (zakres \`read:packages\`)"
-              echo "i wskaż go w stacku — wtedy nic nie musi być publiczne."
-              echo
-              echo "Lokalnie, mając PAT: \`gh auth login\` i \`for p in $(echo "$pakiety"); do gh api --method PATCH /orgs/$ORG/packages/container/\$p -f visibility=$VIS; done\`"
-            } >> "$GITHUB_STEP_SUMMARY"
-            echo "::warning::Token Actions nie może zmieniać widoczności pakietów — szczegóły i trzy wyjścia w podsumowaniu tego uruchomienia (Step Summary)."
+          echo "Ustawiono: $udane z $ile"
+          if [ "$udane" -eq 0 ]; then
+            echo "::error::Token nie może zmieniać widoczności pakietów — szczegóły w kroku „Diagnoza”."
+            exit 1
           fi
 
       - name: Czy anonimowy pull działa (Portainer bez danych logowania)
