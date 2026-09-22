@@ -7,7 +7,7 @@ groups:
       - alert: PgPageVerificationFailed
         expr: |
           sum by (stack, service) (count_over_time({stack="ventiplan-prod", service="postgres"}
-            |~ "(?i)page verification failed|invalid checkpoint|could not locate a valid checkpoint|WAL.*(corrupt|invalid)|incorrect resource manager" [5m])) > 0
+            |~ "(?i)page verification failed|invalid checkpoint|could not locate a valid checkpoint|WAL.{0,80}(corrupt|invalid)|incorrect resource manager" [5m])) > 0
         for: 0m
         labels:
           severity: critical
@@ -43,7 +43,7 @@ groups:
       - alert: PgConnectionRefused
         expr: |
           sum by (stack, service) (count_over_time({stack="ventiplan-prod", service="postgres"}
-            |~ "(?i)FATAL:.*(too many clients|remaining connection slots|database system is in recovery mode)" [10m])) > 0
+            |~ "(?i)FATAL:.{0,80}(too many clients|remaining connection slots|database system is in recovery mode)" [10m])) > 0
         for: 0m
         labels:
           severity: warning

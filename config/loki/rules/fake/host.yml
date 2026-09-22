@@ -8,7 +8,7 @@ groups:
       - alert: KernelDiskErrors
         expr: |
           sum by (transport) (count_over_time({job="journald", transport="kernel"}
-            |~ "(?i)I/O error|blk_update_request|EXT4-fs error|nvme.*(error|I/O)|medium error|Buffer I/O error|ata[0-9]+\\.[0-9]+:|failed command" [10m])) > 0
+            |~ "(?i)I/O error|blk_update_request|EXT4-fs error|nvme.{0,80}(error|I/O)|medium error|Buffer I/O error|ata[0-9]+[.][0-9]+:|failed command" [10m])) > 0
         for: 0m
         labels:
           severity: critical

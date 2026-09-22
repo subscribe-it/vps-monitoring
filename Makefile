@@ -17,6 +17,7 @@ validate: validate-workflows validate-compose validate-prometheus validate-promt
 
 validate-workflows:
 	@python3 scripts/ci/check_workflows.py
+	@python3 scripts/ci/check_loki_regex.py
 
 validate-compose:
 	@python3 scripts/ci/check_config_used.py

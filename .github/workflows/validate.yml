@@ -71,6 +71,9 @@ jobs:
         run: |
           python3 -c "import glob, sys, yaml; pliki = glob.glob('config/loki/rules/**/*.yml', recursive=True); zle = [f'{f}: {r.get(\"alert\")}' for f in pliki for g in yaml.safe_load(open(f))['groups'] for r in g['rules'] if not r.get('expr') or not r.get('alert')]; print(f'  OK: {len(pliki)} plików reguł'); sys.exit(1 if zle else 0)"
 
+      - name: Wzorce LogQL, które w Loki dopasują nic
+        run: python3 scripts/ci/check_loki_regex.py
+
   grafana:
     name: Grafana (provisioning + dashboardy)
     runs-on: ubuntu-latest
@@ -117,15 +120,22 @@ jobs:
             -v "$PWD/config/loki:/etc/loki:ro" -e LOKI_RETENTION=24h \
             grafana/loki:3.6.17 \
             -config.file=/etc/loki/loki-config.yaml -config.expand-env=true
+          # Nazwa `alertmanager` jest wymagana: ruler Lokiego wysyła alerty pod
+          # `http://alertmanager:9093` (tak samo jak na produkcji).
+          docker run -d --name alertmanager --network walidacja -p 127.0.0.1:9093:9093 \
+            -v "$PWD/config/alertmanager:/etc/alertmanager:ro" \
+            prom/alertmanager:v0.34.1 \
+            --config.file=/etc/alertmanager/alertmanager.yml --storage.path=/alertmanager
           echo "czekam na gotowość…"
           for i in $(seq 1 30); do
             p=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:9090/-/healthy || true)
             l=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3100/metrics || true)
-            echo "  próba $i: prometheus=$p loki=$l"
-            [ "$p" = "200" ] && [ "$l" = "200" ] && exit 0
+            a=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:9093/-/ready || true)
+            echo "  próba $i: prometheus=$p loki=$l alertmanager=$a"
+            [ "$p" = "200" ] && [ "$l" = "200" ] && [ "$a" = "200" ] && exit 0
             sleep 5
           done
-          echo "::error::Prometheus lub Loki nie wstały na czas"; exit 1
+          echo "::error::Prometheus, Loki lub Alertmanager nie wstały na czas"; exit 1
 
       - name: Każde zapytanie z dashboardów musi się parsować
         env:
@@ -133,9 +143,33 @@ jobs:
           LOKI_URL: http://127.0.0.1:3100
         run: python3 scripts/ci/check_dashboard_queries.py
 
+      - name: Ruler musi wczytać wszystkie reguły (nie tylko mieć je w plikach)
+        env:
+          LOKI_URL: http://127.0.0.1:3100
+        run: |
+          echo "czekam, aż ruler wczyta reguły…"
+          for i in $(seq 1 24); do
+            if python3 scripts/ci/check_ruler_loaded.py; then exit 0; fi
+            echo "  próba $i — jeszcze nie wszystkie, czekam 5 s"
+            sleep 5
+          done
+          echo "::error::ruler nie wczytał wszystkich reguł — patrz logi Loki (parse error / unable to list rules)"
+          exit 1
+
+      - name: Każda gałąź regexu logowego musi złapać swoją linię
+        env:
+          LOKI_URL: http://127.0.0.1:3100
+        run: python3 tests/integration/verify_log_patterns.py
+
+      - name: Wstrzyknięty log musi dojść jako alert do Alertmanagera
+        env:
+          LOKI_URL: http://127.0.0.1:3100
+          ALERTMANAGER_URL: http://127.0.0.1:9093
+        run: python3 tests/integration/verify_log_rules.py --czekaj 150 --pomin-dlugie
+
       - name: Sprzątanie
         if: always()
-        run: docker rm -f walidacja-prometheus walidacja-loki || true
+        run: docker rm -f walidacja-prometheus walidacja-loki alertmanager || true
 
   python:
     name: Serwisy Pythona (testy)

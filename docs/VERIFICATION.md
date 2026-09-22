@@ -16,6 +16,8 @@ Zasada: jeśli czegoś tu nie ma, nie zakładaj, że działa — sprawdź.
 | Loki: config + 15 reguł | `loki -verify-config` + API rulera | 15 reguł w 4 grupach |
 | Alert logowy → Alertmanager | wstrzyknięty log „page verification failed" | alert `PgPageVerificationFailed` z `stack`/`service` |
 | Dalsze reguły logowe | wstrzyknięte zdarzenia (25× 5xx, ACME, SSH, jądro, Cockpit) | `AcmeCertificateRenewalFailed`, `SshLoginAccepted`, `KernelDiskErrors`, `CockpitLogin` |
+| Każda gałąź każdego regexu logowego | `tests/integration/verify_log_patterns.py` — 52 przypadki, regex czytany z plików reguł | 52/52 reaguje na swoją linię (przed poprawkami 8 gałęzi martwych) |
+| Ruler faktycznie wczytał reguły | `scripts/ci/check_ruler_loaded.py` przeciw działającemu Loki | 15 reguł w 4 grupach = dokładnie tyle, ile w plikach |
 | Potok access logu Traefika | prawdziwy plik → promtail (`| json`) → Loki | zapytanie reguły zwraca 4 błędy z 7 wpisów (kontrola negatywna OK) |
 | Journald → Loki | promtail z realnym journalem | strumienie `{job="journald", transport="kernel"}`, `unit=…` |
 | Kanał ntfy | atrapa serwera ntfy | `Title`, `Priority: urgent`, `Authorization: Bearer`, treść grupowa |
@@ -32,6 +34,8 @@ Zasada: jeśli czegoś tu nie ma, nie zakładaj, że działa — sprawdź.
 | Auto-discovery | atrapa Docker API (`tests/integration/`) | wykrywa `Host(...)` i `PathPrefix`, pomija `skip`, tryb global, zadanie padnięte jako 1/2 |
 | Serwisy Pythona | 200 testów jednostkowych | wszystkie przechodzą |
 | Walidacja przed wdrożeniem | `docker stack config` (schemat Swarma) | przechodzi |
+| Reguły wyciszania (inhibit) | 2 sztuczne alerty (`EdgeNotAcceptingTraffic` + 2× `AppDown`) wysłane do żywego Alertmanagera | `AppDown` → `suppressed`, `inhibitedBy` = alert edge'a; sam alert edge'a pozostał `active` |
+| Priorytety ntfy | atrapa ntfy + żywy notifier | `critical` → `urgent` (brzęczy), `warning` → `low`, `info` → `min` (cicho) |
 
 ### Macierz stanów kontroli backupu (zmierzona, nie założona)
 
@@ -48,6 +52,35 @@ Reguły czyta się z tego tak: `BackupNeverSucceeded` (`< 0`) łapie **potwierdz
 brak kopii, a `BackupVerificationUnavailable` (`absent`) łapie **ślepotę**.
 Rozróżnienie powstało po błędzie, w którym złe poświadczenia R2 udawały
 krytyczny alert o braku backupu.
+
+### Reguły logowe: trzy ciche awarie znalezione uruchomieniem
+
+Wszystkie trzy przeszły `-verify-config`, walidację YAML i przegląd kodu. Każda
+oznaczała alert, który **nigdy by nie zadzwonił** — a to reguły od dokładnie tych
+sygnałów, dla których ten stack powstał (korupcja bazy, błędy dysku).
+
+| Co było zepsute | Dlaczego cicho | Skala | Wykryte przez |
+| --- | --- | --- | --- |
+| `PgConnectionRefused` — cała reguła | wzorzec `FATAL:.*(a\|b\|c)` w Loki nie dopasowuje NICZEGO | 3 gałęzie | `verify_log_patterns.py` |
+| `PgPageVerificationFailed` — gałąź uszkodzenia WAL | to samo: `WAL.*(corrupt\|invalid)` | 2 gałęzie | `verify_log_patterns.py` |
+| `KernelDiskErrors` — gałęzie `nvme…` i `ata…` | `.*(a\|b)` oraz podwójny backslash `\\.` | 3 gałęzie | `verify_log_patterns.py` |
+| `KernelDiskErrors` — cały plik reguł | pojedynczy `\.` to błąd składni LogQL, więc ruler odrzuca PLIK | 1 plik, 2 reguły | log rulera + `check_ruler_loaded.py` |
+
+Zmierzone zachowanie Loki 3.6.17 (ten sam obraz, który idzie na produkcję):
+
+- `X.*(a|b)` → **zero dopasowań**, także dla linii zawierającej `a`. Obejście:
+  `X.{0,80}(a|b)` albo cokolwiek między `.*` a grupę (np. `X.* (a|b)`).
+- W `|~ "…"` escape `\.` **nie istnieje** (ruler odrzuca cały plik), a `\\.` trafia
+  do silnika regexów dosłownie (czyli wymaga backslasha w logu). Na kropkę: `[.]`,
+  na cyfry: `[0-9]`.
+- Loki nie zgłasza przy tym żadnego błędu przy pierwszym przypadku: reguła się
+  ładuje i po prostu milczy.
+
+Dlatego reguł logowych pilnują trzy kontrole: `scripts/ci/check_loki_regex.py`
+(wzorce — bez infrastruktury), `tests/integration/verify_log_patterns.py`
+(52 gałęzie, każda przeciw własnej linii logu, regex brany z plików reguł)
+i `scripts/ci/check_ruler_loaded.py` (porównuje liczbę reguł w plikach z liczbą
+faktycznie wczytaną przez ruler).
 
 ## Zmierzone (nie zgadywane)
 

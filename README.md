@@ -19,6 +19,9 @@ Wdrażany w całości z tego repozytorium przez GitHub Actions → Portainer.
 | **Logi** | centralne zbieranie (kontenery + journald + access log Traefika) i reguły logowe |
 | **Bezpieczeństwo** | logowania SSH/Cockpit, skoki nieudanych prób, bany fail2bana |
 | **Zewnętrznie** | watchdog healthchecks.io — cisza z VPS oznacza alarm |
+
+Kanał alertów: **ntfy** (push na telefon) + **e-mail** (zapas i dziennik).
+Hałasuje tylko `critical`; `warning`/`info` przychodzą jako ciche powiadomienia.
 | **Jeden widok** | panel `monitoring.subscribeit.pl` z kafelkami i żywym stanem + Grafana |
 
 ## Jak to działa w skrócie
@@ -63,6 +66,15 @@ make build      # zbuduj wszystkie 10 obrazów lokalnie
 make up         # podnieś stack (projekt monlocal, wymaga /tmp/mon-local)
 make ps         # stan usług
 make down       # sprzątanie
+```
+
+Reguły logowe mają własne, twarde kontrole (bo dwie ciche awarie przeszły przez
+wszystkie walidacje statyczne — patrz `docs/VERIFICATION.md`):
+
+```bash
+python3 scripts/ci/check_loki_regex.py     # wzorce, które w Loki dopasują NIC
+python3 tests/integration/verify_log_patterns.py   # każda gałąź regexu vs realna linia (wymaga Loki)
+LOKI_URL=… python3 scripts/ci/check_ruler_loaded.py # ile reguł ruler FAKTYCZNIE wczytał
 ```
 
 Uwagi do środowiska lokalnego: `discovery` potrzebuje **menedżera Swarma** (na zwykłym
