@@ -13,7 +13,9 @@ RUN adduser -D -H -u 10001 -s /sbin/nologin monitoring \
 
 WORKDIR /app
 COPY main.py /app/main.py
-RUN chmod 0644 /app/main.py && chown 10001:10001 /app/main.py
+# klient S3 (SigV4, tylko odczyt) dla weryfikacji backupów w R2
+COPY s3.py /app/s3.py
+RUN chmod 0644 /app/main.py /app/s3.py && chown 10001:10001 /app/main.py /app/s3.py
 
 USER 10001
 EXPOSE 8080

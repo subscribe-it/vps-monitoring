@@ -23,6 +23,19 @@ groups:
           description: "Watchdog nie znalazł w logach znacznika udanego backupu. Sprawdź usługę db-backup i dopasowanie BACKUP_SUCCESS_REGEX."
           runbook: "#backup"
 
+      # Brak serii = nie wiemy, czy backup istnieje (np. złe poświadczenia R2 albo
+      # brak dostępu do Dockera). Inny problem niż „backup na pewno nie powstał",
+      # dlatego osobny alert — i dlatego `BackupNeverSucceeded` wymaga wartości -1.
+      - alert: BackupVerificationUnavailable
+        expr: absent(monitoring_backup_age_seconds)
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Nie można zweryfikować stanu backupu"
+          description: "Watchdog nie potrafi ustalić wieku kopii (ani z R2, ani z logów usługi backupu). Monitoring backupów jest ślepy — sprawdź konfigurację R2 i dostęp do Dockera."
+          runbook: "#backup"
+
       - alert: RestoreTestOverdue
         expr: monitoring_restore_test_age_days > 45 or monitoring_restore_test_age_days < 0
         for: 1h

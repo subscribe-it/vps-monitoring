@@ -132,6 +132,12 @@ curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:9093/-/healthy || tru
 
 ## <a name="backup"></a>🔴 BackupTooOld / BackupNeverSucceeded
 **Co to znaczy:** nie ma świeżego, poprawnego dumpu.
+
+**Skąd watchdog to wie:** jeśli ustawione jest `R2_*`, sprawdza **faktyczny obiekt
+w buckecie** (najświeższy pod `R2_PREFIX`, jego wiek i rozmiar) — to odpowiada na
+pytanie „czy kopia dotarła na miejsce". Bez `R2_*` zostaje czytanie logów usługi
+backupu, co jest słabszym sygnałem (`source: "logs"` w `/backup.json`).
+
 **Sprawdź:**
 ```bash
 docker service ps ventiplan-prod_db-backup

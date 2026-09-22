@@ -17,6 +17,12 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
 def load_module(name, relative_path):
+    # Katalog serwisu musi być w sys.path, bo main.py importuje sąsiedni moduł
+    # (`s3` — klient SigV4). Bez tego import kończy się fallbackiem i testy
+    # logiki R2 nie mają czego podstawić.
+    katalog = str((ROOT / relative_path).parent)
+    if katalog not in sys.path:
+        sys.path.insert(0, katalog)
     spec = importlib.util.spec_from_file_location(name, str(ROOT / relative_path))
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
@@ -601,7 +607,7 @@ class BackupJsonTests(unittest.TestCase):
         payload = service.backup_json()
         self.assertEqual(
             sorted(payload.keys()),
-            ["age_hours", "last_success_at", "objects_in_r2", "restore_test_days", "size_bytes", "state"],
+            ["age_hours", "last_success_at", "objects_in_r2", "restore_test_days", "size_bytes", "source", "state"],
         )
         self.assertEqual(payload["state"], "ok")
         self.assertLess(payload["age_hours"], 26)
@@ -700,8 +706,112 @@ class ConfigTests(unittest.TestCase):
 
     def test_config_warnings(self):
         warnings = health.Config(env={}).config_warnings
-        self.assertEqual(len(warnings), 2)
+        self.assertEqual(len(warnings), 3)
+        self.assertTrue(any("R2" in w for w in warnings), warnings)
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class R2Tests(unittest.TestCase):
+    """Kontrola backupu przez R2: obiekt musi FAKTYCZNIE leżeć w buckecie."""
+
+    ENV = {
+        "R2_ENDPOINT": "https://konto.r2.cloudflarestorage.com",
+        "R2_BUCKET": "ventiplan-backups",
+        "R2_PREFIX": "postgres/",
+        "R2_ACCESS_KEY": "AK",
+        "R2_SECRET_KEY": "SK",
+    }
+
+    def setUp(self):
+        self.oryginal = health.s3klient.listuj_obiekty
+
+    def tearDown(self):
+        health.s3klient.listuj_obiekty = self.oryginal
+
+    def obiekty(self, *wpisy):
+        health.s3klient.listuj_obiekty = lambda *a, **k: list(wpisy)
+
+    def test_nieskonfigurowane_r2_nie_jest_bledem(self):
+        service = build_service()  # brak R2_* w env
+        outcome, info, liczba = service.check_r2()
+        self.assertIsNone(outcome)
+        self.assertIsNone(info)
+        self.assertEqual(liczba, 0)
+
+    def test_swiezy_obiekt_przechodzi(self):
+        self.obiekty({"key": "postgres/dump.age", "size": 5_000_000,
+                      "last_modified": now_minus(hours=3)})
+        service = build_service(env=self.ENV)
+        outcome, info, liczba = service.check_r2()
+        self.assertTrue(outcome.ok, outcome.detail)
+        self.assertEqual(liczba, 1)
+        self.assertEqual(info.size_bytes, 5_000_000)
+        self.assertLess(info.last_success_at and (datetime.now(timezone.utc) - info.last_success_at).total_seconds() / 3600, 26)
+
+    def test_stary_obiekt_to_awaria(self):
+        self.obiekty({"key": "postgres/dump.age", "size": 5_000_000,
+                      "last_modified": now_minus(hours=40)})
+        service = build_service(env=self.ENV)
+        outcome, info, _ = service.check_r2()
+        self.assertFalse(outcome.ok)
+        self.assertIn("40", outcome.detail.replace(",", "."))
+
+    def test_za_maly_obiekt_to_awaria(self):
+        self.obiekty({"key": "postgres/dump.age", "size": 100,
+                      "last_modified": now_minus(hours=2)})
+        service = build_service(env=dict(self.ENV, BACKUP_MIN_SIZE_MB="1"))
+        outcome, _, _ = service.check_r2()
+        self.assertFalse(outcome.ok)
+        self.assertIn("rozmiar", outcome.detail)
+
+    def test_pusty_bucket_to_awaria(self):
+        self.obiekty()
+        service = build_service(env=self.ENV)
+        outcome, info, liczba = service.check_r2()
+        self.assertFalse(outcome.ok)
+        self.assertIn("nie ma żadnych obiektów", outcome.detail)
+        self.assertEqual(liczba, 0)
+
+    def test_niedostepne_r2_nie_wywala_serwisu(self):
+        def wybuch(*a, **k):
+            raise OSError("połączenie odrzucone")
+        health.s3klient.listuj_obiekty = wybuch
+        service = build_service(env=self.ENV)
+        outcome, _, _ = service.check_r2()
+        self.assertFalse(outcome.ok)
+        self.assertIn("R2 nie odpowiada", outcome.detail)
+
+    def test_wybiera_najswiezszy_obiekt(self):
+        self.obiekty(
+            {"key": "postgres/stary.age", "size": 1, "last_modified": now_minus(hours=50)},
+            {"key": "postgres/nowy.age", "size": 9_000_000, "last_modified": now_minus(hours=2)},
+        )
+        service = build_service(env=self.ENV)
+        outcome, info, liczba = service.check_r2()
+        self.assertTrue(outcome.ok, outcome.detail)
+        self.assertEqual(liczba, 2)
+        self.assertEqual(info.matched_line, "postgres/nowy.age")
+
+    def test_awaria_kontroli_w_run_once_nie_wywraca_serwisu(self):
+        """Regresja: nieudana kontrola R2 zwracała None jako BackupInfo i /backup.json
+        odpowiadało 500 (AttributeError: NoneType has no last_success_at)."""
+        self.obiekty()  # pusty bucket
+        service = build_service(env=self.ENV)
+        service.run_once()                       # nie może rzucić wyjątku
+        payload = service.backup_json()          # ani wywrócić się na None
+        self.assertEqual(payload["state"], "critical")
+        self.assertIsNone(payload["age_hours"])
+        self.assertEqual(payload["source"], "r2")
+        self.assertFalse(service.results["backup"].ok)
+
+    def test_brak_backupu_wystawia_metryke_ujemna(self):
+        """-1 w metryce to sygnał dla reguły BackupNeverSucceeded (< 0)."""
+        self.obiekty()
+        service = build_service(env=self.ENV)
+        service.run_once()
+        self.assertEqual(service.backup_age_seconds, -1.0)
+        tekst = service.metrics()
+        self.assertIn("monitoring_backup_age_seconds -1", tekst)

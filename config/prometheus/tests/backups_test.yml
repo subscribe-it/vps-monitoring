@@ -62,3 +62,19 @@ tests:
               summary: 'Powiadomienia nie są dostarczane'
               description: '15 nieudanych wysyłek w 15 minut (kanał ntfy). Alerty istnieją, ale do Ciebie nie docierają.'
               runbook: '#notifications'
+
+  - name: brak jakichkolwiek danych o backupie -> monitoring jest ślepy
+    interval: 1m
+    input_series:
+      - series: 'monitoring_all_ok'
+        values: '0x60'
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: BackupVerificationUnavailable
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: 'Nie można zweryfikować stanu backupu'
+              description: 'Watchdog nie potrafi ustalić wieku kopii (ani z R2, ani z logów usługi backupu). Monitoring backupów jest ślepy — sprawdź konfigurację R2 i dostęp do Dockera.'
+              runbook: '#backup'

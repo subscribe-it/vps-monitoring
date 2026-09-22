@@ -67,6 +67,12 @@ def log_error(msg, *args):
 # --------------------------------------------------------------------------
 # Konfiguracja
 # --------------------------------------------------------------------------
+try:  # brak modułu nie może wywalić całego watchdoga
+    import s3 as s3klient
+except ImportError:  # pragma: no cover
+    s3klient = None
+
+
 class ConfigError(RuntimeError):
     pass
 
@@ -86,6 +92,14 @@ class Config:
         self.backup_success_regex = (env.get("BACKUP_SUCCESS_REGEX", "") or "").strip()
         self.backup_max_age_hours = _env_float(env, "BACKUP_MAX_AGE_HOURS", 26.0, minimum=1.0)
         self.backup_min_size_mb = _env_float(env, "BACKUP_MIN_SIZE_MB", 0.0, minimum=0.0)
+        # R2: jeśli podane, to ON jest źródłem prawdy o backupie (obiekt fizycznie
+        # leży w buckecie), a logi usługi backupu służą już tylko jako zapas.
+        self.r2_endpoint = (env.get("R2_ENDPOINT", "") or "").strip()
+        self.r2_bucket = (env.get("R2_BUCKET", "") or "").strip()
+        self.r2_prefix = (env.get("R2_PREFIX", "") or "").strip()
+        self.r2_access_key = (env.get("R2_ACCESS_KEY", "") or "").strip()
+        self.r2_secret_key = (env.get("R2_SECRET_KEY", "") or "").strip()
+        self.r2_region = (env.get("R2_REGION", "auto") or "auto").strip()
         self.disk_min_free_percent = _env_float(env, "DISK_MIN_FREE_PERCENT", 15.0, minimum=0.0)
         self.inodes_min_free_percent = _env_float(env, "INODES_MIN_FREE_PERCENT", 10.0, minimum=0.0)
         self.cert_min_days = _env_float(env, "CERT_MIN_DAYS", 14.0, minimum=0.0)
@@ -99,12 +113,24 @@ class Config:
         self.ping_timeout = _env_float(env, "PING_TIMEOUT_SECONDS", 10.0, minimum=1.0)
 
     @property
+    def r2_configured(self):
+        return bool(
+            self.r2_endpoint and self.r2_bucket and self.r2_access_key and self.r2_secret_key
+            and s3klient is not None
+        )
+
+    @property
     def config_warnings(self):
         warnings = []
         if not self.hc_ping_all_ok:
             warnings.append("HC_PING_ALL_OK nie jest ustawione — pingi do healthchecks.io są pomijane")
         if not self.hc_ping_backup:
             warnings.append("HC_PING_BACKUP nie jest ustawione — ping backupu jest pomijany")
+        if not self.r2_configured:
+            warnings.append(
+                "R2 nie jest skonfigurowane (R2_ENDPOINT/BUCKET/ACCESS_KEY/SECRET_KEY) — "
+                "wiek backupu pochodzi tylko z logów usługi backupu"
+            )
         return warnings
 
 
@@ -765,6 +791,8 @@ class HealthPing:
         self.backup_info = BackupInfo()
         self.backup_state = "unknown"
         self.backup_age_seconds = None
+        self.objects_in_r2 = 0
+        self.backup_source = "none"
         self.restore_test_days = 0.0
         self.last_ping = {}
         self.ping_failures = {target: 0 for target in PING_TARGETS}
@@ -899,17 +927,29 @@ class HealthPing:
         try:
             containers = self.docker.containers()
         except Exception as exc:  # noqa: BLE001 - brak Dockera => backup nieznany
-            return CheckOutcome(False, "Docker API niedostępne: %s" % exc), BackupInfo()
+            # Nie da się sprawdzić ≠ brak kopii. Patrz rozróżnienie w run_once.
+            return (
+                CheckOutcome(False, "Docker API niedostępne: %s" % exc, data={"unverified": True}),
+                BackupInfo(),
+            )
         container = find_backup_container(containers, self.config.backup_service)
         if container is None:
-            return CheckOutcome(
-                False, "nie znaleziono kontenera usługi %s" % self.config.backup_service
-            ), BackupInfo()
+            return (
+                CheckOutcome(
+                    False,
+                    "nie znaleziono kontenera usługi %s" % self.config.backup_service,
+                    data={"unverified": True},
+                ),
+                BackupInfo(),
+            )
         container_id = container.get("Id") or ""
         try:
             raw = self.docker.container_logs(container_id, tail=2000)
         except Exception as exc:  # noqa: BLE001
-            return CheckOutcome(False, "nie mogę odczytać logów backupu: %s" % exc), BackupInfo()
+            return (
+                CheckOutcome(False, "nie mogę odczytać logów backupu: %s" % exc, data={"unverified": True}),
+                BackupInfo(),
+            )
         text = parse_docker_log_stream(raw)
         try:
             info = extract_backup_info(text, self.config.backup_success_regex or None)
@@ -970,6 +1010,90 @@ class HealthPing:
             return CheckOutcome(True, "Alertmanager odpowiada 200")
         return CheckOutcome(False, "Alertmanager /-/healthy zwrócił HTTP %s" % status)
 
+    # -- R2 ----------------------------------------------------------------
+    def check_r2(self):
+        """Czy świeży backup FAKTYCZNIE leży w buckecie (a nie tylko w logach).
+
+        Zwraca (CheckOutcome, BackupInfo, liczba_obiektów) albo (None, None, 0),
+        gdy R2 nie jest skonfigurowane — wtedy watchdog korzysta z logów.
+        """
+        if not self.config.r2_configured:
+            return None, None, 0
+        try:
+            obiekty = s3klient.listuj_obiekty(
+                self.config.r2_endpoint,
+                self.config.r2_bucket,
+                self.config.r2_prefix,
+                self.config.r2_access_key,
+                self.config.r2_secret_key,
+                region=self.config.r2_region,
+            )
+        except urllib.error.HTTPError as exc:
+            # Brak bucketa to FAKT (backupy nie mają gdzie trafić) → stan krytyczny.
+            # Błąd poświadczeń/sieci to ślepota → „nie mogę zweryfikować".
+            tresc = ""
+            try:
+                tresc = exc.read().decode("utf-8", "replace")[:400]
+            except Exception:  # noqa: BLE001
+                pass
+            if getattr(exc, "code", None) == 404 and "NoSuchBucket" in tresc:
+                return (
+                    CheckOutcome(False, "bucket %s nie istnieje" % self.config.r2_bucket),
+                    None,
+                    0,
+                )
+            return (
+                CheckOutcome(False, "R2 odrzuciło żądanie: HTTP %s %s"
+                             % (getattr(exc, "code", "?"), tresc.strip()[:120]),
+                             data={"unverified": True}),
+                None,
+                0,
+            )
+        except Exception as exc:  # noqa: BLE001 - sieć/poświadczenia: raportujemy, nie wywalamy
+            # To NIE jest dowód braku backupu, tylko brak możliwości sprawdzenia.
+            # Rozróżnienie ma znaczenie: inaczej złe poświadczenia R2 udawałyby
+            # krytyczny alert o braku kopii.
+            return (
+                CheckOutcome(False, "R2 nie odpowiada: %s: %s" % (type(exc).__name__, exc),
+                             data={"unverified": True}),
+                None,
+                0,
+            )
+
+        if not obiekty:
+            return (
+                CheckOutcome(False, "w buckecie %s pod prefiksem '%s' nie ma żadnych obiektów"
+                             % (self.config.r2_bucket, self.config.r2_prefix or "/")),
+                None,
+                0,
+            )
+
+        najnowszy = max(obiekty, key=lambda o: o["last_modified"] or datetime.min.replace(tzinfo=timezone.utc))
+        if najnowszy["last_modified"] is None:
+            return CheckOutcome(False, "R2 zwróciło obiekt bez daty modyfikacji"), None, len(obiekty)
+
+        wiek_h = (datetime.now(timezone.utc) - najnowszy["last_modified"]).total_seconds() / 3600.0
+        problemy = []
+        if wiek_h >= self.config.backup_max_age_hours:
+            problemy.append("najświeższy obiekt ma %.1f h (próg %.1f h)" % (wiek_h, self.config.backup_max_age_hours))
+        if self.config.backup_min_size_mb > 0 and najnowszy["size"] < self.config.backup_min_size_mb * 1e6:
+            problemy.append("rozmiar %.2f MB poniżej progu %.1f MB"
+                            % (najnowszy["size"] / 1e6, self.config.backup_min_size_mb))
+        info = BackupInfo(
+            last_success_at=najnowszy["last_modified"],
+            size_bytes=najnowszy["size"],
+            matched_line=najnowszy["key"],
+            timestamp_source="r2",
+        )
+        if problemy:
+            return CheckOutcome(False, "; ".join(problemy) + " (obiekt: %s)" % najnowszy["key"]), info, len(obiekty)
+        return (
+            CheckOutcome(True, "R2: %s, %.2f MB, %.1f h temu (obiektów: %d)"
+                         % (najnowszy["key"], najnowszy["size"] / 1e6, wiek_h, len(obiekty))),
+            info,
+            len(obiekty),
+        )
+
     # -- przebieg ----------------------------------------------------------
     def run_once(self):
         results = {}
@@ -979,7 +1103,11 @@ class HealthPing:
         results["services"] = metric_error if metric_error is not None else self.check_services(samples)
         results["certs"] = metric_error if metric_error is not None else self.check_certs(samples)
         results["http"] = self.check_http()
-        backup_outcome, backup_info = self.check_backup()
+        backup_outcome, backup_info, obiekty_r2 = self.check_r2()
+        zrodlo_backupu = "r2"
+        if backup_outcome is None:  # R2 nieskonfigurowane -> czytamy logi usługi backupu
+            backup_outcome, backup_info = self.check_backup()
+            zrodlo_backupu = "logs"
         results["backup"] = backup_outcome
         results["restore_test"] = self.check_restore_test()
         results["alertmanager"] = self.check_alertmanager()
@@ -993,16 +1121,32 @@ class HealthPing:
             self.all_ok = all_ok
             self.up = True
             self.last_run = self.clock()
-            self.backup_info = backup_info
-            self.backup_age_seconds = (
-                (datetime.now(timezone.utc) - backup_info.last_success_at).total_seconds()
-                if backup_info.last_success_at
-                else None
-            )
+            # UWAGA: gdy kontrola R2 zawiedzie (złe poświadczenia, pusty bucket),
+            # nie ma żadnego BackupInfo — wcześniej wywracało to /backup.json (500).
+            self.backup_info = backup_info if backup_info is not None else BackupInfo()
+            self.objects_in_r2 = obiekty_r2
+            self.backup_source = zrodlo_backupu
+            if self.backup_info.last_success_at is not None:
+                self.backup_age_seconds = (
+                    datetime.now(timezone.utc) - self.backup_info.last_success_at
+                ).total_seconds()
+            elif not backup_outcome.ok and not getattr(backup_outcome, "data", {}).get("unverified"):
+                # Wartość specjalna (-1) → metryka jest wystawiona, więc reguła
+                # `BackupNeverSucceeded` (monitoring_backup_age_seconds < 0) zadzwoni.
+                # W przypadku „nie mogę sprawdzić" metryki NIE ma — brak serii jest
+                # czytelniejszy niż fałszywe „backup nie istnieje".
+                self.backup_age_seconds = -1.0
+            else:
+                self.backup_age_seconds = None
             self.restore_test_days = float(results["restore_test"].data.get("days") or 0.0)
-            if backup_info.last_success_at is None:
+            slepy = bool(getattr(backup_outcome, "data", {}).get("unverified")) and not backup_outcome.ok
+            if self.backup_info.last_success_at is None and slepy:
+                self.backup_state = "unknown"          # nie wiemy — monitoring jest ślepy
+            elif not backup_outcome.ok and self.backup_info.last_success_at is None:
+                self.backup_state = "critical"         # potwierdzone: kopii nie ma
+            elif self.backup_info.last_success_at is None:
                 self.backup_state = "unknown"
-            elif not backup_outcome.ok and self.backup_age_seconds > self.config.backup_max_age_hours * 3600 * 2:
+            elif not backup_outcome.ok and (self.backup_age_seconds or 0) > self.config.backup_max_age_hours * 3600 * 2:
                 self.backup_state = "critical"
             elif backup_outcome.ok:
                 self.backup_state = "ok"
@@ -1096,15 +1240,18 @@ class HealthPing:
 
     def backup_json(self):
         with self._lock:
-            info = self.backup_info
+            info = self.backup_info or BackupInfo()
             return {
                 "state": self.backup_state,
                 "last_success_at": iso_z(info.last_success_at.timestamp()) if info.last_success_at else None,
                 "age_hours": (
-                    round(self.backup_age_seconds / 3600.0, 2) if self.backup_age_seconds is not None else None
+                    round(self.backup_age_seconds / 3600.0, 2)
+                    if self.backup_age_seconds is not None and self.backup_age_seconds >= 0
+                    else None
                 ),
                 "size_bytes": int(info.size_bytes or 0),
-                "objects_in_r2": 0,  # brak dostępu do R2 z tego serwisu (patrz README)
+                "objects_in_r2": int(self.objects_in_r2),
+                "source": self.backup_source,
                 "restore_test_days": int(round(self.restore_test_days)),
             }
 

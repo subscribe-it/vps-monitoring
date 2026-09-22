@@ -24,11 +24,30 @@ Zasada: jeśli czegoś tu nie ma, nie zakładaj, że działa — sprawdź.
 | Grafana: provisioning | uruchomiona Grafana | 4 dashboardy, `database: ok` |
 | Panel w przeglądarce | Chrome DevTools na zbudowanym obrazie | 0 błędów w konsoli, 7 sekcji, iframe 704/800 px, 375 px bez przewijania |
 | Kontrakt panel ↔ discovery | prawdziwy `/status/api.json` → parser panelu | `isStatusSnapshot` = true, formatowanie pl-PL |
+| Klient S3 (SigV4) dla R2 | **prawdziwy serwer S3** (MinIO): poprawne poświadczenia, zły sekret, zły klucz, pusty prefiks | obiekt odczytany; złe poświadczenia odrzucone (`SignatureDoesNotMatch`) |
+| Weryfikacja backupu przez R2 | watchdog w kontenerze przeciwko MinIO; trzy stany | patrz macierz niżej |
+| Zapytania z dashboardów | Prometheus + Loki: wszystkie `expr` z 4 dashboardów | 56 PromQL + 10 LogQL — poprawne |
 | Logowanie do Grafany przez nagłówek | `curl` z i bez `X-User` | bez nagłówka 401 (bezpieczny fallback), z nagłówkiem zalogowany jako **Org Admin** |
 | Testy progów alertów | `promtool test rules`, 6 plików | wszystkie grupy reguł pokryte (44 reguły) |
 | Auto-discovery | atrapa Docker API (`tests/integration/`) | wykrywa `Host(...)` i `PathPrefix`, pomija `skip`, tryb global, zadanie padnięte jako 1/2 |
-| Serwisy Pythona | 191 testów jednostkowych | wszystkie przechodzą |
+| Serwisy Pythona | 200 testów jednostkowych | wszystkie przechodzą |
 | Walidacja przed wdrożeniem | `docker stack config` (schemat Swarma) | przechodzi |
+
+### Macierz stanów kontroli backupu (zmierzona, nie założona)
+
+| Przypadek | `state` | `source` | obiektów | `monitoring_backup_age_seconds` | `check_ok{check="backup"}` |
+| --- | --- | --- | --- | --- | --- |
+| świeży obiekt w buckecie | `ok` | `r2` | 1 | wiek w sekundach | 1 |
+| złe poświadczenia / brak sieci (ślepota) | `unknown` | `r2` | 0 | **brak serii** | 0 |
+| bucket nie istnieje (fakt) | `critical` | `r2` | 0 | **-1** | 0 |
+| brak sukcesu w logach usługi backupu | `critical` | `logs` | 0 | **-1** | 0 |
+| brak Dockera i brak R2 (ślepota) | `unknown` | `logs` | 0 | **brak serii** | 0 |
+| R2 nieskonfigurowane, logi pokazują sukces | `ok` | `logs` | 0 | wiek w sekundach | 1 |
+
+Reguły czyta się z tego tak: `BackupNeverSucceeded` (`< 0`) łapie **potwierdzony**
+brak kopii, a `BackupVerificationUnavailable` (`absent`) łapie **ślepotę**.
+Rozróżnienie powstało po błędzie, w którym złe poświadczenia R2 udawały
+krytyczny alert o braku backupu.
 
 ## Zmierzone (nie zgadywane)
 
