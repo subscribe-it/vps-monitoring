@@ -115,6 +115,7 @@ import ToolGrid from '../components/ToolGrid.astro';
     STANY_FILTRA,
     czyAktywny,
     doHasza,
+    etykietaSortowania,
     filtrujAlerty,
     filtrujCertyfikaty,
     filtrujEndpointy,
@@ -166,6 +167,12 @@ import ToolGrid from '../components/ToolGrid.astro';
     let debounceFiltra: number | null = null;
     /** Piszemy do hasza sami — nie traktuj tego jako wejścia z linku. */
     let haszZNaszegoPisania = false;
+    /**
+     * Ostatni hasz widoku stanu. Trasa narzędzia (`#/tool/…`) nie niesie
+     * filtra, więc żeby powrót z podglądu nie gubił ustawień, zapamiętujemy
+     * hasz stanu i to jego wstawiamy w link „Wróć do stanu".
+     */
+    let ostatniHaszStatusu = '#/';
     const KLUCZ_ZWINIETE = 'monitoring:zwiete-stacki';
 
     /* ---------------- pomocnicze DOM ---------------- */
@@ -461,6 +468,14 @@ import ToolGrid from '../components/ToolGrid.astro';
       grid.dataset.state = state;
 
       if (!holder) return;
+      if (empty) empty.hidden = tools.length > 0;
+      /*
+       * Kafelki przebudowujemy tylko przy zmianie danych o narzędziach.
+       * `renderAll` chodzi po każdym odświeżeniu (30 s) i po każdym kliknięciu
+       * w filtr — wymiana siedmiu węzłów w tym takcie to niepotrzebne miganie
+       * paska (i gubienie `aria-current`, które ustawia dopiero router).
+       */
+      if (!stale('tools', tools)) return;
       holder.replaceChildren();
 
       for (const tool of tools) {
@@ -491,8 +506,6 @@ import ToolGrid from '../components/ToolGrid.astro';
 
         holder.append(tile);
       }
-
-      if (empty) empty.hidden = tools.length > 0;
     }
 
     function highlightActiveTool(activeId: string | null): void {
@@ -1031,6 +1044,12 @@ import ToolGrid from '../components/ToolGrid.astro';
       const open = q<HTMLAnchorElement>(app, '[data-role="frame-open"]');
       const openMobile = q<HTMLAnchorElement>(app, '[data-role="frame-open-mobile"]');
 
+      // Powrót prowadzi do ostatniego widoku stanu (z filtrem i fokusem), a nie
+      // do gołego `#/` — wejście w podgląd nie może kasować ustawień widoku.
+      for (const powrot of qa<HTMLAnchorElement>(app, '[data-role="back"]')) {
+        powrot.href = ostatniHaszStatusu;
+      }
+
       setText(app, '[data-role="frame-title"]', tool ? tool.name : id);
       setState(app, '[data-role="frame-state"]', tool ? tool.state : 'unknown');
       setText(app, '[data-role="frame-state-label"]', tool ? stateLabel(tool.state) : 'Nieznany');
@@ -1146,14 +1165,29 @@ import ToolGrid from '../components/ToolGrid.astro';
       renderAll();
     }
 
+    /**
+     * Czy hasz opisuje trasę podglądu narzędzia (`#/tool/<id>`)?
+     *
+     * Rozróżnienie jest konieczne, bo hasz pełni dwie role: niesie filtr
+     * widoku stanu (`#/?q=…`) i trasę podglądu. Klik w kafelek zmienia hasz
+     * na trasę, ale `app.dataset.view` jest jeszcze `status` (widok przerysuje
+     * się dopiero po `applyRoute`) — bez tego warunku `syncHash` nadpisywał
+     * świeżo ustawioną trasę haszem stanu i klik w kafelek „nic nie robił".
+     */
+    function czyTrasaNarzedzia(hash: string = window.location.hash): boolean {
+      return hash.startsWith('#/tool/');
+    }
+
     function syncHash(): void {
-      // W widoku narzędzia hasz należy do ramki — nie nadpisujemy go filtrem.
+      // Trasa podglądu i widok narzędzia należą do ramki — filtr ich nie rusza.
+      if (czyTrasaNarzedzia()) return;
       if (app.dataset.view !== 'status') return;
       const docelowy = doHasza(filtr, fokus);
       if (window.location.hash === docelowy) return;
       haszZNaszegoPisania = true;
       try {
         window.history.replaceState(null, '', docelowy);
+        ostatniHaszStatusu = docelowy;
       } finally {
         haszZNaszegoPisania = false;
       }
@@ -1162,9 +1196,13 @@ import ToolGrid from '../components/ToolGrid.astro';
     /** Wejście z linku (albo Wstecz): hasz jest źródłem prawdy dla filtra i fokusu. */
     function wczytajStanZHasza(): void {
       if (haszZNaszegoPisania) return;
+      // Trasa narzędzia nie zawiera filtra — wejście w podgląd (i powrót z
+      // niego przez Wstecz) nie może kasować ustawień widoku stanu.
+      if (czyTrasaNarzedzia()) return;
       const stan = zHasza(window.location.hash);
       filtr = stan.filtr;
       fokus = stan.fokus;
+      ostatniHaszStatusu = window.location.hash || '#/';
       if (fokus) {
         const czesci = rozbijFokus(fokus);
         if (czesci) zwieteStacki.delete(czesci.stack);
@@ -1488,16 +1526,29 @@ import ToolGrid from '../components/ToolGrid.astro';
       }
     }
 
+    /**
+     * Wskaźnik aktywnego sortowania: `aria-sort` na `<th>` (dla czytników
+     * ekranu), `data-kierunek` na przycisku (dla CSS — strzałka w SVG tylko
+     * w aktywnej kolumnie) i `title`, który mówi wprost, co się stanie po
+     * kliknięciu. Kolumny nieaktywne nie mają ani strzałki, ani `aria-sort`.
+     */
     function ustawAriaSort(): void {
       for (const naglowek of qa<HTMLElement>(app, '[data-section="stacks"] thead th')) {
         const przycisk = q<HTMLElement>(naglowek, '[data-sort]');
         const klucz = przycisk?.dataset.sort;
-        const aktywny = klucz === filtr.sort;
+        const aktywny = klucz !== undefined && klucz === filtr.sort;
+        const kierunek = aktywny ? filtr.kierunek : null;
         naglowek.setAttribute(
           'aria-sort',
-          aktywny ? (filtr.kierunek === 'desc' ? 'descending' : 'ascending') : 'none',
+          kierunek === null ? 'none' : kierunek === 'desc' ? 'descending' : 'ascending',
         );
-        if (przycisk) przycisk.dataset.kierunek = aktywny ? filtr.kierunek : '';
+        if (!przycisk) continue;
+        przycisk.dataset.kierunek = kierunek ?? '';
+        const nazwa = etykietaSortowania(klucz as KluczSortowania);
+        przycisk.title =
+          kierunek === null
+            ? `Sortuj usługi w stacku po: ${nazwa}`
+            : `${nazwa} — sortowanie ${kierunek === 'desc' ? 'malejąco' : 'rosnąco'} w obrębie stacka; kliknij, aby odwrócić`;
       }
     }
 

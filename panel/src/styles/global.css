@@ -1118,15 +1118,31 @@
     color: var(--color-base-content);
   }
 
-  .th-sort[data-kierunek]:not([data-kierunek=""])::after {
-    content: "↓";
-    font-family: var(--font-mono);
-    font-size: 0.75rem;
+  /*
+   * Wskaźnik sortowania. Slot ma STAŁĄ szerokość i jest obecny w każdej
+   * kolumnie, a strzałkę widać tylko w aktywnej — dzięki temu klik w nagłówek
+   * nie zmienia szerokości kolumny (wcześniej glif `::after` dochodził ~30 px
+   * i cała tabela przesuwała się w bok) ani nie miga przy przemalowaniu sekcji.
+   * Samą strzałkę rysuje SVG z `SortableTh.astro` (12 px, stroke 2), a nie
+   * znak fontu, więc jej rozmiar i wyrównanie nie zależą od font-family.
+   */
+  .sort-ikona {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    width: 0.75rem;
+    height: 0.75rem;
     color: var(--color-primary);
   }
 
-  .th-sort[data-kierunek="asc"]::after {
-    content: "↑";
+  .sort-ikona svg {
+    display: none;
+  }
+
+  .th-sort[data-kierunek="asc"] .sort-ikona svg[data-role="sort-asc"],
+  .th-sort[data-kierunek="desc"] .sort-ikona svg[data-role="sort-desc"] {
+    display: block;
   }
 
   th[aria-sort="ascending"],

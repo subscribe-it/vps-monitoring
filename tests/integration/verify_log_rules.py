@@ -35,17 +35,17 @@ AM = os.environ.get("ALERTMANAGER_URL", "http://127.0.0.1:9093").rstrip("/")
 
 # (alert, strumień, treść linii) — treści są wzięte z REALNYCH formatów logów
 PRZYPADKI = [
-    ("PgPageVerificationFailed", {"stack": "ventiplan-prod", "service": "postgres"},
+    ("PgPageVerificationFailed", {"stack": "ventiplan-prod", "service": "ventiplan-prod_postgres"},
      "2026-09-21 01:13:07 UTC [123] LOG:  page verification failed, calculated checksum 1 but expected 2"),
-    ("PgPanic", {"stack": "ventiplan-prod", "service": "postgres"},
+    ("PgPanic", {"stack": "ventiplan-prod", "service": "ventiplan-prod_postgres"},
      "2026-09-21 01:13:07 UTC [123] PANIC:  database system was interrupted; last known up at 2026-09-21 01:00:00 UTC"),
-    ("PgStorageProblem", {"stack": "ventiplan-prod", "service": "postgres"},
+    ("PgStorageProblem", {"stack": "ventiplan-prod", "service": "ventiplan-prod_postgres"},
      "2026-09-21 01:13:07 UTC [123] ERROR:  could not extend file: No space left on device"),
-    ("PgConnectionRefused", {"stack": "ventiplan-prod", "service": "postgres"},
+    ("PgConnectionRefused", {"stack": "ventiplan-prod", "service": "ventiplan-prod_postgres"},
      "2026-09-21 01:13:07 UTC [123] FATAL:  sorry, too many clients already"),
-    ("AcmeCertificateRenewalFailed", {"stack": "portainer-edge-gateway", "service": "traefik"},
+    ("AcmeCertificateRenewalFailed", {"stack": "portainer-edge-gateway", "service": "portainer-edge-gateway_traefik"},
      'level=error msg="Unable to obtain ACME certificate for domains \\"x.pl\\": error: acme: error: 429 rateLimited"'),
-    ("TraefikRouterError", {"stack": "portainer-edge-gateway", "service": "traefik"},
+    ("TraefikRouterError", {"stack": "portainer-edge-gateway", "service": "portainer-edge-gateway_traefik"},
      'level=error msg="error while building router: cannot find service for router x"'),
     ("SshLoginAccepted", {"job": "journald", "unit": "ssh.service"},
      "Accepted publickey for ubuntu from 195.60.64.7 port 43210 ssh2: ED25519 SHA256:abc"),

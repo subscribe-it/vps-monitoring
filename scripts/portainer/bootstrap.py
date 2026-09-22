@@ -431,6 +431,13 @@ def main() -> int:
             # zadania z obrazu rozwiązanego lokalnie po tagu `:main`, więc bez
             # świeżego pullu wstaje ten sam, stary digest (wdrożenie „udane”,
             # kod stary — zmierzone).
+            #
+            # UWAGA (zmierzone 22.09.2026): dla obrazów z PRYWATNEGO GHCR ten
+            # pull zwraca 401, bo Docker API wymaga nagłówka `X-Registry-Auth`
+            # (Portainer nie oddaje haseł przez `/api/registries`, więc nie ma
+            # z czego go zbudować). Właściwy pull robi za nas Portainer przez
+            # `"pullImage": true` w aktualizacji stacka — używa wtedy swoich
+            # zapisanych danych rejestru (u nas: rejestr id=4 `ghcr.io`).
             kod, svc = api("GET", f"/api/endpoints/{eid}/docker/services")
             obrazy = set()
             if kod == 200 and isinstance(svc, list):
@@ -444,13 +451,19 @@ def main() -> int:
                 repo, _, tag = obraz.partition(":")
                 kod, _ = api("POST", f"/api/endpoints/{eid}/docker/images/create"
                                      f"?fromImage={urllib.parse.quote(repo, safe='')}&tag={urllib.parse.quote(tag or 'latest', safe='')}")
-                print(f"    pull {obraz} → HTTP {kod} {'✓' if kod == 200 else '✗ (użyję lokalnej wersji)'}")
+                opis = "✓" if kod == 200 else "✗ (rejestr prywatny — pull zrobi Portainer przez pullImage)"
+                print(f"    pull {obraz} → HTTP {kod} {opis}")
 
             tresc = open(plik, encoding="utf-8").read()
             kod, odp = api("PUT", f"/api/stacks/{sid}?endpointId={eid}", {
                 "stackFileContent": tresc,
                 "env": env,
                 "prune": False,
+                # Bez tego Swarm zostaje na starym digestcie: nowe zadania wstają
+                # z obrazu, który już jest na węźle. `pullImage` każe Portainerowi
+                # pobrać obrazy Z JEGO uwierzytelnieniem rejestru (inaczej niż
+                # nasze `images/create`, które dla GHCR dostaje 401).
+                "pullImage": bool(args.pull),
             })
             ok = kod in (200, 201)
             print(f"  redeploy z PLIKU ({plik}) → HTTP {kod} {'✓' if ok else '✗ ' + str(odp)[:200]}")

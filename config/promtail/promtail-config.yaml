@@ -7,8 +7,14 @@ server:
   grpc_listen_port: 0
   log_level: info
 
+# Pozycje czytania leżą na WOLUMENIE (montaż `promtail_positions:/positions`
+# w docker-compose.yml), a nie w /tmp. W /tmp ginęły przy każdym restarcie
+# kontenera, a wtedy promtail czyta wszystkie pliki od początku — razem z wpisami
+# starszymi niż 7 dni, które Loki odrzuca (HTTP 400 „timestamp too old”), gubiąc
+# całe paczki. Zmierzone 22.09.2026 przy odtwarzaniu stacku: 299 odrzuconych
+# paczek i 39,6 MB logów straconych.
 positions:
-  filename: /tmp/positions.yaml
+  filename: /positions/positions.yaml
 
 clients:
   - url: ${LOKI_URL}
@@ -32,7 +38,15 @@ scrape_configs:
         target_label: container
       - source_labels: ['__meta_docker_container_label_com_docker_swarm_service_name']
         target_label: service
-      - source_labels: ['__meta_docker_container_label_com_docker_swarm_stack_namespace']
+      # `stack` MUSI być czytane z `com.docker.stack.namespace`. Docker NIE
+      # ustawia kontenerom `com.docker.swarm.stack.namespace` (sprawdzone
+      # 22.09.2026 na żywym promtailu: /targets pokazuje 156 wystąpień
+      # `com_docker_stack_namespace` i ZERO `com_docker_swarm_stack_namespace`).
+      # Poprzednia wersja czytała tę nieistniejącą etykietę, więc `stack` było
+      # puste, Loki puste etykiety pomija — i wszystko, co filtruje po `stack=`,
+      # milczało: panel „Logi — przeglądanie” (zmienna `stack` z `label_values`)
+      # był pusty, a reguły Lokiego z `{stack="…”}` nie mogły się zapalić.
+      - source_labels: ['__meta_docker_container_label_com_docker_stack_namespace']
         target_label: stack
       - source_labels: ['__meta_docker_container_log_stream']
         target_label: stream
@@ -65,6 +79,13 @@ scrape_configs:
         regex: '(ssh\.service|cockpit[^;]*|fail2ban\.service|docker\.service|containerd\.service);.*|;kernel'
 
   # --- 3) access log Traefika (cudzy wolumen, tylko :ro) --------------------
+  # Zmierzone 22.09.2026: plik `/traefik-logs/access.log` istnieje i rośnie
+  # (2,0 MB, ~2,3 tys. wpisów/h), a promtail przeczytał go w całości — czyli
+  # access log edge JEST włączony i alert TraefikNoAccessLogs słusznie milczy.
+  # Kontener Traefika montuje ten sam wolumen jako `/var/log/traefik`.
+  # `RequestHost` z JSON-a jest etykietą strumienia, więc filtrowanie po domenie
+  # działa bez `| json`. Uwaga: nginx z ModSecurity w edge (cudzy stack) NIE
+  # loguje żądań do stdout — jego blokady widać wyłącznie jako 403/429 tutaj.
   - job_name: traefik
     static_configs:
       - targets: [localhost]

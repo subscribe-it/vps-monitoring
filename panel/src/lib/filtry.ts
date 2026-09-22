@@ -243,19 +243,6 @@ export function sortujUslugi<T extends Uslugowe>(
   });
 }
 
-/** Agregat stacka dla wybranego klucza — decyduje o kolejności stacków. */
-function agregatStacka<T extends Uslugowe>(stack: Stackowe<T>, klucz: KluczSortowania): number | string {
-  const uslugi = stack.services;
-  if (klucz === 'usluga' || klucz === 'obraz') return normalizuj(stack.name);
-  if (uslugi.length === 0) return klucz === 'restarty' || klucz === 'repliki' ? 0 : -1;
-  if (klucz === 'restarty') {
-    return uslugi.reduce((suma, u) => suma + (u.restarts_1h ?? 0), 0);
-  }
-  // Najgorszy/największy element decyduje o pozycji stacka (dla deficytu replik
-  // to największy brak, nie suma — jeden stack z 0/1 ma iść wyżej niż pięć 2/3).
-  return Math.max(...uslugi.map((u) => Number(wartosc(u, klucz))));
-}
-
 /* ------------------------------------------------------------------ *
  * Widok stacków (filtr + sort + fokus)
  * ------------------------------------------------------------------ */
@@ -273,9 +260,18 @@ export interface WidokStackow<T extends Uslugowe, S extends Stackowe<T> = Stacko
 /**
  * Przefiltrowany i posortowany widok stacków.
  *
- * Zasada „fokus wygrywa z filtrem": usługa wskazana fokusem zostaje na ekranie
- * nawet wtedy, gdy nie pasuje do filtra — użytkownik kliknął ją świadomie
- * i zniknięcie jej w tym samym momencie byłoby zgubne.
+ * Dwie zasady, obie widoczne dla użytkownika:
+ *
+ * 1. **Sortowanie działa wewnątrz stacka, nie między stackami.** Klucz
+ *    z nagłówka kolumny przestawia wyłącznie usługi w środku swojego stacka,
+ *    a kolejność stacków zostaje taka, jak przyszła z API (tam jest już
+ *    posortowana po nazwie). Powód: przy sortowaniu globalnym jeden klik
+ *    w „CPU" przerzucał całe sekcje — stack, na który się patrzyło, uciekał
+ *    z ekranu razem z resztą tabeli, a porównywanie stacków po maksimum CPU
+ *    (2 usługi vs 20) mówiło więcej o liczbie usług niż o stanie produkcji.
+ * 2. **Fokus wygrywa z filtrem**: usługa wskazana fokusem zostaje na ekranie
+ *    nawet wtedy, gdy nie pasuje do filtra — użytkownik kliknął ją świadomie
+ *    i zniknięcie jej w tym samym momencie byłoby zgubne.
  */
 export function przygotujStacki<T extends Uslugowe, S extends Stackowe<T>>(
   stacki: readonly S[],
@@ -303,14 +299,9 @@ export function przygotujStacki<T extends Uslugowe, S extends Stackowe<T>>(
     pokazano += widoczne.length;
     // Rozszerzamy oryginalny obiekt stacka i podmieniamy tylko listę usług,
     // dzięki czemu do sekcji trafia dokładnie ten sam typ, co z API.
+    // `wynik` zachowuje kolejność wejściową — sortujemy tylko w środku stacka.
     wynik.push({ ...stack, services: sortujUslugi(widoczne, f.sort, f.kierunek) });
   }
-
-  const znak = f.kierunek === 'desc' ? -1 : 1;
-  wynik.sort((a, b) => {
-    const roznica = porownaj(agregatStacka(a, f.sort), agregatStacka(b, f.sort)) * znak;
-    return roznica !== 0 ? roznica : a.name.localeCompare(b.name, 'pl');
-  });
 
   return { stacki: wynik, pokazano, wszystkich, ukryteStacki };
 }

@@ -4,8 +4,9 @@
  * (repliki, CPU, RAM, restarty, obraz).
  *
  * Trzy mechanizmy, które ułatwiają pracę przy 47 usługach:
- *  1. **sortowanie** — klikalny nagłówek każdej kolumny (`aria-sort` na `<th>`),
- *     ten sam stan co w pasku filtrów,
+ *  1. **sortowanie** — klikalny nagłówek każdej kolumny (`aria-sort` na `<th>`,
+ *     wskaźnik w `SortableTh.astro`); porządkuje usługi **w środku** stacka,
+ *     a kolejność samych stacków zostaje taka, jak z API,
  *  2. **zwijanie stacka** — przycisk z chevronem w nagłówku; nazwa stacka
  *     zawęża widok do niego (jeden klik = „pokaż mi tylko ten stack"),
  *  3. **focus usługi** — nazwa usługi to przycisk: rozwija wiersz szczegółów
@@ -15,6 +16,7 @@
  */
 import { Icon } from 'astro-icon/components';
 import SectionCard from './SectionCard.astro';
+import SortableTh from './SortableTh.astro';
 ---
 
 <SectionCard section="stacks" title="Stacki" icon="lucide:box">
@@ -60,27 +62,13 @@ import SectionCard from './SectionCard.astro';
         <caption class="sr-only" data-role="table-caption"></caption>
         <thead>
           <tr>
-            <th scope="col" aria-sort="none">
-              <button type="button" class="th-sort" data-action="sortuj" data-sort="usluga">Usługa</button>
-            </th>
-            <th scope="col" aria-sort="none">
-              <button type="button" class="th-sort" data-action="sortuj" data-sort="stan">Stan</button>
-            </th>
-            <th scope="col" class="num" aria-sort="none">
-              <button type="button" class="th-sort" data-action="sortuj" data-sort="repliki">Repliki</button>
-            </th>
-            <th scope="col" class="num" aria-sort="none">
-              <button type="button" class="th-sort" data-action="sortuj" data-sort="cpu">CPU</button>
-            </th>
-            <th scope="col" class="num" aria-sort="none">
-              <button type="button" class="th-sort" data-action="sortuj" data-sort="ram">RAM</button>
-            </th>
-            <th scope="col" class="num" aria-sort="none">
-              <button type="button" class="th-sort" data-action="sortuj" data-sort="restarty">Restarty 1 h</button>
-            </th>
-            <th scope="col" class="hidden md:table-cell" aria-sort="none">
-              <button type="button" class="th-sort" data-action="sortuj" data-sort="obraz">Obraz</button>
-            </th>
+            <SortableTh klucz="usluga" etykieta="Usługa" />
+            <SortableTh klucz="stan" etykieta="Stan" />
+            <SortableTh klucz="repliki" etykieta="Repliki" klasa="num" />
+            <SortableTh klucz="cpu" etykieta="CPU" klasa="num" />
+            <SortableTh klucz="ram" etykieta="RAM" klasa="num" />
+            <SortableTh klucz="restarty" etykieta="Restarty 1 h" klasa="num" />
+            <SortableTh klucz="obraz" etykieta="Obraz" klasa="hidden md:table-cell" />
           </tr>
         </thead>
         <tbody data-role="services"></tbody>

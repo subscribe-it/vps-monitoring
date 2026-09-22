@@ -336,6 +336,234 @@
         "x": 12,
         "y": 23
       }
+    },
+    {
+      "id": 9,
+      "type": "row",
+      "title": "Ruch i blokady (access log Traefika)",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 33
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Zadania wg hosta (access log)",
+      "description": "Liczba wpisow w access logu Traefika w oknie 5 minut, w rozbiciu na zadana domene. Pusto = brak ruchu albo brak access logu (patrz alert TraefikNoAccessLogs).",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "editorMode": "code",
+          "expr": "sum by (RequestHost) (count_over_time({job=\"traefik\"}[5m]))",
+          "queryType": "range",
+          "maxLines": 100
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "showPoints": "never",
+            "spanNulls": true,
+            "axisPlacement": "auto",
+            "axisBorderShow": false,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineStyle": {
+              "fill": "solid"
+            },
+            "insertNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 10,
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 34
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Zablokowane 403/429 wg hosta",
+      "description": "Odpowiedzi 403/429 z access logu Traefika (okno 5 minut): blokady CRS/ModSecurity, rate-limit, brak autoryzacji. Wzrost = ktos sonduje albo reguly blokuja za duzo. Progi: 1 (zolty) i 50 (czerwony) na okno.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "editorMode": "code",
+          "expr": "sum by (RequestHost) (count_over_time({job=\"traefik\"} | json | DownstreamStatus = 403 or DownstreamStatus = 429 [5m]))",
+          "queryType": "range",
+          "maxLines": 100
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 50
+              }
+            ]
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "showPoints": "never",
+            "spanNulls": true,
+            "axisPlacement": "auto",
+            "axisBorderShow": false,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineStyle": {
+              "fill": "solid"
+            },
+            "insertNulls": false,
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 11,
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 34
+      }
+    },
+    {
+      "type": "logs",
+      "title": "Wolne zadania (> 1 s, access log)",
+      "description": "Wpisy access logu z Duration > 1 s (Duration jest w nanosekundach) - pelny kontekst: domena, sciezka, kod odpowiedzi, czas.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "editorMode": "code",
+          "expr": "{job=\"traefik\"} | json | Duration > 1000000000",
+          "queryType": "range",
+          "maxLines": 200
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "dedupStrategy": "none",
+        "sortOrder": "Descending"
+      },
+      "id": 12,
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 42
+      }
     }
   ],
   "refresh": "30s",

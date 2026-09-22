@@ -27,6 +27,11 @@ groups:
           description: "{{ $value | printf \"%.0f\" }} nieudanych prób w 5 minut. fail2ban blokuje adresy, ale to potwierdza trwający atak słownikowy."
           runbook: "#security"
 
+      # UWAGA (zmierzone 22.09.2026): fail2ban zapisuje bany do
+      # /var/log/fail2ban.log, a do journala tylko start/stop — ta reguła
+      # nie zapali się, dopóki promtail nie zbierze tego pliku
+      # (montaż /var/log + job `fail2ban`). Do tego czasu traktuj ją jako
+      # przygotowaną, nie jako działającą ochronę.
       - alert: Fail2banBanSpike
         expr: |
           sum by (unit) (count_over_time({job="journald", unit="fail2ban.service"} |~ "Ban " [15m])) > 5

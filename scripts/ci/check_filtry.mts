@@ -32,6 +32,7 @@ import {
   zHasza,
   zmianyMiedzy,
   type Filtr,
+  type KluczSortowania,
   type Uslugowe,
 } from '../../panel/src/lib/filtry.ts';
 
@@ -132,14 +133,41 @@ const zFokusem = przygotujStacki(stacki, filtr({ q: 'nie-ma-takiej' }), kluczFok
 rowne(zFokusem.pokazano, 1, 'fokus wygrywa z filtrem — wskazana usługa zostaje');
 rowne(zFokusem.stacki[0].services[0].name, 'panel', 'fokus pokazuje właściwą usługę');
 
-/* ---------------- sortowanie ---------------- */
+/* ---------------- sortowanie: w środku stacka, nie między stackami ---------------- */
+
+/*
+ * Kontrakt (zmiana Zachowania z 2026-09): klucz z nagłówka kolumny porządkuje
+ * usługi WEWNĄTRZ ich stacka, a kolejność stacków zostaje taka, jak przyszła
+ * z API (`services/discovery/main.py` sortuje je po nazwie). Wcześniej stacki
+ * były sortowane agregatem klucza i jeden klik w „CPU" przerzucał całe sekcje.
+ */
+const PORZADEK_Z_API = ['monitoring', 'ventiplan-prod'];
+const KLUCZE_SORTOWANIA_TEST: KluczSortowania[] = [
+  'stan',
+  'usluga',
+  'repliki',
+  'cpu',
+  'ram',
+  'restarty',
+  'obraz',
+];
+
+for (const klucz of KLUCZE_SORTOWANIA_TEST) {
+  for (const kierunek of ['asc', 'desc'] as const) {
+    rowne(
+      przygotujStacki(stacki, filtr({ sort: klucz, kierunek })).stacki.map((s) => s.name),
+      PORZADEK_Z_API,
+      `kolejność stacków jest stała (sort=${klucz}, kierunek=${kierunek})`,
+    );
+  }
+}
 
 const poCpu = przygotujStacki(stacki, filtr({ sort: 'cpu', kierunek: 'desc' }));
-rowne(poCpu.stacki.map((s) => s.name), ['monitoring', 'ventiplan-prod'], 'stacki wg największego CPU malejąco');
+rowne(poCpu.stacki.map((s) => s.name), PORZADEK_Z_API, 'CPU nie przestawia stacków');
 rowne(poCpu.stacki[0].services.map((s) => s.name), ['grafana', 'panel'], 'usługi wg CPU malejąco');
 
 const poCpuAsc = przygotujStacki(stacki, filtr({ sort: 'cpu', kierunek: 'asc' }));
-rowne(poCpuAsc.stacki[0].name, 'ventiplan-prod', 'rosnąco: stack z najmniejszym CPU na górze');
+rowne(poCpuAsc.stacki.map((s) => s.name), PORZADEK_Z_API, 'CPU rosnąco też nie rusza stacków');
 rowne(
   poCpuAsc.stacki.find((s) => s.name === 'monitoring')?.services.map((s) => s.name),
   ['panel', 'grafana'],
@@ -147,13 +175,42 @@ rowne(
 );
 
 const poRestartach = przygotujStacki(stacki, filtr({ sort: 'restarty', kierunek: 'desc' }));
-rowne(poRestartach.stacki[0].name, 'monitoring', 'stack z restartami na górze');
+rowne(poRestartach.stacki[0].services[0].name, 'grafana', 'restarty: usługa z restartami pierwsza');
+rowne(poRestartach.stacki.map((s) => s.name), PORZADEK_Z_API, 'restarty nie przestawiają stacków');
 
 const poReplikach = przygotujStacki(stacki, filtr({ sort: 'repliki', kierunek: 'desc' }));
-rowne(poReplikach.stacki[0].name, 'ventiplan-prod', 'przy sortowaniu replik deficyt (2→1) idzie na górę');
+rowne(
+  poReplikach.stacki.find((s) => s.name === 'ventiplan-prod')?.services.map((s) => s.name),
+  ['db'],
+  'deficyt replik (2→1) liczony w obrębie stacka',
+);
+
+const poRam = przygotujStacki(stacki, filtr({ sort: 'ram', kierunek: 'desc' }));
+rowne(
+  poRam.stacki.find((s) => s.name === 'monitoring')?.services.map((s) => s.name),
+  ['grafana', 'panel'],
+  'RAM malejąco w obrębie stacka',
+);
+rowne(poRam.stacki.map((s) => s.name), PORZADEK_Z_API, 'RAM nie przestawia stacków');
+
+const poStanieSort = przygotujStacki(stacki, filtr({ sort: 'stan', kierunek: 'desc' }));
+rowne(
+  poStanieSort.stacki.find((s) => s.name === 'monitoring')?.services.map((s) => s.name),
+  ['grafana', 'panel'],
+  'najgorszy stan na górze w obrębie stacka',
+);
 
 const poNazwie = przygotujStacki(stacki, filtr({ sort: 'usluga', kierunek: 'asc' }));
-rowne(poNazwie.stacki.map((s) => s.name), ['monitoring', 'ventiplan-prod'], 'alfabetycznie po nazwie stacka');
+rowne(
+  poNazwie.stacki.find((s) => s.name === 'monitoring')?.services.map((s) => s.name),
+  ['grafana', 'panel'],
+  'alfabetycznie w obrębie stacka',
+);
+rowne(poNazwie.stacki.map((s) => s.name), PORZADEK_Z_API, 'alfabetycznie po usłudze nie rusza stacków');
+
+// Fokus i filtr nie mogą zmieniać kolejności stacków (ta sama zasada).
+const porzadekZFilterem = przygotujStacki(stacki, filtr({ q: 'grafana' }));
+rowne(porzadekZFilterem.stacki.map((s) => s.name), ['monitoring'], 'filtr zostawia tylko trafiony stack');
 
 const stabilne = sortujUslugi(
   [usluga({ name: 'b', cpu_percent: 1 }), usluga({ name: 'a', cpu_percent: 1 })],

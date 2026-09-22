@@ -182,9 +182,61 @@ docker service ps ventiplan-prod_postgres
 **Sprawdź:** Grafana → Logi (filtr `DownstreamStatus >= 500`), logi aplikacji z tego hosta.
 **Działaj:** jeśli 5xx korelują z błędami bazy → [#pgcorruption](#pgcorruption).
 
-## <a name="logs"></a>🟡 TraefikNoAccessLogs
-**Co to znaczy:** brak nowych wpisów w access logu edge — analiza po fakcie będzie niemożliwa.
-**Sprawdź:** `docker service logs --tail 50 portainer-edge-gateway_traefik`, `docker volume inspect portainer-edge-gateway_traefik-logs`.
+## <a name="logs"></a>🟡 TraefikNoAccessLogs — i jak czytać logi
+**Co to znaczy:** od 15 minut nie ma nowych wpisów w access logu edge — analiza po fakcie będzie niemożliwa.
+**Stan zmierzony 22.09.2026:** access log działa. `/traefik-logs/access.log` (wolumen `portainer-edge-gateway_traefik-logs`; w kontenerze Traefika ten sam wolumen jest pod `/var/log/traefik`) ma ~2,0 MB i ~2,3 tys. wpisów na godzinę, a promtail przeczytał go w całości. Cisza oznacza więc realną awarię, nie brak konfiguracji.
+
+**Gdzie patrzeć:** Grafana → dashboard **„Logi — przeglądanie”** (uid `vps-logs`). Zmienne `Stack`/`Serwis` wybierają kontener, panel *Surowe logi 5xx* pokazuje błędy Traefika. Trzy źródła rozróżnia etykieta `job`:
+`docker` — stdout kontenerów (etykiety `container`, `service`, `stack`), `journald` — journal hosta (`unit`, `transport`), `traefik` — access log edge (`RequestHost`, `filename`).
+
+**Sprawdź, gdy alert dzwoni:**
+```bash
+docker service logs --tail 50 portainer-edge-gateway_traefik   # czy edge w ogóle żyje (cudzy stack — tylko czytamy)
+docker service logs --tail 100 monitoring_promtail | grep -i traefik
+docker volume inspect portainer-edge-gateway_traefik-logs     # czy plik jest na wolumenie
+```
+
+**Gotowe zapytania (LogQL)** — do wklejenia w Grafanie (Explore → datasource `Loki`) albo w panelu:
+
+```logql
+# ruch wg domeny w 24 h (kto jest w ogóle obsługiwany)
+sum by (RequestHost) (count_over_time({job="traefik"}[24h]))
+
+# zablokowane żądania 403/429 wg domeny (m.in. blokady CRS/ModSecurity, rate-limit)
+sum by (RequestHost) (count_over_time({job="traefik"} | json | DownstreamStatus = 403 or DownstreamStatus = 429 [24h]))
+
+# błędy 5xx wg domeny
+sum by (RequestHost) (count_over_time({job="traefik"} | json | DownstreamStatus >= 500 [24h]))
+
+# wolne żądania (> 1 s) — lista wpisów z pełnym kontekstem
+{job="traefik"} | json | Duration > 1000000000
+
+# ruch wg wejścia: web (80) / websecure (443) / traefik (wewnętrzne)
+sum by (entryPointName) (count_over_time({job="traefik"} | json [24h]))
+
+# logi samego edge (ACME, budowa routerów, restart)
+{service="portainer-edge-gateway_traefik"}
+
+# nieudane logowania SSH (te same dane, które widzi alert SshAuthFailuresSpike)
+{job="journald", unit="ssh.service"} |~ "Failed password|Invalid user"
+```
+
+**Uwagi, które oszczędzają czas:**
+- `Duration` w access logu jest w **nanosekundach** (1 s = `1000000000`), a `RequestHost` jest etykietą strumienia — filtr po domenie działa bez `| json`.
+- Loki przymusza okno zapytania do kroku, więc pytając przez API/CLI używaj okien ≥ 1 h; w Grafanie okno dobiera sama.
+- nginx z ModSecurity w edge (cudzy stack) **nie loguje żądań do stdout** (kontener milczy od startu 16.08.2026) — jego blokady widać wyłącznie jako 403/429 w access logu Traefika. Osobne logi CRS wymagałyby zmiany w cudzym stacku.
+- Etykieta `stack` w strumieniach istnieje od 22.09.2026 (wcześniej promtail czytał nieistniejącą etykietę Dockera i dashboard miał pustą listę stacków). Strumienie starsze niż ta poprawka `stack` nie mają — filtruj je po `service`.
+
+**Jeśli access log kiedyś przestanie powstawać** (alert dzwoni, a zapytania wyżej milczą): w CUDZYM stacku `portainer-edge-gateway`, w usłudze Traefika, musi zostać włączony access log i montaż tego wolumenu. **To zadanie dla Ciebie — ten runbook niczego tam nie zmienia.** Fragment do wklejenia w pliku compose tego stacku (nazwy wolumenów wewnątrz cudzego stacku są lokalne; na zewnątrz ten wolumen to `portainer-edge-gateway_traefik-logs`):
+
+```yaml
+    command:
+      - --accesslog=true
+      - --accesslog.filepath=/var/log/traefik/access.log
+      - --accesslog.format=json      # promtail parsuje JSON (RequestHost, DownstreamStatus, Duration)
+    volumes:
+      - traefik-logs:/var/log/traefik
+```
 
 ## <a name="security"></a>⚪/🟡 SshLoginAccepted / SshAuthFailuresSpike / Fail2banBanSpike / CockpitLogin
 **Co to znaczy:** ktoś loguje się (albo próbuje) do hosta lub do panelu Cockpit.

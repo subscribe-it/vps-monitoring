@@ -1,0 +1,42 @@
+---
+/**
+ * Nagłówek kolumny sortowalnej (`<th>` + przycisk).
+ *
+ * Jedno miejsce, w którym żyje wskaźnik sortowania, bo wcześniej powtarzał się
+ * siedem razy i rozjeżdżał się przy każdej poprawce:
+ *
+ *  - `aria-sort` na `<th>` ustawia skrypt (`none`/`ascending`/`descending`),
+ *  - `data-kierunek` na przycisku steruje strzałką wyłącznie w aktywnej
+ *    kolumnie (CSS: `.th-sort[data-kierunek="asc|desc"] .sort-ikona svg`),
+ *  - slot `.sort-ikona` ma **stałą** szerokość, więc pojawienie się strzałki
+ *    nie przesuwa nagłówków ani nie przewraca szerokości tabeli,
+ *  - `title` mówi wprost, co zrobi klik („sortowanie malejące — kliknij, aby
+ *    odwrócić"), a nie tylko pokazuje strzałkę.
+ *
+ * Ikony są inline SVG z lucide (12 px, stroke 2), a nie glifami tekstowymi:
+ * `::after { content: "↓" }` zależał od fontu, miał inne wsparcie linii niż
+ * tekst przycisku i rozszerzał kolumnę dopiero po kliknięciu.
+ */
+import { Icon } from 'astro-icon/components';
+
+interface Props {
+  /** Klucz sortowania z `KluczSortowania` (np. `cpu`, `restarty`). */
+  klucz: string;
+  /** Widoczna nazwa kolumny. */
+  etykieta: string;
+  /** Dodatkowe klasy na `<th>` (np. `num`, `hidden md:table-cell`). */
+  klasa?: string;
+}
+
+const { klucz, etykieta, klasa } = Astro.props;
+---
+
+<th scope="col" aria-sort="none" class={klasa}>
+  <button type="button" class="th-sort" data-action="sortuj" data-sort={klucz}>
+    <span>{etykieta}</span>
+    <span class="sort-ikona" aria-hidden="true">
+      <Icon name="lucide:chevron-up" size={12} data-role="sort-asc" />
+      <Icon name="lucide:chevron-down" size={12} data-role="sort-desc" />
+    </span>
+  </button>
+</th>

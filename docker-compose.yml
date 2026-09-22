@@ -30,6 +30,9 @@ volumes:
   grafana_data_v2: {}
   loki_data_v2: {}
   alertmanager_data_v2: {}
+  # Pozycje promtaila — trzymają stan „dokąd doczytano logi” między restartami
+  # (bez tego każdy redeploy odtwarza od zera tydzień logów i część gubi).
+  promtail_positions: {}
 
 x-common: &common
   networks:
@@ -581,6 +584,10 @@ services:
       - /etc/machine-id:/etc/machine-id:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - portainer-edge-gateway_traefik-logs:/traefik-logs:ro
+      # Pozycje czytania muszą przeżyć restart kontenera. W /tmp ginęły, a wtedy
+      # promtail czyta wszystko od początku plików, Loki odrzuca wpisy starsze
+      # niż 7 dni (HTTP 400) i gubi całe paczki — zmierzone 22.09.2026: 39,6 MB.
+      - promtail_positions:/positions
     command: -config.file=/etc/promtail/config.yml -config.expand-env=true
     <<: *common
     deploy:
