@@ -654,6 +654,31 @@ class ApiJsonTests(unittest.TestCase):
         self.assertEqual(service.api_json()["backup"]["state"], "unknown")
 
 
+    def test_system_df_jest_cache_owany_miedzy_odswiezeniami(self):
+        """`/system/df` to najdroższe wywołanie Dockera — nie może iść co cykl.
+
+        Zmierzone na produkcji: przy 79 kontenerach wołanie `df` co 30 s trzymało
+        dockerd tak zajęty, że Portainer (ten sam daemon) odpowiadał po 20-30 s.
+        """
+        service = self._service()
+        oryginal = service.docker.system_df
+        licznik = {"ile": 0}
+
+        def licz():
+            licznik["ile"] += 1
+            return oryginal()
+
+        service.docker.system_df = licz
+        service.refresh()
+        assert licznik["ile"] == 1, "pierwsze odświeżenie musi pobrać /system/df"
+        service.refresh()
+        assert licznik["ile"] == 1, "kolejne odświeżenie korzysta z cache (TTL 10 min)"
+
+        # Po wygaśnięciu TTL wołanie wraca.
+        service._df_cache = (service.clock() - service.SYSTEM_DF_TTL_SECONDS - 1, service._df_cache[1], True)
+        service.refresh()
+        assert licznik["ile"] == 2, "po TTL pomiar jest odświeżany"
+
 class BrokenDependencyTests(unittest.TestCase):
     """
     Uszkodzone odpowiedzi Prometheusa, Alertmanagera i health-ping nie mogą

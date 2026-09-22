@@ -367,7 +367,10 @@ services:
     environment:
       - TZ=${TZ:-Europe/Warsaw}
       - DOCKER_HOST=unix:///var/run/docker.sock
-      - REFRESH_SECONDS=${DISCOVERY_REFRESH_SECONDS:-30}
+      # 60 s zamiast 30 s: każde odświeżenie to `stats` dla ~45 kontenerów
+      # (każde próbkuje ~1 s) plus tanie listy usług — zmierzone na produkcji,
+      # przy 30 s cykl bywał dłuższy niż interwał i obciążał dockerd bez przerwy.
+      - REFRESH_SECONDS=${DISCOVERY_REFRESH_SECONDS:-60}
       - SKIP_STACKS=${DISCOVERY_SKIP_STACKS:-monitoring,traefik,traefik_stack}
       - SKIP_SERVICES=${DISCOVERY_SKIP_SERVICES:-}
       - CRITICAL_STACKS=${CRITICAL_STACKS:-ventiplan-prod,jpolski_na6_pl_prod,star-sign,bugsink,portainer-edge-gateway}

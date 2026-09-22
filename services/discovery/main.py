@@ -1387,12 +1387,40 @@ class DiscoveryService:
             stop_event.wait(self.config.refresh_seconds)
 
     # -- odświeżanie -------------------------------------------------------
+
+    # `/system/df` to najdroższe wywołanie Dockera: przechodzi warstwy obrazów,
+    # wolumeny i wszystkie kontenery. Zmierzone na produkcji (79 kontenerów,
+    # 45 działających): wołane co 30 s trzymało dockerd tak zajęty, że sama lista
+    # kontenerów przez API Portainera odpowiadała po 20–30 s, a Portainer — który
+    # stoi na tym samym daemonie — „nie odpowiadał”. Metryki liczone z `df`
+    # (obrazy/wolumeny do odzyskania, liczniki kontenerów) nie potrzebują
+    # świeżości 30 s, więc trzymamy je w cache.
+    SYSTEM_DF_TTL_SECONDS = 600
+    SYSTEM_DF_RETRY_SECONDS = 60
+
+    def system_df_cached(self):
+        teraz = self.clock()
+        zapis = getattr(self, "_df_cache", None)
+        if zapis is not None:
+            ttl = self.SYSTEM_DF_TTL_SECONDS if zapis[2] else self.SYSTEM_DF_RETRY_SECONDS
+            if teraz - zapis[0] < ttl:
+                return zapis[1]
+        try:
+            raw = as_dict(self.docker.system_df(), "GET /system/df")
+            self._df_cache = (teraz, raw, True)
+            return raw
+        except Exception as exc:  # noqa: BLE001 - brak `df` nie może psuć odświeżenia
+            log("Nie udało się odczytać /system/df (%s) — zostaje poprzedni pomiar", exc)
+            poprzedni = zapis[1] if zapis else {}
+            self._df_cache = (teraz, poprzedni, False)
+            return poprzedni
+
     def refresh(self):
         try:
             raw_services = as_list(self.docker.services(), "GET /services")
             raw_tasks = as_list(self.docker.tasks(), "GET /tasks")
             raw_containers = as_list(self.docker.containers(), "GET /containers/json?all=1")
-            raw_df = as_dict(self.docker.system_df(), "GET /system/df")
+            raw_df = self.system_df_cached()
         except Exception as exc:  # noqa: BLE001 - brak Dockera nie może wywalić serwisu
             log_error("Odświeżenie nie powiodło się: %s", exc)
             with self._lock:
