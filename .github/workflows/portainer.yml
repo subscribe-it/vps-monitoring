@@ -57,16 +57,18 @@ jobs:
           WZORZEC: ${{ inputs.wzorzec }}
         run: |
           set -o pipefail
-          args=""
+          # Tablica, nie string: sklejanie argumentów ze spacjami gubiło cudzysłowy
+          # i wzorzec trafiał do skryptu razem z nimi.
+          args=()
           case "${{ inputs.action }}" in
-            show-env)           args="--show-env" ;;
-            uslugi)             args="--uslugi" ;;
-            logi)               args="--logi \"$WZORZEC\" --linii 60" ;;
-            start)              args="--start" ;;
-            redeploy)           args="--redeploy --pull" ;;
-            start-and-redeploy) args="--start --redeploy --pull" ;;
+            show-env)           args=(--show-env) ;;
+            uslugi)             args=(--uslugi) ;;
+            logi)               args=(--logi "$WZORZEC" --linii 60) ;;
+            start)              args=(--start) ;;
+            redeploy)           args=(--redeploy --pull) ;;
+            start-and-redeploy) args=(--start --redeploy --pull) ;;
           esac
-          python3 scripts/portainer/bootstrap.py $args
+          python3 scripts/portainer/bootstrap.py "${args[@]}"
           kod=$?
           if [ "$kod" -eq 2 ]; then
             echo "::error::Stack wskazuje zły plik compose. Wejdź w Portainer → Stacks → monitoring i ustaw compose path na docker-compose.yml (API nie pozwala tego zmienić)."
