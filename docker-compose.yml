@@ -67,6 +67,14 @@ services:
       restart_policy:
         condition: any
         delay: 10s
+      labels:
+        - "traefik.enable=true"
+        - "traefik.swarm.network=traefik-public"
+        # Middleware ForwardAuth — nazwa w Swarmie dostaje prefiks stacku,
+        # dlatego routery odwołują się do "monitoring-mon-auth@swarm".
+        - "traefik.http.middlewares.mon-auth.forwardauth.address=http://auth:8080/verify"
+        - "traefik.http.middlewares.mon-auth.forwardauth.authResponseHeaders=X-User"
+        - "traefik.http.middlewares.mon-auth.forwardauth.trustForwardHeader=true"
     networks:
       - monitoring
       - traefik-public
@@ -76,14 +84,6 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
-    labels:
-      - "traefik.enable=true"
-      - "traefik.docker.network=traefik-public"
-      # Middleware ForwardAuth — nazwa w Swarmie dostaje prefiks stacku,
-      # dlatego routery odwołują się do "monitoring-mon-auth@swarm".
-      - "traefik.http.middlewares.mon-auth.forwardauth.address=http://auth:8080/verify"
-      - "traefik.http.middlewares.mon-auth.forwardauth.authResponseHeaders=X-User"
-      - "traefik.http.middlewares.mon-auth.forwardauth.trustForwardHeader=true"
 
   # ---------------------------------------------------------------------------
   # panel — strona startowa (Astro, statyczna) z kafelkami i żywym stanem
@@ -102,6 +102,25 @@ services:
       restart_policy:
         condition: any
         delay: 10s
+      labels:
+        - "traefik.enable=true"
+        - "traefik.swarm.network=traefik-public"
+        - "traefik.http.routers.mon-panel.rule=Host(`${MONITORING_DOMAIN:-monitoring.subscribeit.pl}`)"
+        - "traefik.http.routers.mon-panel.entrypoints=websecure"
+        - "traefik.http.routers.mon-panel.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-letsencrypt}"
+        - "traefik.http.routers.mon-panel.priority=1"
+        - "traefik.http.routers.mon-panel.middlewares=monitoring-mon-auth@swarm"
+        - "traefik.http.services.mon-panel.loadbalancer.server.port=80"
+        # www → domena główna: dwie origin oznaczałyby dwa logowania i dwa konteksty ciasteczek.
+        - "traefik.http.routers.mon-panel-www.rule=Host(`www.${MONITORING_DOMAIN:-monitoring.subscribeit.pl}`)"
+        - "traefik.http.routers.mon-panel-www.entrypoints=websecure"
+        - "traefik.http.routers.mon-panel-www.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-letsencrypt}"
+        - "traefik.http.routers.mon-panel-www.priority=10"
+        - "traefik.http.routers.mon-panel-www.middlewares=monitoring-mon-www-redirect@swarm"
+        - "traefik.http.routers.mon-panel-www.service=mon-panel"
+        - "traefik.http.middlewares.mon-www-redirect.redirectregex.regex=^https?://www\\.(.+)"
+        - "traefik.http.middlewares.mon-www-redirect.redirectregex.replacement=https://$${1}"
+        - "traefik.http.middlewares.mon-www-redirect.redirectregex.permanent=true"
     networks:
       - monitoring
       - traefik-public
@@ -110,25 +129,6 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-    labels:
-      - "traefik.enable=true"
-      - "traefik.docker.network=traefik-public"
-      - "traefik.http.routers.mon-panel.rule=Host(`${MONITORING_DOMAIN:-monitoring.subscribeit.pl}`)"
-      - "traefik.http.routers.mon-panel.entrypoints=websecure"
-      - "traefik.http.routers.mon-panel.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-letsencrypt}"
-      - "traefik.http.routers.mon-panel.priority=1"
-      - "traefik.http.routers.mon-panel.middlewares=monitoring-mon-auth@swarm"
-      - "traefik.http.services.mon-panel.loadbalancer.server.port=80"
-      # www → domena główna: dwie origin oznaczałyby dwa logowania i dwa konteksty ciasteczek.
-      - "traefik.http.routers.mon-panel-www.rule=Host(`www.${MONITORING_DOMAIN:-monitoring.subscribeit.pl}`)"
-      - "traefik.http.routers.mon-panel-www.entrypoints=websecure"
-      - "traefik.http.routers.mon-panel-www.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-letsencrypt}"
-      - "traefik.http.routers.mon-panel-www.priority=10"
-      - "traefik.http.routers.mon-panel-www.middlewares=monitoring-mon-www-redirect@swarm"
-      - "traefik.http.routers.mon-panel-www.service=mon-panel"
-      - "traefik.http.middlewares.mon-www-redirect.redirectregex.regex=^https?://www\\.(.+)"
-      - "traefik.http.middlewares.mon-www-redirect.redirectregex.replacement=https://$${1}"
-      - "traefik.http.middlewares.mon-www-redirect.redirectregex.permanent=true"
 
   # ---------------------------------------------------------------------------
   # grafana — dashboardy i logi (provisioning + dashboardy w obrazie)
@@ -178,21 +178,21 @@ services:
       resources:
         limits: { cpus: '0.50', memory: 512M }
         reservations: { cpus: '0.05', memory: 128M }
+      labels:
+        - "traefik.enable=true"
+        - "traefik.swarm.network=traefik-public"
+        - "traefik.http.routers.mon-grafana.rule=Host(`${MONITORING_DOMAIN:-monitoring.subscribeit.pl}`) && PathPrefix(`/grafana`)"
+        - "traefik.http.routers.mon-grafana.entrypoints=websecure"
+        - "traefik.http.routers.mon-grafana.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-letsencrypt}"
+        - "traefik.http.routers.mon-grafana.priority=100"
+        - "traefik.http.routers.mon-grafana.middlewares=monitoring-mon-auth@swarm"
+        - "traefik.http.services.mon-grafana.loadbalancer.server.port=3000"
     networks:
       - monitoring
       - traefik-public
     depends_on:
       - prometheus
       - loki
-    labels:
-      - "traefik.enable=true"
-      - "traefik.docker.network=traefik-public"
-      - "traefik.http.routers.mon-grafana.rule=Host(`${MONITORING_DOMAIN:-monitoring.subscribeit.pl}`) && PathPrefix(`/grafana`)"
-      - "traefik.http.routers.mon-grafana.entrypoints=websecure"
-      - "traefik.http.routers.mon-grafana.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-letsencrypt}"
-      - "traefik.http.routers.mon-grafana.priority=100"
-      - "traefik.http.routers.mon-grafana.middlewares=monitoring-mon-auth@swarm"
-      - "traefik.http.services.mon-grafana.loadbalancer.server.port=3000"
 
   # ---------------------------------------------------------------------------
   # prometheus — metryki (config i reguły w obrazie)
@@ -225,6 +225,15 @@ services:
       resources:
         limits: { cpus: '1.0', memory: 1G }
         reservations: { cpus: '0.10', memory: 256M }
+      labels:
+        - "traefik.enable=true"
+        - "traefik.swarm.network=traefik-public"
+        - "traefik.http.routers.mon-prometheus.rule=Host(`${MONITORING_DOMAIN:-monitoring.subscribeit.pl}`) && PathPrefix(`/prometheus`)"
+        - "traefik.http.routers.mon-prometheus.entrypoints=websecure"
+        - "traefik.http.routers.mon-prometheus.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-letsencrypt}"
+        - "traefik.http.routers.mon-prometheus.priority=100"
+        - "traefik.http.routers.mon-prometheus.middlewares=monitoring-mon-auth@swarm"
+        - "traefik.http.services.mon-prometheus.loadbalancer.server.port=9090"
     networks:
       - monitoring
       - traefik-public
@@ -234,15 +243,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
-    labels:
-      - "traefik.enable=true"
-      - "traefik.docker.network=traefik-public"
-      - "traefik.http.routers.mon-prometheus.rule=Host(`${MONITORING_DOMAIN:-monitoring.subscribeit.pl}`) && PathPrefix(`/prometheus`)"
-      - "traefik.http.routers.mon-prometheus.entrypoints=websecure"
-      - "traefik.http.routers.mon-prometheus.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-letsencrypt}"
-      - "traefik.http.routers.mon-prometheus.priority=100"
-      - "traefik.http.routers.mon-prometheus.middlewares=monitoring-mon-auth@swarm"
-      - "traefik.http.services.mon-prometheus.loadbalancer.server.port=9090"
 
   # ---------------------------------------------------------------------------
   # alertmanager — routing alertów (config bez sekretów w obrazie)
@@ -271,6 +271,15 @@ services:
         delay: 10s
       resources:
         limits: { cpus: '0.25', memory: 256M }
+      labels:
+        - "traefik.enable=true"
+        - "traefik.swarm.network=traefik-public"
+        - "traefik.http.routers.mon-alertmanager.rule=Host(`${MONITORING_DOMAIN:-monitoring.subscribeit.pl}`) && PathPrefix(`/alertmanager`)"
+        - "traefik.http.routers.mon-alertmanager.entrypoints=websecure"
+        - "traefik.http.routers.mon-alertmanager.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-letsencrypt}"
+        - "traefik.http.routers.mon-alertmanager.priority=100"
+        - "traefik.http.routers.mon-alertmanager.middlewares=monitoring-mon-auth@swarm"
+        - "traefik.http.services.mon-alertmanager.loadbalancer.server.port=9093"
     networks:
       - monitoring
       - traefik-public
@@ -280,15 +289,6 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
-    labels:
-      - "traefik.enable=true"
-      - "traefik.docker.network=traefik-public"
-      - "traefik.http.routers.mon-alertmanager.rule=Host(`${MONITORING_DOMAIN:-monitoring.subscribeit.pl}`) && PathPrefix(`/alertmanager`)"
-      - "traefik.http.routers.mon-alertmanager.entrypoints=websecure"
-      - "traefik.http.routers.mon-alertmanager.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-letsencrypt}"
-      - "traefik.http.routers.mon-alertmanager.priority=100"
-      - "traefik.http.routers.mon-alertmanager.middlewares=monitoring-mon-auth@swarm"
-      - "traefik.http.services.mon-alertmanager.loadbalancer.server.port=9093"
 
   # ---------------------------------------------------------------------------
   # notifier — jedyne wyjście alertów: ntfy (push) + e-mail (SMTP)
@@ -382,21 +382,21 @@ services:
         delay: 10s
       resources:
         limits: { cpus: '0.25', memory: 256M }
+      labels:
+        - "traefik.enable=true"
+        - "traefik.swarm.network=traefik-public"
+        - "traefik.http.routers.mon-status.rule=Host(`${MONITORING_DOMAIN:-monitoring.subscribeit.pl}`) && PathPrefix(`/status`)"
+        - "traefik.http.routers.mon-status.entrypoints=websecure"
+        - "traefik.http.routers.mon-status.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-letsencrypt}"
+        - "traefik.http.routers.mon-status.priority=200"
+        - "traefik.http.routers.mon-status.middlewares=monitoring-mon-auth@swarm"
+        - "traefik.http.services.mon-status.loadbalancer.server.port=8080"
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3).status==200 else 1)"]
       interval: 60s
       timeout: 10s
       retries: 3
       start_period: 20s
-    labels:
-      - "traefik.enable=true"
-      - "traefik.docker.network=traefik-public"
-      - "traefik.http.routers.mon-status.rule=Host(`${MONITORING_DOMAIN:-monitoring.subscribeit.pl}`) && PathPrefix(`/status`)"
-      - "traefik.http.routers.mon-status.entrypoints=websecure"
-      - "traefik.http.routers.mon-status.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-letsencrypt}"
-      - "traefik.http.routers.mon-status.priority=200"
-      - "traefik.http.routers.mon-status.middlewares=monitoring-mon-auth@swarm"
-      - "traefik.http.services.mon-status.loadbalancer.server.port=8080"
 
   # ---------------------------------------------------------------------------
   # health-ping — watchdog wychodzący: pinguje healthchecks.io TYLKO gdy
