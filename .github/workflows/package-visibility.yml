@@ -38,7 +38,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GHCR_ADMIN_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
-          set -uo pipefail
+          # GitHub uruchamia kroki jako `bash -e`, więc KAŻDA niezerowa komenda
+          # przerywa krok (i pomija następne). Diagnostyka ma się nie wywalać.
+          set +e +o pipefail -u
           ORG="${{ github.repository_owner }}"
 
           # Kod HTTP bez wywoływania SIGPIPE (poprzednia wersja używała `gh api -i | head`,
@@ -49,7 +51,7 @@ jobs:
           }
           cialo() {
             lokalne=$(gh api "$1" 2>&1 || true)
-            printf '%s' "$lokalne" | head -c 220
+            echo "${lokalne:0:400}"
           }
 
           if [ -n "${{ secrets.GHCR_ADMIN_TOKEN }}" ]; then
@@ -75,8 +77,9 @@ jobs:
           echo "  PAKIET /orgs/…/vps-monitoring-loki  → HTTP $(kod_http "/orgs/$ORG/packages/container/vps-monitoring-loki")"
           echo "  PAKIET /user/…/vps-monitoring-loki  → HTTP $(kod_http "/user/packages/container/vps-monitoring-loki")"
 
-          echo "--- nazwy widziane przez /user/packages (pierwsze 15) ---"
-          gh api "/user/packages?package_type=container" --jq '.[].name' 2>/dev/null | head -15 || echo "  (brak dostępu)"
+          echo "--- nazwy widziane przez /orgs/…/packages (pierwsze 15) ---"
+          nazwy=$(gh api "/orgs/$ORG/packages?package_type=container" --jq '.[].name' 2>/dev/null || true)
+          if [ -n "$nazwy" ]; then echo "$nazwy" | sed -n '1,15p'; else echo "  (brak dostępu)"; fi
 
           echo "--- treść odpowiedzi z listy organizacji ---"
           cialo "/orgs/$ORG/packages?package_type=container"
@@ -88,11 +91,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GHCR_ADMIN_TOKEN || secrets.GITHUB_TOKEN }}
           TOKEN: ${{ secrets.GHCR_ADMIN_TOKEN }}
         run: |
-          set +e +o pipefail
+          set +e +o pipefail -u
           ORG="${{ github.repository_owner }}"
           PAK="vps-monitoring-loki"
           echo "=== A) gh api --method PATCH -f visibility=public ==="
-          gh api -i --method PATCH "/orgs/$ORG/packages/container/$PAK" -f visibility=public 2>&1 | head -n 20
+          a=$(gh api -i --method PATCH "/orgs/$ORG/packages/container/$PAK" -f visibility=public 2>&1 || true)
+          echo "$a" | sed -n '1,20p'
           echo
           echo "=== B) curl: PATCH z ciałem JSON ==="
           if [ -n "$TOKEN" ]; then
@@ -101,7 +105,8 @@ jobs:
               -H "Accept: application/vnd.github+json" \
               -H "X-GitHub-Api-Version: 2022-11-28" \
               -d '{"visibility":"public"}' \
-              "https://api.github.com/orgs/$ORG/packages/container/$PAK" 2>&1 | head -n 25
+              "https://api.github.com/orgs/$ORG/packages/container/$PAK" > /tmp/curl.out 2>&1 || true
+            sed -n '1,25p' /tmp/curl.out
           else
             echo "  (brak GHCR_ADMIN_TOKEN — pomijam)"
           fi
@@ -118,9 +123,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GHCR_ADMIN_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
-          set -uo pipefail
+          set +e +o pipefail -u
           ORG="${{ github.repository_owner }}"
           VIS="${{ inputs.visibility }}"
+          # Kod HTTP z przechwyconej odpowiedzi — bez `gh | head`, które kończy
+          # się SIGPIPE i (przy `bash -e` od GitHuba) przerywa cały krok.
+          kod_http() {
+            lokalne=$(gh api -i "$1" 2>/dev/null || true)
+            printf '%s' "$lokalne" | sed -n '1s/.* \([0-9][0-9][0-9]\) .*/\1/p'
+          }
           # Nazwy bierzemy z compose — lista nie może się rozjechać z tym, co wdrażamy.
           pakiety=$(grep -oE "ghcr\.io/$ORG/[a-z0-9-]+" docker-compose.yml | sed "s|ghcr.io/$ORG/||" | sort -u)
           ile=$(echo "$pakiety" | wc -l)
@@ -130,8 +141,8 @@ jobs:
           # która faktycznie je widzi (200), zamiast zakładać jedną z nich.
           dziala=""
           for baza in "/orgs/$ORG/packages/container" "/user/packages/container"; do
-            kod=$(gh api -i "$baza/$(echo "$pakiety" | head -1)" 2>/dev/null | head -1 | awk '{print $2}')
-            if [ "$kod" = "200" ]; then dziala="$baza"; break; fi
+            pierwsz=$(echo "$pakiety" | sed -n '1p')
+            if [ "$(kod_http "$baza/$pierwsz")" = "200" ]; then dziala="$baza"; break; fi
           done
           if [ -z "$dziala" ]; then
             echo "::error::Token nie widzi pakietów (żadna baza nie zwróciła 200) — zobacz krok „Diagnoza tokenu i pakietów”."
@@ -142,11 +153,12 @@ jobs:
 
           udane=0
           for nazwa in $pakiety; do
-            if wynik=$(gh api --method PATCH "$dziala/$nazwa" -f "visibility=$VIS" --jq '.visibility' 2>/tmp/blad); then
-              echo "  ✓ $nazwa → $wynik"
+            blad=$(gh api --method PATCH "$dziala/$nazwa" -f "visibility=$VIS" --jq '.visibility' 2>&1)
+            if [ $? -eq 0 ] && [ -n "$blad" ]; then
+              echo "  ✓ $nazwa → $blad"
               udane=$((udane + 1))
             else
-              echo "  ✗ $nazwa → $(head -2 /tmp/blad | tr '\n' ' ')"
+              echo "  ✗ $nazwa → $(echo "$blad" | sed -n '1,2p' | tr '\n' ' ')"
             fi
           done
           echo "Ustawiono: $udane z $ile"
@@ -175,7 +187,7 @@ jobs:
                 "https://ghcr.io/v2/$ORG/$nazwa/manifests/latest")
               echo "  ✓ $nazwa: publiczny, manifest → HTTP $kod"
             else
-              powod=$(echo "$odp" | head -c 80)
+              powod=${odp:0:80}
               echo "  ✗ $nazwa: anonimowo niedostępny ($powod)"
               zle=$((zle + 1))
             fi
