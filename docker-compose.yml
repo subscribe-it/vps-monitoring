@@ -79,7 +79,10 @@ services:
       - monitoring
       - traefik-public
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/healthz || exit 1"]
+      # 127.0.0.1, nie "localhost": w kontenerze localhost = ::1, a nginx słucha
+      # wtedy na innym gnieździe — healthcheck zawsze zawodził i Swarm restartował
+      # zadanie w pętli (szczegóły w config/auth/default.conf).
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8080/healthz || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
