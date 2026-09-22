@@ -2,6 +2,10 @@
 /**
  * Sekcja (f): aktywne alerty z `alerts[]`. Gdy lista jest pusta, pokazujemy
  * jednoznaczny, spokojny stan „brak aktywnych alertów” zamiast pustej tabeli.
+ *
+ * Alert krytyczny i ostrzeżenie dostają delikatne tło (bez kolorowej krawędzi),
+ * więc lista sama porządkuje się wzrokiem — najpierw to, co naprawdę boli.
+ * Pełne podsumowanie alertu trafia do `title`, więc wiersz zostaje czytelny.
  */
 import { Icon } from 'astro-icon/components';
 import SectionCard from './SectionCard.astro';
@@ -11,27 +15,32 @@ import SectionCard from './SectionCard.astro';
   <div data-role="list"></div>
   <div class="empty-ops" data-role="empty-clear" hidden>
     <span class="state-dot" data-state="ok" aria-hidden="true"></span>
-    <span>Brak aktywnych alertów.</span>
+    <span>Brak aktywnych alertów — wszystkie reguły są ciche.</span>
   </div>
   <div class="empty-ops" data-role="empty" hidden>
     <Icon name="lucide:inbox" size={16} aria-hidden="true" />
-    <span>Brak danych o alertach.</span>
+    <span>Brak danych o alertach — API nie zwróciło tej sekcji.</span>
   </div>
 </SectionCard>
 
 <template id="tpl-alert-row">
   <article class="row-ops" data-role="alert" data-state="unknown">
-    <Icon name="lucide:triangle-alert" size={16} class="state-text mt-px shrink-0" aria-hidden="true" />
+    <Icon
+      name="lucide:triangle-alert"
+      size={16}
+      class="state-text mt-px shrink-0"
+      aria-hidden="true"
+    />
     <div class="min-w-0 flex-1">
-      <div class="flex flex-wrap items-center gap-2">
-        <span class="text-sm font-semibold" data-role="name"></span>
+      <div class="flex min-w-0 flex-wrap items-center gap-2">
+        <span class="min-w-0 truncate text-sm font-semibold" data-role="name"></span>
         <span class="state-pill" data-role="severity-pill">
           <span data-role="severity"></span>
         </span>
-        <span class="subtle text-[11px]" data-role="alert-stack"></span>
+        <span class="subtle text-xs" data-role="alert-stack"></span>
       </div>
-      <p class="muted mt-0.5 text-xs" data-role="summary"></p>
+      <p class="muted mt-0.5 line-clamp-2 text-xs" data-role="summary"></p>
     </div>
-    <span class="subtle text-[11px]" data-role="since"></span>
+    <span class="subtle text-xs" data-role="since"></span>
   </article>
 </template>

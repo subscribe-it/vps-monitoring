@@ -3,6 +3,9 @@
  * Sekcja (c): certyfikaty TLS z `certs[]` — dni do wygaśnięcia.
  * Stan wiersza bierzemy z API (`state`), a sama wartość dni jest dodatkowo
  * wyróżniana progami (<30 dni, <14 dni).
+ *
+ * Wiersz jednoliniowy: host, data wygaśnięcia, liczba dni, stan. Nazwa hosta
+ * jest przycinana, ale pełna wartość ląduje w `title` (skrypt klienta).
  */
 import { Icon } from 'astro-icon/components';
 import SectionCard from './SectionCard.astro';
@@ -12,7 +15,7 @@ import SectionCard from './SectionCard.astro';
   <div data-role="list"></div>
   <div class="empty-ops" data-role="empty" hidden>
     <Icon name="lucide:inbox" size={16} aria-hidden="true" />
-    <span>Brak danych o certyfikatach.</span>
+    <span>Brak danych o certyfikatach — API nie zwróciło listy domen.</span>
   </div>
 </SectionCard>
 
@@ -20,7 +23,7 @@ import SectionCard from './SectionCard.astro';
   <div class="row-ops" data-role="row" data-state="unknown">
     <span class="state-dot" aria-hidden="true"></span>
     <span class="num min-w-0 flex-1 truncate text-sm font-medium" data-role="host"></span>
-    <span class="subtle hidden text-xs sm:block" data-role="expires"></span>
+    <span class="subtle hidden text-xs sm:inline" data-role="expires"></span>
     <span data-role="days-wrap" data-state="unknown">
       <span class="num state-text text-sm font-semibold" data-role="days"></span>
     </span>

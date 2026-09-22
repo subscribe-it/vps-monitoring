@@ -9,15 +9,15 @@ import StatBlock from './StatBlock.astro';
 ---
 
 <SectionCard section="security" title="Bezpieczeństwo" icon="lucide:shield">
-  <div class="grid grid-cols-2 gap-2.5 p-3 sm:grid-cols-3">
+  <div class="field-grid">
     <StatBlock field="security-state" label="Stan" icon="lucide:shield-alert" />
     <StatBlock field="security-failed" label="Nieudane SSH 24 h" icon="lucide:ban" />
     <StatBlock field="security-bans" label="Bany 24 h" icon="lucide:lock" />
   </div>
   <div class="border-t border-base-300">
-    <header class="flex items-center gap-2 px-4 pt-3 pb-1.5">
+    <header class="flex items-center gap-2 px-4 pt-2.5 pb-1">
       <Icon name="lucide:log-in" size={14} class="subtle" aria-hidden="true" />
-      <h3 class="card-title text-[11px]">Udane logowania 24 h</h3>
+      <h3 class="card-title text-xs">Udane logowania 24 h</h3>
       <span class="count-chip" data-role="logins-count">—</span>
     </header>
     <div data-role="logins"></div>
@@ -28,7 +28,7 @@ import StatBlock from './StatBlock.astro';
   </div>
   <div class="empty-ops" data-role="empty" hidden>
     <Icon name="lucide:inbox" size={16} aria-hidden="true" />
-    <span>Brak danych o bezpieczeństwie.</span>
+    <span>Brak danych o bezpieczeństwie — API nie zwróciło tej sekcji.</span>
   </div>
 </SectionCard>
 
@@ -37,6 +37,6 @@ import StatBlock from './StatBlock.astro';
     <Icon name="lucide:key-round" size={14} class="subtle shrink-0" aria-hidden="true" />
     <span class="min-w-0 flex-1 truncate text-xs font-medium" data-role="service"></span>
     <span class="num subtle text-xs" data-role="ip"></span>
-    <span class="subtle text-xs" data-role="at"></span>
+    <span class="subtle num text-xs" data-role="at"></span>
   </div>
 </template>

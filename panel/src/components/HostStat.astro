@@ -3,6 +3,10 @@
  * Pojedynczy kafelek mini-statystyki hosta (CPU, RAM, dysk, uptime...).
  * Wartość wpisuje skrypt klienta w `[data-role="value"]`, pasek w
  * `[data-role="meter"]`, opis w `[data-role="sub"]`.
+ *
+ * Kafelek jest zwarty: etykieta 12 px, wartość 16 px, opis maksymalnie dwie
+ * linie (pełna treść trafia do atrybutu `title` w skrypcie). Dzięki temu osiem
+ * statystyk mieści się w jednym rzędzie i nie zjada pionu ekranu.
  */
 import { Icon } from 'astro-icon/components';
 
@@ -18,20 +22,16 @@ interface Props {
 const { stat, label, icon, meter = false } = Astro.props;
 ---
 
-<div
-  class="rounded-[var(--radius-box)] border border-base-300 bg-base-200 px-3 py-2.5"
-  data-stat={stat}
-  data-state="unknown"
->
+<div class="stat-tile" data-stat={stat} data-state="unknown">
   <div class="flex items-center gap-1.5">
     <Icon name={icon} size={13} class="state-text" aria-hidden="true" />
-    <span class="card-title text-[11px]">{label}</span>
+    <span class="card-title text-xs">{label}</span>
   </div>
-  <div class="num mt-1.5 text-[15px] font-semibold" data-role="value">—</div>
+  <div class="num text-base leading-tight font-semibold" data-role="value">—</div>
   {
     meter && (
       <div
-        class="meter mt-1.5"
+        class="meter"
         role="progressbar"
         aria-label={label}
         aria-valuemin="0"
@@ -40,9 +40,9 @@ const { stat, label, icon, meter = false } = Astro.props;
         aria-valuetext="brak danych"
         data-role="meter"
       >
-        <span style="width:0%"></span>
+        <span style="transform:scaleX(0)"></span>
       </div>
     )
   }
-  <div class="subtle mt-1 text-[11px] leading-tight" data-role="sub">—</div>
+  <div class="subtle line-clamp-2 text-xs leading-snug" data-role="sub">—</div>
 </div>

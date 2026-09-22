@@ -1,0 +1,36 @@
+---
+/**
+ * Przyklejony pasek stanu — jedyna rzecz w panelu, która jest widoczna
+ * nieprzerwanie.
+ *
+ * Powód istnienia: strona ze stanem ma kilka tysięcy pikseli (47 usług,
+ * 16 endpointów). Przewijając „Stacki” użytkownik tracił z oczu odpowiedź na
+ * dwa pytania: „czy coś jest zepsute?” i „czy dane są świeże?”. Pasek niesie
+ * dokładnie te dwie informacje plus akcję odświeżenia.
+ *
+ * Wartości wypełnia skrypt klienta (role `sticky-*`), a `data-action="refresh"`
+ * obsługuje ten sam delegowany handler co przycisk w nagłówku.
+ */
+import { Icon } from 'astro-icon/components';
+---
+
+<div class="sticky-bar" data-section="sticky" data-state="unknown">
+  <span class="state-dot" aria-hidden="true"></span>
+  <span class="text-sm font-semibold" data-role="sticky-label">—</span>
+  <span class="muted text-xs" data-role="sticky-note"></span>
+  <span class="ml-auto flex shrink-0 items-center gap-2 sm:gap-3">
+    <span
+      class="subtle hidden items-center gap-1.5 text-xs sm:flex"
+      data-role="sticky-fresh"
+      data-state="unknown"
+    >
+      <span class="state-dot" aria-hidden="true"></span>
+      <span class="num" data-role="sticky-updated">—</span>
+      <span data-role="sticky-ago"></span>
+    </span>
+    <button type="button" class="btn-ops" data-action="refresh">
+      <Icon name="lucide:refresh-cw" size={14} aria-hidden="true" />
+      <span>Odśwież</span>
+    </button>
+  </span>
+</div>

@@ -2,6 +2,9 @@
 /**
  * Sekcja (d): kopia zapasowa (`backup`). Wartości procentowe i czasowe
  * formatowane po stronie klienta; stan pochodzi wprost z API.
+ *
+ * Sześć pól układa się w jednym rzędzie wypełniającym kartę (`.field-grid`
+ * z auto-fit), dzięki czemu sekcja jest niska niezależnie od szerokości okna.
  */
 import { Icon } from 'astro-icon/components';
 import SectionCard from './SectionCard.astro';
@@ -9,7 +12,7 @@ import StatBlock from './StatBlock.astro';
 ---
 
 <SectionCard section="backup" title="Kopia zapasowa" icon="lucide:database-backup">
-  <div class="grid grid-cols-2 gap-2.5 p-3 sm:grid-cols-3">
+  <div class="field-grid">
     <StatBlock field="backup-state" label="Stan" icon="lucide:shield-check" />
     <StatBlock field="backup-last" label="Ostatnia kopia" icon="lucide:calendar-clock" />
     <StatBlock field="backup-age" label="Wiek kopii" icon="lucide:timer" />
@@ -19,6 +22,6 @@ import StatBlock from './StatBlock.astro';
   </div>
   <div class="empty-ops" data-role="empty" hidden>
     <Icon name="lucide:inbox" size={16} aria-hidden="true" />
-    <span>Brak danych o kopii zapasowej.</span>
+    <span>Brak danych o kopii zapasowej — API nie zwróciło tej sekcji.</span>
   </div>
 </SectionCard>

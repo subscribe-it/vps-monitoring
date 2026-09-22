@@ -73,6 +73,19 @@
        nadal przekracza 4.5:1 (WCAG AA) — sprawdzone pomiarem kontrastu. */
     --state-disabled: oklch(68% 0.012 255);
     --state: var(--state-unknown);
+
+    /*
+     * Rytm odstępów (jedna skala dla całego panelu):
+     *   4 px  — wewnątrz pigułek i ikon
+     *   8 px  — wiersze wewnątrz bloku, kafelki w siatce
+     *  12 px  — odstęp między kartami sekcji
+     *  16 px  — padding wnętrza karty
+     * Dzięki temu „ciasne grupy, hojne separacje” jest mierzalne, a nie uznaniowe.
+     */
+    --sp-1: 0.25rem;
+    --sp-2: 0.5rem;
+    --sp-section: 0.75rem;
+    --sp-card: 1rem;
   }
 
   html {
@@ -97,6 +110,8 @@
     color: var(--color-base-content);
     font-family: var(--font-sans);
     min-height: 100dvh;
+    /* Kursor tekstowy w akcencie — powierzchnie przeglądarki też należą do projektu. */
+    caret-color: var(--color-primary);
   }
 
   ::selection {
@@ -168,11 +183,11 @@
     display: inline-flex;
     align-items: center;
     gap: 0.375rem;
-    padding: 0.125rem 0.5rem;
+    padding: 0.1875rem 0.5rem;
     border-radius: 9999px;
-    font-size: 0.6875rem;
+    font-size: 0.75rem;
     font-weight: 600;
-    letter-spacing: 0.02em;
+    letter-spacing: 0.01em;
     white-space: nowrap;
     color: var(--state);
     background: color-mix(in oklab, var(--state) 14%, transparent);
@@ -208,8 +223,8 @@
   .card-head {
     display: flex;
     align-items: center;
-    gap: 0.625rem;
-    padding: 0.75rem 1rem;
+    gap: 0.5rem 0.625rem;
+    padding: 0.5625rem 1rem;
     border-bottom: 1px solid var(--color-base-300);
     background: color-mix(in oklab, var(--color-base-300) 30%, transparent);
   }
@@ -224,7 +239,7 @@
 
   .count-chip {
     font-family: var(--font-mono);
-    font-size: 0.6875rem;
+    font-size: 0.75rem;
     font-weight: 600;
     padding: 0.0625rem 0.4375rem;
     border-radius: 9999px;
@@ -240,36 +255,33 @@
    * `grid`) wygrywa z regułą z tej warstwy niezależnie od specyficzności.
    * Dlatego układ, który musi być nadpisywany przez stan widoku, trzymamy
    * tutaj w CSS, a nie w klasach narzędziowych na tym samym elemencie.
+   *
+   * Kafelki układają się w jeden pas: docelowo wszystkie narzędzia mieszczą się
+   * w jednym rzędzie na szerokim ekranie (7 kafelków × ~11rem + odstępy
+   * ≈ 1280 px), a na węższych zawijają się do dwóch.
    */
   .tools-grid {
     display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0.625rem;
-    padding: 0.75rem;
+    grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem 0.625rem;
   }
 
-  @media (width >= 40rem) {
+  @media (width < 40rem) {
     .tools-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-  }
-
-  @media (width >= 80rem) {
-    .tools-grid {
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
     }
   }
 
   .tile {
     position: relative;
     display: flex;
-    gap: 0.75rem;
-    align-items: flex-start;
-    padding: 0.8125rem 0.9375rem;
+    gap: 0.625rem;
+    align-items: center;
+    padding: 0.5rem 0.625rem;
     background: color-mix(in oklab, var(--color-base-200) 80%, transparent);
-    border: 1px solid var(--color-base-300);
-    border-left: 3px solid var(--state);
-    border-radius: var(--radius-box);
+    border: 1px solid color-mix(in oklab, var(--state) 26%, var(--color-base-300));
+    border-radius: var(--radius-field);
     text-decoration: none;
     color: inherit;
     transition:
@@ -280,8 +292,7 @@
 
   .tile:hover {
     background: color-mix(in oklab, var(--color-base-300) 55%, transparent);
-    border-color: color-mix(in oklab, var(--state) 40%, var(--color-base-300));
-    border-left-color: var(--state);
+    border-color: color-mix(in oklab, var(--state) 55%, var(--color-base-300));
   }
 
   .tile:active {
@@ -296,14 +307,17 @@
   /* Opis kafelka: własna klasa zamiast `block`, żeby tryb podglądu mógł go schować. */
   .tile-desc {
     display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .tile-icon {
     flex: none;
     display: grid;
     place-items: center;
-    width: 2.25rem;
-    height: 2.25rem;
+    width: 2rem;
+    height: 2rem;
     border-radius: 0.5rem;
     color: var(--state);
     background: color-mix(in oklab, var(--state) 13%, transparent);
@@ -311,8 +325,8 @@
   }
 
   .icon-use {
-    width: 1.125rem;
-    height: 1.125rem;
+    width: 1rem;
+    height: 1rem;
     display: block;
   }
 
@@ -330,28 +344,32 @@
   .table-wrap {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
+    /* Motywowanie natywnych pasków przewijania (nie własny scrollbar). */
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklab, var(--color-base-content) 26%, transparent) transparent;
   }
 
   .table-ops {
     width: 100%;
+    min-width: 33rem;
     border-collapse: collapse;
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
   }
 
   .table-ops th {
     text-align: left;
-    font-size: 0.6875rem;
+    font-size: 0.75rem;
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.045em;
-    color: color-mix(in oklab, var(--color-base-content) 72%, transparent);
-    padding: 0.5rem 0.75rem;
+    letter-spacing: 0.04em;
+    color: color-mix(in oklab, var(--color-base-content) 74%, transparent);
+    padding: 0.4375rem 0.75rem;
     border-bottom: 1px solid var(--color-base-300);
     white-space: nowrap;
   }
 
   .table-ops td {
-    padding: 0.5rem 0.75rem;
+    padding: 0.4375rem 0.75rem;
     border-bottom: 1px solid color-mix(in oklab, var(--color-base-300) 55%, transparent);
     vertical-align: middle;
   }
@@ -385,8 +403,8 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 0.5rem 0.75rem;
-    padding: 0.625rem 1rem;
+    gap: 0.25rem 0.625rem;
+    padding: 0.5rem 1rem;
     border-bottom: 1px solid color-mix(in oklab, var(--color-base-300) 55%, transparent);
     transition: background-color 150ms ease;
   }
@@ -399,9 +417,21 @@
     background: color-mix(in oklab, var(--color-base-content) 4%, transparent);
   }
 
+  /*
+   * Alerty: pilność widać po tle wiersza, nie po kolorowej krawędzi. Tło jest
+   * na tyle słabe, że tekst zachowuje kontrast, a lista sortuje się wzrokiem.
+   */
+  [data-role="alert"][data-state="critical"] {
+    background: color-mix(in oklab, var(--color-error) 7%, transparent);
+  }
+
+  [data-role="alert"][data-state="warning"] {
+    background: color-mix(in oklab, var(--color-warning) 5%, transparent);
+  }
+
   /* ---------- pasek zużycia ---------- */
   .meter {
-    height: 0.375rem;
+    height: 0.3125rem;
     border-radius: 9999px;
     overflow: hidden;
     background: color-mix(in oklab, var(--color-base-content) 13%, transparent);
@@ -410,9 +440,17 @@
   .meter > span {
     display: block;
     height: 100%;
+    width: 100%;
     border-radius: inherit;
     background: var(--state);
-    transition: width 200ms ease;
+    transform-origin: left center;
+    transform: scaleX(0);
+    /*
+     * Animujemy `transform`, nie `width`: zmiana szerokości wymusza przeliczenie
+     * układu przy każdym odświeżeniu (co 30 s × 3 paski), a `scaleX` idzie przez
+     * kompozytor. Krzywa: szybki start, łagodne wyhamowanie.
+     */
+    transition: transform 250ms cubic-bezier(0.16, 1, 0.3, 1);
   }
 
   /* ---------- komunikaty ---------- */
@@ -445,21 +483,38 @@
     color: color-mix(in oklab, var(--color-base-content) 66%, transparent);
   }
 
+  /*
+   * Link akcji („Otwórz”). Powiększony obszar kliknięcia (≥28 px) bez zmiany
+   * rozmiaru optycznego — 16-pikselowe cele były nie do trafienia na telefonie.
+   */
   .link-ops {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    min-height: 1.75rem;
+    padding: 0.1875rem 0.5rem;
+    margin: -0.1875rem -0.5rem;
+    border-radius: var(--radius-field);
     color: var(--color-primary);
     text-decoration: none;
-    transition: color 150ms ease;
+    text-underline-offset: 0.2em;
+    transition:
+      color 150ms ease,
+      background-color 150ms ease;
   }
 
   .link-ops:hover {
     text-decoration: underline;
+    background: color-mix(in oklab, var(--color-primary) 12%, transparent);
   }
 
   .btn-ops {
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     gap: 0.4375rem;
-    padding: 0.375rem 0.6875rem;
+    min-height: 1.875rem;
+    padding: 0.3125rem 0.6875rem;
     border-radius: var(--radius-field);
     font-size: 0.8125rem;
     font-weight: 550;
@@ -477,6 +532,15 @@
     background: color-mix(in oklab, var(--color-base-content) 12%, transparent);
     border-color: color-mix(in oklab, var(--color-primary) 45%, var(--color-base-300));
     color: var(--color-base-content);
+  }
+
+  .btn-ops:active {
+    background: color-mix(in oklab, var(--color-base-content) 16%, transparent);
+  }
+
+  .btn-ops:disabled {
+    opacity: 0.55;
+    cursor: progress;
   }
 
   .skip-link {
@@ -541,19 +605,185 @@
 
   [data-view="tool"] .tools-grid {
     display: flex;
-    gap: 0.625rem;
-    padding: 0.5rem 0.75rem;
+    gap: 0.5rem;
+    padding: 0.375rem 0.75rem;
     overflow-x: auto;
     overscroll-behavior-x: contain;
   }
 
   [data-view="tool"] .tools-grid .tile {
     flex: 0 0 auto;
-    align-items: center;
-    width: 15rem;
+    width: 13rem;
   }
 
   [data-view="tool"] .tile-desc {
+    display: none;
+  }
+}
+
+/*
+ * ===========================================================================
+ * Układ strony — wydajne użycie szerokości ekranu
+ * ===========================================================================
+ *
+ * Założenia (zmierzone na produkcji przed zmianą):
+ *  - panel miał sztywny limit 1700 px, więc na monitorze 2560 px ~⅓ szerokości
+ *    stała pusta;
+ *  - wszystko szło jedną kolumną: 6341 px wysokości przy 1440 px, a sekcja
+ *    „Stacki" zajmowała 3304 px;
+ *  - 346 elementów miało 11 px, a dominujący rozmiar tekstu to 13 px.
+ *
+ * Po zmianie: powłoka jest płynna (bez limitu), a sekcje układają się
+ * w kolumny zależnie od realnej szerokości okna. Nie „rozciągamy" tekstu —
+ * szerokość zamieniamy na kolejne kolumny treści.
+ */
+@layer components {
+  /* Płynna powłoka: pełna szerokość okna + padding rosnący z ekranem. */
+  .shell {
+    width: 100%;
+    margin-inline: auto;
+    padding-inline: clamp(0.75rem, 1.1vw, 2.5rem);
+  }
+
+  /* Pionowy rytm widoku stanu. */
+  .status-view {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-section);
+    min-width: 0;
+  }
+
+  /* Grupy sekcji: jedna kolumna na wąskim, więcej kolumn na szerokim ekranie. */
+  .grid-ops {
+    display: grid;
+    gap: var(--sp-section);
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+    min-width: 0;
+  }
+
+  @media (width >= 64rem) {
+    .grid-ops-3 {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  /* Alerty + endpointy obok siebie dopiero wtedy, gdy oba mają sensowną szerokość. */
+  @media (width >= 106rem) {
+    .grid-ops-2 {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .grid-ops-3 {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
+
+  /*
+   * Stacki: 47 usług w jednej kolumnie to ponad 3000 px przewijania. Na bardzo
+   * szerokich ekranach rozbijamy listę stacków na dwie kolumny — karty są
+   * rozdzielone linią, więc układ nadal czyta się jako jedna tabela sekcji.
+   */
+  @media (width >= 134rem) {
+    [data-section="stacks"] [data-role="list"] {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      align-items: stretch;
+    }
+
+    [data-section="stacks"] [data-role="list"] > *:nth-child(odd) {
+      border-right: 1px solid var(--color-base-300);
+    }
+
+    [data-section="stacks"] [data-role="list"] > * > header {
+      padding-inline: 1rem;
+    }
+  }
+
+  /*
+   * Pasek stanu przyklejony do góry. Na 6000-pikselowej stronie użytkownik
+   * przewijając „Stacki" tracił z oczu informację, czy cokolwiek jest zepsute
+   * i kiedy ostatnio przyszły dane. Pasek niesie dokładnie te dwie rzeczy
+   * plus akcję odświeżenia.
+   */
+  .sticky-bar {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem 0.75rem;
+    min-height: 2.75rem;
+    padding: 0.375rem 0.75rem;
+    border: 1px solid var(--color-base-300);
+    border-radius: var(--radius-box);
+    background: color-mix(in oklab, var(--color-base-200) 95%, var(--color-base-100));
+    box-shadow: 0 6px 18px -12px oklch(0% 0 0 / 0.75);
+  }
+
+  .sticky-bar [data-role="bar-note"] {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Kafelki statystyk hosta / pól wartości: jedna linia opisu, bez pustki. */
+  .stat-tile {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0.5rem 0.625rem;
+    border: 1px solid var(--color-base-300);
+    border-radius: var(--radius-field);
+    background: color-mix(in oklab, var(--color-base-200) 70%, transparent);
+    min-width: 0;
+  }
+
+  /*
+   * Wartość nigdy nie może wyjść poza kafelek (długie „11:57:50 UTC" obcinało
+   * się bez śladu). Pełna treść jest w `title` kafelka, ustawianym przez skrypt.
+   */
+  .stat-tile [data-role="value"] {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /*
+   * Nagłówek: stan ogólny po lewej, statystyki hosta jako jeden pas po prawej.
+   * Osiem kafli w jednym rzędzie zamiast dwóch rzędów po cztery — mniej
+   * pionu na informację, którą i tak czyta się jednym spojrzeniem.
+   */
+  .host-stats {
+    display: grid;
+    gap: 0.375rem;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  @media (width >= 34rem) {
+    .host-stats {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+  }
+
+  @media (width >= 60rem) {
+    .host-stats {
+      grid-template-columns: repeat(8, minmax(0, 1fr));
+    }
+  }
+
+  /* Siatka pól w sekcjach Kopia zapasowa / Bezpieczeństwo — wypełnia kartę. */
+  .field-grid {
+    display: grid;
+    gap: 0.375rem;
+    padding: 0.75rem;
+    grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  }
+}
+
+@layer components {
+  /* W widoku podglądu pasek stanu tylko zabiera miejsce — ramka ma własny pasek. */
+  [data-view="tool"] .sticky-bar {
     display: none;
   }
 }

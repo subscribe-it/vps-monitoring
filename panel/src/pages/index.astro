@@ -19,25 +19,32 @@ import ErrorBanner from '../components/ErrorBanner.astro';
 import IframeView from '../components/IframeView.astro';
 import SecuritySection from '../components/SecuritySection.astro';
 import StacksSection from '../components/StacksSection.astro';
+import StatusBar from '../components/StatusBar.astro';
 import StatusHeader from '../components/StatusHeader.astro';
 import ToolGrid from '../components/ToolGrid.astro';
 ---
 
 <Base title="Panel monitoringu — stan usług">
   <div id="app" class="flex min-h-dvh flex-col" data-view="status" data-endpoint="/status/api.json" data-refresh-ms="30000">
-    <main
-      id="main"
-      class="mx-auto flex w-full max-w-[1700px] min-h-0 flex-1 flex-col gap-3 px-3 py-4 sm:px-5 lg:px-8"
-    >
+    <main id="main" class="shell flex min-h-0 flex-1 flex-col gap-3 py-3">
+      <StatusBar />
       <ErrorBanner />
       <StatusHeader />
       <ToolGrid />
 
-      <div class="flex flex-col gap-3" data-role="status-view">
-        <AlertsSection />
-        <ChecksSection />
+      <!--
+        Układ widoku stanu: alerty obok endpointów (gdy obie kolumny mają
+        sensowną szerokość), stacki na pełnej szerokości, a trzy lżejsze sekcje
+        w jednym rzędzie. Progi kolumn trzyma `.grid-ops-*` w global.css, więc
+        na 27-calowym monitorze szerokość jest wykorzystana, a nie pusta.
+      -->
+      <div class="status-view" data-role="status-view">
+        <div class="grid-ops grid-ops-2">
+          <AlertsSection />
+          <ChecksSection />
+        </div>
         <StacksSection />
-        <div class="grid gap-3 xl:grid-cols-3">
+        <div class="grid-ops grid-ops-3">
           <CertsSection />
           <BackupSection />
           <SecuritySection />
@@ -47,14 +54,14 @@ import ToolGrid from '../components/ToolGrid.astro';
       <IframeView />
     </main>
 
-    <footer
-      class="border-t border-base-300 px-3 py-3 sm:px-5 lg:px-8"
-      data-role="footer"
-    >
-      <p class="subtle mx-auto max-w-[1700px] text-[11px]">
-        Źródło danych: <span class="num">/status/api.json</span> · odświeżanie co 30 s ·
-        panel statyczny, bez zależności zewnętrznych
-      </p>
+    <footer class="border-t border-base-300 py-3" data-role="footer">
+      <div class="shell">
+        <p class="subtle max-w-[80ch] text-xs">
+          Źródło danych: <span class="num">/status/api.json</span> · odświeżanie co 30 s ·
+          po powrocie do karty dane odświeżają się natychmiast · panel statyczny, bez
+          zależności zewnętrznych
+        </p>
+      </div>
     </footer>
   </div>
 </Base>
@@ -158,6 +165,33 @@ import ToolGrid from '../components/ToolGrid.astro';
       return mod10 >= 2 && mod10 <= 4 && !(mod100 >= 12 && mod100 <= 14) ? few : many;
     }
 
+    /**
+     * Ustawia tekst i zapisuje pełną wartość w `title`. Używane wszędzie tam,
+     * gdzie komórka jest przycinana (`truncate`) — dzięki temu „ucięte" dane
+     * pozostają dostępne po najechaniu, zamiast ginąć bez śladu.
+     */
+    function setTextWithTitle(root: ParentNode, selector: string, value: string): void {
+      setText(root, selector, value);
+      const node = q<HTMLElement>(root, selector);
+      if (!node) return;
+      if (value) node.title = value;
+      else node.removeAttribute('title');
+    }
+
+    /**
+     * Referencja obrazu w tabeli usług: pełny digest (64 znaki) plus rejestr
+     * to ~140 znaków, które nie mieszczą się w kolumnie i były obcinane
+     * w połowie (`ghcr.io/subscribe-it/...`). Pokazujemy to, co odróżnia jeden
+     * obraz od drugiego — repozytorium, tag i początek digestu — a pełną
+     * wartość trzymamy w `title`. Nic nie ginie, a kolumna da się przeczytać.
+     */
+    function skrocObraz(ref: string): string {
+      const bezRejestru = ref
+        .replace(/^(?:ghcr\.io|registry-1\.docker\.io|docker\.io)\//, '')
+        .replace(/^subscribe-it\//, '');
+      return bezRejestru.replace(/@sha256:([0-9a-f]{12})[0-9a-f]+/i, '@sha256:$1…');
+    }
+
     /** Nagłówek sekcji: licznik + zbiorczy stan. */
     function updateSection(key: string, states: State[], count: string): void {
       const el = section(key);
@@ -217,6 +251,23 @@ import ToolGrid from '../components/ToolGrid.astro';
       setText(header, '[data-role="overall-label"]', overallLabel(overall));
       setText(header, '[data-role="overall-note"]', overallNote(s));
       setText(header, '[data-role="generated"]', fmtDateTimeUTC(s.generated_at));
+
+      /*
+       * Pasek przyklejony pokazuje ten sam stan, ale bez prefiksu „Wymaga
+       * uwagi:" — w nagłówku zdanie czyta się w całości, w pasku liczy się
+       * zwięzłość (jest widoczny przez całe przewijanie).
+       */
+      const bar = section('sticky');
+      if (bar) {
+        bar.dataset.state = overall;
+        setText(bar, '[data-role="sticky-label"]', overallLabel(overall));
+        setText(bar, '[data-role="sticky-note"]', issueSummary(s));
+      }
+    }
+
+    /** Powody z `overallNote` bez prefiksu i kropki — treść paska przyklejonego. */
+    function issueSummary(s: StatusSnapshot): string {
+      return overallNote(s).replace(/^Wymaga uwagi: /, '').replace(/\.$/, '');
     }
 
     function renderHost(host: HostSnapshot | null): void {
@@ -233,13 +284,16 @@ import ToolGrid from '../components/ToolGrid.astro';
         tile.dataset.state = options.state ?? 'unknown';
         setText(tile, '[data-role="value"]', options.value);
         setText(tile, '[data-role="sub"]', options.sub);
+        tile.title = options.sub === 'brak danych' ? options.value : `${options.value} — ${options.sub}`;
 
         const meter = q<HTMLElement>(tile, '[data-role="meter"]');
         if (!meter) return;
         const percent = options.percent ?? null;
         const bar = meter.firstElementChild;
         if (bar instanceof HTMLElement) {
-          bar.style.width = `${percent === null ? 0 : Math.max(0, Math.min(100, percent))}%`;
+          // Skala zamiast szerokości: animacja nie przelicza układu (patrz .meter w CSS).
+          const skala = percent === null ? 0 : Math.max(0, Math.min(100, percent)) / 100;
+          bar.style.transform = `scaleX(${skala})`;
         }
         meter.setAttribute('aria-valuenow', String(percent === null ? 0 : Math.round(percent)));
         meter.setAttribute('aria-valuetext', options.value);
@@ -305,7 +359,7 @@ import ToolGrid from '../components/ToolGrid.astro';
       });
       put('time', {
         value: fmtTimeUTC(host.time_utc),
-        sub: fmtDateUTC(host.time_utc),
+        sub: `${fmtDateUTC(host.time_utc)} UTC`,
         state: host.time_utc ? 'ok' : 'unknown',
       });
     }
@@ -318,14 +372,22 @@ import ToolGrid from '../components/ToolGrid.astro';
       return '#/';
     }
 
+    /**
+     * Nazwa dostępna kafelka. Musi ZACZYNAĆ się od widocznego tekstu (WCAG
+     * 2.5.3 „label in name") — dlatego składamy ją w tej samej kolejności co
+     * treść kafelka: nazwa, opis, stan; dopisek mówi, gdzie link prowadzi.
+     */
     function toolAriaLabel(tool: Tool): string {
-      const parts = [tool.name];
-      if (tool.description) parts.push(tool.description);
-      parts.push(`stan: ${stateLabel(tool.state)}`);
-      if (tool.embed && tool.url) parts.push('otwiera podgląd w panelu');
-      else if (tool.url) parts.push('otwiera się w nowej karcie');
-      else parts.push('widok stanu');
-      return parts.join(' — ');
+      const widoczny = [tool.name, tool.description ?? '', stateLabel(tool.state)]
+        .filter(Boolean)
+        .join(' ');
+      const dopisek =
+        tool.embed && tool.url
+          ? 'otwiera podgląd w panelu'
+          : tool.url
+            ? 'otwiera się w nowej karcie'
+            : 'przełącza na widok stanu';
+      return `${widoczny} — ${dopisek}`;
     }
 
     function renderTools(tools: Tool[]): void {
@@ -357,14 +419,12 @@ import ToolGrid from '../components/ToolGrid.astro';
         const use = q<SVGUseElement>(tile, 'use');
         if (use) use.setAttribute('href', spriteHref(tool.icon));
 
-        setText(tile, '[data-role="name"]', tool.name);
-        setText(tile, '[data-role="description"]', tool.description ?? '');
+        setTextWithTitle(tile, '[data-role="name"]', tool.name);
+        setTextWithTitle(tile, '[data-role="description"]', tool.description ?? '');
+        // Rodzaj narzędzia (wewnętrzne/zewnętrzne) ląduje w podpowiedzi kafelka:
+        // jako osobna etykieta był obcinany w połowie i dublował ikonę linku.
+        tile.title = toolAriaLabel(tool);
         setText(tile, '[data-role="state-label"]', stateLabel(tool.state));
-        setText(
-          tile,
-          '[data-role="kind"]',
-          tool.kind === 'internal' ? 'wewnętrzne' : tool.kind === 'external' ? 'zewnętrzne' : tool.kind,
-        );
 
         const marker = q<SVGElement>(tile, '[data-role="marker"]');
         if (marker) marker.toggleAttribute('hidden', tool.embed || !tool.url);
@@ -412,8 +472,8 @@ import ToolGrid from '../components/ToolGrid.astro';
           const row = instantiate('tpl-check-row');
           if (!row || !rows) continue;
           row.dataset.state = check.state;
-          setText(row, '[data-role="name"]', check.name);
-          setText(row, '[data-role="detail"]', check.detail ?? stateLabel(check.state));
+          setTextWithTitle(row, '[data-role="name"]', check.name);
+          setTextWithTitle(row, '[data-role="detail"]', check.detail ?? stateLabel(check.state));
           setText(
             row,
             '[data-role="latency"]',
@@ -426,7 +486,9 @@ import ToolGrid from '../components/ToolGrid.astro';
             if (check.url) {
               link.href = check.url;
               link.hidden = false;
-              link.setAttribute('aria-label', `${check.name} — otwórz w nowej karcie`);
+              // Nazwa dostępna zaczyna się od widocznego tekstu („Otwórz"),
+              // żeby nie łamać reguły „label in name" (WCAG 2.5.3).
+              link.setAttribute('aria-label', `Otwórz ${check.name} w nowej karcie`);
             } else {
               link.hidden = true;
               link.removeAttribute('href');
@@ -475,8 +537,17 @@ import ToolGrid from '../components/ToolGrid.astro';
           const row = instantiate('tpl-service-row');
           if (!row || !body) continue;
           row.dataset.state = service.state;
-          setText(row, '[data-role="name"]', service.name);
-          setText(row, '[data-role="full-name"]', service.full_name ?? '');
+          setTextWithTitle(row, '[data-role="name"]', service.name);
+          /*
+           * `full_name` to ta sama nazwa z prefiksem stacka (np. `bugsink_db`
+           * dla usługi `db`), więc druga linia w komórce była czystą
+           * redundancją i podwajała wysokość 47 wierszy. Zostaje w podpowiedzi.
+           */
+          const komorkaNazwy = q<HTMLElement>(row, '[data-role="name"]');
+          if (komorkaNazwy) {
+            if (service.full_name) komorkaNazwy.title = service.full_name;
+            else komorkaNazwy.removeAttribute('title');
+          }
           setText(row, '[data-role="state-label"]', stateLabel(service.state));
           setText(
             row,
@@ -493,7 +564,13 @@ import ToolGrid from '../components/ToolGrid.astro';
           );
           setText(row, '[data-role="ram"]', fmtBytes(service.mem_bytes));
           setText(row, '[data-role="restarts"]', fmtInt(service.restarts_1h));
-          setText(row, '[data-role="image"]', service.image ?? '');
+          const obraz = service.image ?? '';
+          setText(row, '[data-role="image"]', obraz ? skrocObraz(obraz) : '');
+          const komorkaObrazu = q<HTMLElement>(row, '[data-role="image"]');
+          if (komorkaObrazu) {
+            if (obraz) komorkaObrazu.title = obraz;
+            else komorkaObrazu.removeAttribute('title');
+          }
           body.append(row);
         }
         holder.append(block);
@@ -517,7 +594,7 @@ import ToolGrid from '../components/ToolGrid.astro';
 
         row.dataset.state = cert.state;
         setState(row, '[data-role="days-wrap"]', certDaysState(cert.days_left));
-        setText(row, '[data-role="host"]', cert.host);
+        setTextWithTitle(row, '[data-role="host"]', cert.host);
         setText(row, '[data-role="expires"]', cert.expires_at ? fmtDateUTC(cert.expires_at) : '');
         setText(row, '[data-role="days"]', `${fmtDays(cert.days_left)}`);
         setText(row, '[data-role="state-label"]', stateLabel(cert.state));
@@ -531,6 +608,7 @@ import ToolGrid from '../components/ToolGrid.astro';
       block.dataset.state = state;
       setText(block, '[data-role="value"]', value);
       setText(block, '[data-role="sub"]', sub);
+      block.title = sub ? `${value} — ${sub}` : value;
     }
 
     function renderBackup(backup: Backup | null): void {
@@ -606,8 +684,8 @@ import ToolGrid from '../components/ToolGrid.astro';
       for (const login of logins) {
         const row = instantiate('tpl-login-row');
         if (!row) continue;
-        setText(row, '[data-role="service"]', login.service);
-        setText(row, '[data-role="ip"]', login.ip);
+        setTextWithTitle(row, '[data-role="service"]', login.service);
+        setTextWithTitle(row, '[data-role="ip"]', login.ip);
         setText(row, '[data-role="at"]', fmtDateTimeUTC(login.at));
         holder.append(row);
       }
@@ -643,10 +721,10 @@ import ToolGrid from '../components/ToolGrid.astro';
         const row = instantiate('tpl-alert-row');
         if (!row) continue;
         row.dataset.state = alert.severity;
-        setText(row, '[data-role="name"]', alert.name);
+        setTextWithTitle(row, '[data-role="name"]', alert.name);
         setText(row, '[data-role="severity"]', severityLabel(alert.severity));
-        setText(row, '[data-role="alert-stack"]', alert.stack ?? '');
-        setText(row, '[data-role="summary"]', alert.summary ?? '');
+        setTextWithTitle(row, '[data-role="alert-stack"]', alert.stack ?? '');
+        setTextWithTitle(row, '[data-role="summary"]', alert.summary ?? '');
         setText(row, '[data-role="since"]', alert.since ? `od ${fmtTimeUTC(alert.since)}` : '');
         holder.append(row);
       }
@@ -681,15 +759,27 @@ import ToolGrid from '../components/ToolGrid.astro';
     }
 
     function renderMeta(): void {
-      const header = section('header');
-      if (!header) return;
-
       const age = lastGoodAt ? Date.now() - lastGoodAt.getTime() : null;
       const isStale = age === null || age > refreshMs * 3;
-      setState(header, '[data-role="fresh"]', lastGoodAt ? (isStale ? 'warning' : 'ok') : 'unknown');
-      setText(header, '[data-role="updated"]', lastGoodAt ? fmtTimeUTC(lastGoodAt) : DASH);
-      setText(header, '[data-role="updated-ago"]', lastGoodAt ? `(${fmtAgo(lastGoodAt)})` : '');
-      setText(app, '[data-role="refresh-seconds"]', String(refreshSeconds));
+      const fresh: State = lastGoodAt ? (isStale ? 'warning' : 'ok') : 'unknown';
+
+      /*
+       * Świeżość danych mieszka w pasku przyklejonym: to jedyne miejsce
+       * widoczne przez całe przewijanie, więc tam musi być odpowiedź na pytanie
+       * „czy patrzę na aktualny stan?".
+       */
+      const bar = section('sticky');
+      if (bar) {
+        setState(bar, '[data-role="sticky-fresh"]', fresh);
+        setText(bar, '[data-role="sticky-updated"]', lastGoodAt ? fmtTimeUTC(lastGoodAt) : DASH);
+        setText(bar, '[data-role="sticky-ago"]', lastGoodAt ? fmtAgo(lastGoodAt) : 'brak danych');
+      }
+
+      // Auto-odświeżanie bez osobnej linii tekstu: informacja w podpowiedzi akcji.
+      const refreshButton = q<HTMLButtonElement>(app, '[data-action="refresh"]');
+      if (refreshButton) {
+        refreshButton.title = `Odśwież teraz — automatycznie co ${refreshSeconds} s`;
+      }
     }
 
     /* ---------------- pobieranie danych ---------------- */
@@ -726,6 +816,14 @@ import ToolGrid from '../components/ToolGrid.astro';
         const empty = q<HTMLElement>(el, '[data-role="empty"]');
         if (empty) empty.hidden = false;
       }
+      // Pasek przyklejony musi powiedzieć prawdę także wtedy, gdy nie ma danych.
+      const bar = section('sticky');
+      if (bar) {
+        bar.dataset.state = 'unknown';
+        setText(bar, '[data-role="sticky-label"]', 'Brak danych');
+        setText(bar, '[data-role="sticky-note"]', 'nie udało się pobrać stanu z API');
+      }
+
       // „Brak aktywnych alertów” byłoby nieprawdą — nie wiemy, czy są.
       const clear = q<HTMLElement>(app, '[data-section="alerts"] [data-role="empty-clear"]');
       if (clear) clear.hidden = true;

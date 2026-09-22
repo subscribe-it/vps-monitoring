@@ -4,6 +4,9 @@
  * wskaźnikiem stanu. Kolor całej sekcji wynika z atrybutu `data-state` na
  * tym elemencie (patrz `--state` w global.css), a skrypt klienta tylko go
  * podmienia.
+ *
+ * Sekcja jest opisana własnym nagłówkiem (`aria-labelledby`), więc czytnik
+ * ekranu wymienia ją jako nazwany region, a nie „sekcję bez tytułu”.
  */
 import { Icon } from 'astro-icon/components';
 
@@ -16,12 +19,13 @@ interface Props {
 }
 
 const { section, title, icon } = Astro.props;
+const headingId = `section-${section}-title`;
 ---
 
-<section class="card-ops" data-section={section} data-state="unknown">
+<section class="card-ops" data-section={section} data-state="unknown" aria-labelledby={headingId}>
   <header class="card-head">
-    <Icon name={icon} size={17} class="state-text" aria-hidden="true" />
-    <h2 class="card-title">{title}</h2>
+    <Icon name={icon} size={16} class="state-text" aria-hidden="true" />
+    <h2 class="card-title" id={headingId}>{title}</h2>
     <span class="count-chip" data-role="count">—</span>
     <span
       class="state-pill ml-auto"

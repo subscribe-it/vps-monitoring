@@ -2,6 +2,12 @@
 /**
  * Sekcja (b): stacki z `stacks[]` wraz z tabelą usług
  * (repliki, CPU, RAM, restarty, obraz).
+ *
+ * Tabela jest gęsta (tekst 14 px, padding 7 px), a pełne identyfikatory
+ * (nazwa kontenera, referencja obrazu) trafiają do atrybutu `title` — dzięki
+ * temu nic nie jest „ucięte bez śladu”, a kolumny nie zabierają szerokości
+ * potrzebnej na liczby. Na bardzo szerokich ekranach lista stacków łamie się
+ * na dwie kolumny (patrz reguła `[data-section="stacks"]` w global.css).
  */
 import { Icon } from 'astro-icon/components';
 import SectionCard from './SectionCard.astro';
@@ -11,13 +17,13 @@ import SectionCard from './SectionCard.astro';
   <div data-role="list"></div>
   <div class="empty-ops" data-role="empty" hidden>
     <Icon name="lucide:inbox" size={16} aria-hidden="true" />
-    <span>Brak danych o stackach.</span>
+    <span>Brak danych o stackach — API nie zwróciło listy usług.</span>
   </div>
 </SectionCard>
 
 <template id="tpl-stack">
   <section class="border-b border-base-300 last:border-b-0" data-role="stack" data-state="unknown">
-    <header class="flex flex-wrap items-center gap-2 px-4 pt-3 pb-2">
+    <header class="flex flex-wrap items-center gap-2 px-4 pt-2.5 pb-1.5">
       <span class="state-dot" aria-hidden="true"></span>
       <h3 class="text-sm font-semibold" data-role="stack-name"></h3>
       <span class="count-chip" data-role="stack-services"></span>
@@ -42,7 +48,7 @@ import SectionCard from './SectionCard.astro';
             <th scope="col" class="num">CPU</th>
             <th scope="col" class="num">RAM</th>
             <th scope="col" class="num">Restarty 1 h</th>
-            <th scope="col" class="hidden lg:table-cell">Obraz</th>
+            <th scope="col" class="hidden md:table-cell">Obraz</th>
           </tr>
         </thead>
         <tbody data-role="services"></tbody>
@@ -56,10 +62,7 @@ import SectionCard from './SectionCard.astro';
     <td>
       <span class="flex items-center gap-2">
         <span class="state-dot" aria-hidden="true"></span>
-        <span class="min-w-0">
-          <span class="block truncate font-medium" data-role="name"></span>
-          <span class="num subtle block truncate text-[11px]" data-role="full-name"></span>
-        </span>
+        <span class="truncate font-medium" data-role="name"></span>
       </span>
     </td>
     <td class="state-text text-xs font-semibold" data-role="state-label"></td>
@@ -67,8 +70,8 @@ import SectionCard from './SectionCard.astro';
     <td class="num" data-role="cpu"></td>
     <td class="num" data-role="ram"></td>
     <td class="num" data-role="restarts"></td>
-    <td class="hidden lg:table-cell">
-      <span class="num subtle block max-w-[20rem] truncate text-[11px]" data-role="image"></span>
+    <td class="hidden md:table-cell">
+      <span class="num subtle block max-w-[34rem] truncate text-xs" data-role="image"></span>
     </td>
   </tr>
 </template>

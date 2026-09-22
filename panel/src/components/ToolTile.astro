@@ -4,6 +4,10 @@
  * a skrypt klienta klonuje go dla każdej pozycji z `tools[]` i wypełnia teksty.
  * Dzięki temu znaczniki zostają w Astro, a dane wstawiamy przez `textContent`
  * (żadnego wstrzykiwania HTML z odpowiedzi API).
+ *
+ * Trzy linie treści w jednym kafelku (nazwa, opis, stan + rodzaj) — siedem
+ * narzędzi mieści się w jednym pasie już przy 1400 px, więc nie zabierają
+ * pierwszego ekranu sekcjom ze stanem.
  */
 import { Icon } from 'astro-icon/components';
 ---
@@ -16,23 +20,22 @@ import { Icon } from 'astro-icon/components';
       </svg>
     </span>
     <span class="min-w-0 flex-1">
-      <span class="flex items-center gap-2">
+      <span class="flex items-center gap-1.5">
         <span class="truncate text-sm font-semibold" data-role="name"></span>
         <Icon
           name="lucide:external-link"
-          size={13}
+          size={12}
           class="subtle ml-auto shrink-0"
           data-role="marker"
           aria-hidden="true"
         />
       </span>
-      <span class="muted tile-desc mt-0.5 text-xs leading-snug" data-role="description"></span>
-      <span class="mt-2 flex flex-wrap items-center gap-2">
+      <span class="muted tile-desc mt-0.5 text-xs" data-role="description"></span>
+      <span class="mt-1.5 flex items-center gap-1.5">
         <span class="state-pill">
           <span class="state-dot" aria-hidden="true"></span>
           <span data-role="state-label"></span>
         </span>
-        <span class="subtle text-[11px]" data-role="kind"></span>
       </span>
     </span>
   </a>
