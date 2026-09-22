@@ -2,8 +2,13 @@
 #  Grafana — provisioning dashboardow (jako kod, bez klikania w UI)
 #
 #  Pliki JSON leza w config/grafana/dashboards/ i sa wypalane w obrazie
-#  (dockerfiles/grafana: COPY config/grafana/dashboards /var/lib/grafana/dashboards),
-#  dlatego provider czyta wlasnie ten katalog.
+#  (dockerfiles/grafana: COPY config/grafana/dashboards /etc/grafana/dashboards).
+#
+#  UWAGA: celowo POZA /var/lib/grafana. Ten katalog jest wolumenem
+#  (grafana_data_v2), a Docker kopiuje do wolumenu zawartosc obrazu tylko przy
+#  jego pierwszym utworzeniu — pozniejsze zmiany dashboardow w obrazie byly
+#  zaslaniane przez wolumen i Grafana ich nie widziala (zmierzone 2026-09-22:
+#  nowy dashboard byl w obrazie, a `/api/search` pokazywalo 4 z 5).
 #
 #  foldersFromFilesStructure: false — wszystkie dashboardy ladują w jednym
 #  folderze "Monitoring" (kluczowe dla dashboardu aplikacji: jeden dashboard
@@ -23,5 +28,5 @@ providers:
     updateIntervalSeconds: 30
     allowUiUpdates: false
     options:
-      path: /var/lib/grafana/dashboards
+      path: /etc/grafana/dashboards
       foldersFromFilesStructure: false
