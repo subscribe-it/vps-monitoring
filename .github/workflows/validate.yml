@@ -179,6 +179,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
+      - name: Składnia skryptów bash
+        run: |
+          zle=0
+          for f in $(git ls-files '*.sh'); do
+            bash -n "$f" || { echo "::error::$f ma błąd składni"; zle=1; }
+          done
+          [ "$zle" -eq 0 ] && echo "  ✓ wszystkie skrypty bash mają poprawną składnię"
+
       - name: Kompilacja i testy
         run: |
           python3 -m compileall -q services scripts

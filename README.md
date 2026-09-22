@@ -76,6 +76,14 @@ python3 scripts/ci/check_loki_regex.py     # wzorce, które w Loki dopasują NIC
 python3 tests/integration/verify_log_patterns.py   # każda gałąź regexu vs realna linia (wymaga Loki)
 LOKI_URL=… python3 scripts/ci/check_ruler_loaded.py # ile reguł ruler FAKTYCZNIE wczytał
 python3 tests/integration/verify_ntfy_real.py       # prawdziwy ntfy.sh: czy powiadomienie dochodzi (wymaga internetu)
+
+Przygotowanie zmiennych do Portainera (generuje hash hasła, losowe sekrety
+i wypisuje gotowy blok `KLUCZ=WARTOŚĆ` do wklejenia):
+
+```bash
+scripts/przygotuj-env.sh                    # tryb interaktywny, pyta o wszystko
+scripts/przygotuj-env.sh --plik /tmp/env.txt
+```
 ```
 
 Uwagi do środowiska lokalnego: `discovery` potrzebuje **menedżera Swarma** (na zwykłym

@@ -37,6 +37,10 @@ GitHub → Settings → Developer settings → **Fine-grained token**:
 
 ## 4. Skąd wziąć wartości env
 
+Najprościej: uruchom `scripts/przygotuj-env.sh` — dopyta o wartości, wygeneruje
+hash hasła (i sprawdzi, że pasuje do hasła), wylosuje brakujące sekrety i wypisze
+gotowy blok do wklejenia w Portainera. Poniżej to samo ręcznie.
+
 | Zmienna | Skąd |
 | --- | --- |
 | `PANEL_AUTH_PASSWORD_HTPASSWD` | `docker run --rm httpd:2.4-alpine htpasswd -nbB admin 'HASŁO'` → w Portainerze podwój każdy `$` |
