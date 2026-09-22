@@ -33,11 +33,18 @@ jobs:
 
       - name: Ustaw widoczność pakietów
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ORG: ${{ github.repository_owner }}
-          VIS: ${{ inputs.visibility }}
+          # Token Actions NIE MA dostępu do pakietów (PATCH zwraca 404 — zmierzone),
+          # więc jeśli w sekretach jest klasyczny PAT z `write:packages`, używamy jego.
+          GH_TOKEN: ${{ secrets.GHCR_ADMIN_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           set -uo pipefail
+          ORG="${{ github.repository_owner }}"
+          VIS="${{ inputs.visibility }}"
+          if [ -n "${{ secrets.GHCR_ADMIN_TOKEN }}" ]; then
+            echo "Token: GHCR_ADMIN_TOKEN (PAT z write:packages)"
+          else
+            echo "Token: GITHUB_TOKEN (Actions) — pakietów nim nie zmienisz, to tylko podgląd"
+          fi
           # Nazwy bierzemy z compose — lista nie może się rozjechać z tym, co wdrażamy.
           pakiety=$(grep -oE "ghcr\.io/$ORG/[a-z0-9-]+" docker-compose.yml | sed "s|ghcr.io/$ORG/||" | sort -u)
           echo "Organizacja: $ORG | widoczność: $VIS | pakietów: $(echo "$pakiety" | wc -l)"
@@ -52,7 +59,21 @@ jobs:
           done
           echo "Ustawiono: $ile z $(echo "$pakiety" | wc -l)"
           if [ "$ile" -eq 0 ]; then
-            echo "::warning::Token Actions nie może zmieniać widoczności pakietów. Ustaw ręcznie: GitHub → organizacja $ORG → zakładka Packages → pakiet → Package settings → Danger Zone → Change visibility → $VIS."
+            {
+              echo "### Pakiety zostały prywatne — potrzebna jedna z dwóch rzeczy"
+              echo
+              echo "**A. Token do tego workflow (jednorazowo).** Utwórz klasyczny PAT z zakresem \`write:packages\`"
+              echo "i dodaj go jako sekret \`GHCR_ADMIN_TOKEN\` w tym repo, potem uruchom ten workflow ponownie."
+              echo
+              echo "**B. Ustaw widoczność w UI.** Organizacja \`"$ORG"\` → zakładka **Packages** → pakiet →"
+              echo "**Package settings** → Danger Zone → **Change visibility** → \`$VIS\` (11 pakietów)."
+              echo
+              echo "**C. Zostaw pakiety prywatne.** Dodaj w Portainerze rejestr \`ghcr.io\` z PAT (zakres \`read:packages\`)"
+              echo "i wskaż go w stacku — wtedy nic nie musi być publiczne."
+              echo
+              echo "Lokalnie, mając PAT: \`gh auth login\` i \`for p in $(echo "$pakiety"); do gh api --method PATCH /orgs/$ORG/packages/container/\$p -f visibility=$VIS; done\`"
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::Token Actions nie może zmieniać widoczności pakietów — szczegóły i trzy wyjścia w podsumowaniu tego uruchomienia (Step Summary)."
           fi
 
       - name: Czy anonimowy pull działa (Portainer bez danych logowania)
