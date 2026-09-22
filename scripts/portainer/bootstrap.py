@@ -228,8 +228,7 @@ def main() -> int:
         if kod != 200:
             print(f"  ✗ HTTP {kod}: {str(sieci)[:200]}")
         for s in sorted(sieci or [], key=lambda x: x.get("Name", "")):
-            if s.get("Scope") == "swarm" or "traefik" in (s.get("Name") or ""):
-                print(f"    {s.get('Name'):45s} driver={s.get('Driver')} scope={s.get('Scope')}")
+            print(f"    {s.get('Name'):45s} driver={s.get('Driver'):10s} scope={s.get('Scope')}")
 
     if args.labelki:
         filtr = urllib.parse.quote(json.dumps({"name": [args.labelki]}))
