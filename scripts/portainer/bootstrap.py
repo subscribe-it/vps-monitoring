@@ -29,6 +29,7 @@ import os
 import ssl
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
 STACK = os.environ.get("PORTAINER_STACK", "monitoring")
@@ -48,13 +49,18 @@ def klient(url, klucz):
     else:
         naglowki["X-API-Key"] = klucz
 
-    def wolaj(metoda, sciezka, dane=None):
+    def wolaj(metoda, sciezka, dane=None, surowy=False):
         cialo = json.dumps(dane).encode() if dane is not None else None
         req = urllib.request.Request(baza + sciezka, data=cialo, method=metoda, headers=naglowki)
         try:
             with urllib.request.urlopen(req, timeout=30, context=kontekst) as odp:
                 tresc = odp.read().decode("utf-8", "replace")
-                return odp.status, (json.loads(tresc) if tresc.strip() else None)
+                if surowy or not tresc.strip():
+                    return odp.status, tresc
+                try:
+                    return odp.status, json.loads(tresc)
+                except json.JSONDecodeError:
+                    return odp.status, tresc
         except urllib.error.HTTPError as e:
             tresc = e.read().decode("utf-8", "replace")
             try:
@@ -64,6 +70,67 @@ def klient(url, klucz):
             return e.code, tresc
 
     return wolaj
+
+
+def odfiltruj_logi(surowy):
+    """Docker skleja logi w ramki: 8-bajtowy nagłówek (typ + długość) i treść.
+
+    Bez zdjęcia nagłówków w logu widać śmieci w rodzaju „\\x01\\x00\\x00\\x00".
+    """
+    wynik, i = [], 0
+    bajty = surowy.encode("utf-8", "surrogateescape") if isinstance(surowy, str) else surowy
+    while i < len(bajty):
+        if bajty[i] in (0, 1, 2) and bajty[i + 1:i + 4] == b"\x00\x00\x00":
+            dlugosc = int.from_bytes(bajty[i + 4:i + 8], "big")
+            wynik.append(bajty[i + 8:i + 8 + dlugosc].decode("utf-8", "replace"))
+            i += 8 + dlugosc
+        else:  # strumień bez ramek (tty)
+            wynik.append(bajty[i:].decode("utf-8", "replace"))
+            break
+    return "".join(wynik)
+
+
+def uslugi_stacku(api, eid, przestrzen):
+    """Lista usług stacku z liczbą zadań w stanie running."""
+    filtr = urllib.parse.quote(json.dumps({"label": ["com.docker.stack.namespace=%s" % przestrzen]}))
+    kod, uslugi = api("GET", f"/api/endpoints/{eid}/docker/services?filters={filtr}")
+    if kod != 200:
+        raise SystemExit(f"  ✗ nie mogę wylistować usług: HTTP {kod} {uslugi}")
+    kod, zadania = api("GET", f"/api/endpoints/{eid}/docker/tasks?filters={filtr}")
+    if kod != 200:
+        raise SystemExit(f"  ✗ nie mogę wylistować zadań: HTTP {kod} {zadania}")
+    licznik = {}
+    bledy = {}
+    for z in zadania or []:
+        sid = z.get("ServiceID")
+        stan = (z.get("Status") or {}).get("State") or "?"
+        if stan == "running":
+            licznik[sid] = licznik.get(sid, 0) + 1
+        else:
+            opis = (z.get("Status") or {}).get("Err") or ""
+            if not opis:
+                opis = "%s (stan: %s)" % ((z.get("DesiredState") or "?"), stan)
+            bledy.setdefault(sid, opis)
+    return uslugi or [], licznik, bledy
+
+
+def pokaz_uslugi(api, eid, przestrzen):
+    uslugi, licznik, bledy = uslugi_stacku(api, eid, przestrzen)
+    ok = 0
+    print(f"  usług w stacku: {len(uslugi)}")
+    for u in sorted(uslugi, key=lambda x: (x.get("Spec") or {}).get("Name", "")):
+        nazwa = (u.get("Spec") or {}).get("Name", "?")
+        chce = ((u.get("Spec") or {}).get("Mode") or {}).get("Replicated") or {}
+        chce = chce.get("Replicas", 1)
+        ma = licznik.get(u.get("ID"), 0)
+        pelne = ma >= chce
+        ok += 1 if pelne else 0
+        znacznik = "✓" if pelne else "✗"
+        print(f"    {znacznik} {nazwa:38s} {ma}/{chce}")
+        if not pelne and u.get("ID") in bledy:
+            print(f"        powód: {bledy[u['ID']][:150]}")
+    print(f"  z pełnymi replikami: {ok}/{len(uslugi)}")
+    return ok == len(uslugi)
 
 
 def znajdz_stack(api, nazwa):
@@ -87,6 +154,11 @@ def main() -> int:
     p.add_argument("--json", action="store_true", help="wypisz wynik maszynowo")
     p.add_argument("--show-env", action="store_true",
                    help="pokaż NAZWY zmiennych środowiskowych stacka (wartości nigdy)")
+    p.add_argument("--uslugi", action="store_true",
+                   help="pokaż usługi stacku z liczbą działających replik i powodami awarii")
+    p.add_argument("--logi", metavar="WZORZEC",
+                   help="pokaż ostatnie linie logów usługi pasującej do wzorca (dowolny stack)")
+    p.add_argument("--linii", type=int, default=40, help="ile linii logu (domyślnie 40)")
     args = p.parse_args()
 
     url = (os.environ.get("PORTAINER_URL") or "").strip()
@@ -137,6 +209,30 @@ def main() -> int:
         print("    z env.portainer.paste.txt. Potem uruchom ten workflow ponownie.")
         return 2
     print(f"  ścieżka compose: {plik} ✓")
+
+    if args.uslugi:
+        print()
+        pokaz_uslugi(api, eid, args.stack)
+
+    if args.logi:
+        # Szukamy po WSZYSTKICH usługach w rojniku — dzięki temu można zajrzeć
+        # także do Traefika z innego stacka (diagnostyka routingu).
+        filtr = urllib.parse.quote(json.dumps({"name": [args.logi]}))
+        kod, uslugi = api("GET", f"/api/endpoints/{eid}/docker/services?filters={filtr}")
+        if kod != 200 or not uslugi:
+            print(f"  ✗ nie znalazłem usługi pasującej do „{args.logi}”")
+        else:
+            for u in uslugi[:3]:
+                nazwa = (u.get("Spec") or {}).get("Name")
+                print(f"\n  --- log: {nazwa} (ostatnie {args.linii} linii) ---")
+                kod, surowy = api("GET",
+                    f"/api/endpoints/{eid}/docker/services/{u['ID']}/logs"
+                    f"?stdout=1&stderr=1&timestamps=0&tail={args.linii}", surowy=True)
+                if kod != 200:
+                    print(f"    ✗ HTTP {kod}: {str(surowy)[:200]}")
+                else:
+                    for linia in odfiltruj_logi(surowy).splitlines():
+                        print(f"    {linia[:220]}")
 
     if args.start and not dziala:
         # `endpointId` jest wymagane (bez niego Portainer zwraca 400) — sprawdzone

@@ -23,9 +23,15 @@ on:
         options:
           - check
           - show-env
+          - uslugi
+          - logi
           - start
           - redeploy
           - start-and-redeploy
+      wzorzec:
+        description: "Fragment nazwy usługi dla akcji 'logi' (np. traefik, discovery)"
+        required: false
+        default: traefik
 
 permissions:
   contents: read
@@ -48,11 +54,14 @@ jobs:
         env:
           PORTAINER_URL: ${{ secrets.PORTAINER_URL }}
           PORTAINER_API_KEY: ${{ secrets.PORTAINER_API_KEY }}
+          WZORZEC: ${{ inputs.wzorzec }}
         run: |
           set -o pipefail
           args=""
           case "${{ inputs.action }}" in
             show-env)           args="--show-env" ;;
+            uslugi)             args="--uslugi" ;;
+            logi)               args="--logi \"$WZORZEC\" --linii 60" ;;
             start)              args="--start" ;;
             redeploy)           args="--redeploy --pull" ;;
             start-and-redeploy) args="--start --redeploy --pull" ;;
