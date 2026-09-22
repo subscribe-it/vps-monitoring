@@ -96,6 +96,10 @@ class Config:
             env.get("MONITORING_DOMAIN", DEFAULT_MONITORING_DOMAIN) or ""
         ).strip()
         self.security_json_url = (env.get("SECURITY_JSON_URL", "") or "").strip()
+        # Loki jest źródłem sekcji „Bezpieczeństwo", gdy nie ma zewnętrznego
+        # JSON-a: promtail zbiera journald hosta, więc nieudane logowania SSH
+        # są już w Loki (patrz `sekcja_z_loki`).
+        self.loki_url = (env.get("LOKI_URL", "") or "").strip().rstrip("/")
         self.port = _env_int(env, "PORT", DEFAULT_PORT)
 
     @property
@@ -1307,7 +1311,90 @@ def empty_backup():
 
 
 def empty_security():
-    return {"ssh_failed_24h": 0, "ssh_bans_24h": 0, "logins_24h": [], "state": "unknown"}
+    # Liczniki jako None, a nie 0: „nie wiem" nie może wyglądać jak „zero
+    # zdarzeń". Panel renderuje None jako „—" (fmtInt w panel/src/lib/status.ts).
+    return {"ssh_failed_24h": None, "ssh_bans_24h": None, "logins_24h": [], "state": "unknown"}
+
+
+# --- sekcja „Bezpieczeństwo" z Loki ----------------------------------------
+# Skąd dane: promtail zbiera journald hosta (config/promtail/promtail-config.yaml),
+# więc próby logowania SSH są już w Loki — nie trzeba osobnego agenta na hoście.
+# Zmierzone na produkcji 22.09.2026: w 24 h 203 linie „Failed password" i 44
+# „Accepted", a jednostka systemd to `ssh.service` (nie `ssh`). fail2ban pisze
+# do journala tylko start/stop („Server ready", „Shutdown successful"), więc
+# liczby banów z journala nie da się policzyć — zostaje None, a panel pokazuje
+# „—" zamiast fałszywego zera.
+LOKI_SSH = 'unit="ssh.service"'
+LOKI_FAIL2BAN = 'unit="fail2ban.service"'
+LOKI_LICZNIKI = (
+    ("ssh_failed_24h",
+     'sum(count_over_time({job="journald", %s} |= "Failed password" [24h]))' % LOKI_SSH),
+    ("ssh_bans_24h",
+     'sum(count_over_time({job="journald", %s} |~ "(?i)ban" [24h]))' % LOKI_FAIL2BAN),
+)
+LOKI_LOGINY = '{job="journald", %s} |= "Accepted"' % LOKI_SSH
+LOKI_LOGIN_WZORZEC = re.compile(
+    r"Accepted (?P<metoda>\S+) for (?P<uzytkownik>\S+) from (?P<ip>\S+) port (?P<port>\d+)"
+)
+
+
+def sekcja_z_loki(loki_url, json_get, limit_logowan=20, teraz=None):
+    """Buduje sekcję `security` z Loki. Zwraca None, gdy Loki nie odpowiedziało."""
+    teraz = time.time() if teraz is None else teraz
+    sekcja = {"ssh_failed_24h": None, "ssh_bans_24h": None, "logins_24h": [], "state": "unknown"}
+    odpowiedzialo = False
+
+    for klucz, zapytanie in LOKI_LICZNIKI:
+        adres = "%s/loki/api/v1/query?%s" % (
+            loki_url, urllib.parse.urlencode({"query": zapytanie, "time": "%.0f" % teraz}),
+        )
+        try:
+            dane = json_get(adres, timeout=5.0)
+        except Exception as wyjatek:  # noqa: BLE001 - brak Loki => licznik zostaje None
+            log("Loki nie odpowiedziało na %s (%s)", klucz, wyjatek)
+            continue
+        odpowiedzialo = True
+        wynik = ((dane or {}).get("data") or {}).get("result") or []
+        if not wynik:
+            continue
+        try:
+            sekcja[klucz] = int(float(wynik[0]["value"][1]))
+        except (KeyError, IndexError, TypeError, ValueError):
+            log("Loki: nieoczekiwany kształt odpowiedzi dla %s", klucz)
+
+    koniec_ns = int(teraz * 1e9)
+    adres = "%s/loki/api/v1/query_range?%s" % (
+        loki_url,
+        urllib.parse.urlencode({
+            "query": LOKI_LOGINY,
+            "start": str(koniec_ns - 24 * 3600 * 10**9),
+            "end": str(koniec_ns),
+            "limit": str(limit_logowan),
+            "direction": "backward",
+        }),
+    )
+    try:
+        dane = json_get(adres, timeout=5.0)
+    except Exception as wyjatek:  # noqa: BLE001
+        log("Loki nie odpowiedziało na listę logowań (%s)", wyjatek)
+    else:
+        odpowiedzialo = True
+        for strumien in ((dane or {}).get("data") or {}).get("result") or []:
+            for znacznik, linia in strumien.get("values") or []:
+                dopasowanie = LOKI_LOGIN_WZORZEC.search(linia or "")
+                if not dopasowanie:
+                    continue
+                sekcja["logins_24h"].append({
+                    "service": dopasowanie.group("uzytkownik"),
+                    "ip": dopasowanie.group("ip"),
+                    "method": dopasowanie.group("metoda"),
+                    "at": iso_z(float(znacznik) / 1e9),
+                })
+
+    if not odpowiedzialo:
+        return None
+    sekcja["state"] = "ok"
+    return sekcja
 
 
 # --------------------------------------------------------------------------
@@ -1805,20 +1892,29 @@ class DiscoveryService:
         return alerts
 
     def security_section(self):
-        default = {"ssh_failed_24h": 0, "ssh_bans_24h": 0, "logins_24h": [], "state": "unknown"}
-        if not self.config.security_json_url:
-            return default
-        try:
-            payload = self.json_get(self.config.security_json_url, timeout=5.0)
-        except Exception as exc:  # noqa: BLE001 - brak źródła => unknown
-            log("Źródło bezpieczeństwa niedostępne (%s)", exc)
-            return default
-        if not isinstance(payload, dict):
-            return default
-        section = dict(default)
-        section.update(payload)
-        section.setdefault("state", "ok")
-        return section
+        default = empty_security()
+        # Zewnętrzny JSON (jeśli ktoś go poda) ma pierwszeństwo — może zawierać
+        # dane, których w journalu nie ma (np. bany z fail2bana).
+        if self.config.security_json_url:
+            try:
+                payload = self.json_get(self.config.security_json_url, timeout=5.0)
+            except Exception as exc:  # noqa: BLE001 - brak źródła => unknown
+                log("Źródło bezpieczeństwa niedostępne (%s)", exc)
+                return default
+            if not isinstance(payload, dict):
+                return default
+            section = dict(default)
+            section.update(payload)
+            # `empty_security()` ma teraz `state: unknown`, więc setdefault nic
+            # by nie zmienił — a skoro źródło odpowiedziało, to nie jest unknown.
+            if not payload.get("state"):
+                section["state"] = "ok"
+            return section
+        if self.config.loki_url:
+            section = sekcja_z_loki(self.config.loki_url, self.json_get)
+            if section is not None:
+                return section
+        return default
 
     def tools_section(self):
         tools = []

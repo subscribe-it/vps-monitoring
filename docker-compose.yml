@@ -402,6 +402,10 @@ services:
       - MONITORING_DOMAIN=${MONITORING_DOMAIN:-monitoring.subscribeit.pl}
       - ALERTMANAGER_URL=http://alertmanager:9093
       - HEALTH_PING_URL=http://health-ping:8080
+      # Źródło sekcji „Bezpieczeństwo": promtail zbiera journald hosta, więc
+      # nieudane logowania SSH są już w Loki. Bez tego sekcja była wiecznie
+      # „unknown" (a liczniki obiecywały zero).
+      - LOKI_URL=http://loki:3100
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     # Gniazdo Dockera należy do grupy `docker` (0660). Proces działa jako UID 10001,

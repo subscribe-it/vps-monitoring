@@ -1016,5 +1016,119 @@ class ContainerUsageTests(unittest.TestCase):
             self.assertIn(oczekiwana, nazwy)
 
 
+class SecurityFromLokiTests(unittest.TestCase):
+    """Sekcja „Bezpieczeństwo" liczona z Loki (promtail zbiera journald sshd).
+
+    Powód: bez tego sekcja była wiecznie `unknown`, a liczniki pokazywały 0
+    także wtedy, gdy danych po prostu nie było (fałszywe „wszystko gra").
+    """
+
+    def _json_get(self, odpowiedzi):
+        def json_get(url, timeout=5.0):
+            for fragment, wartosc in odpowiedzi.items():
+                if fragment in url:
+                    if isinstance(wartosc, Exception):
+                        raise wartosc
+                    return wartosc
+            raise AssertionError("nieoczekiwany adres w teście: " + url)
+
+        return json_get
+
+    def _sekcja(self, odpowiedzi):
+        service = build_service(
+            FakeDocker(services=[]),
+            config=make_config(LOKI_URL="http://loki:3100"),
+            json_get=self._json_get(odpowiedzi),
+        )
+        return service.security_section()
+
+    def test_liczy_nieudane_proby_i_udane_logowania(self):
+        logowania = {"data": {"result": [{"values": [
+            ["1758530000000000000",
+             "Sep 22 10:13:20 vps sshd[1]: Accepted publickey for ubuntu "
+             "from 195.60.64.7 port 51234 ssh2: RSA SHA256:abc"],
+            ["1758520000000000000",
+             "Sep 22 09:06:40 vps sshd[2]: Accepted password for root from 10.0.0.9 port 2211 ssh2"],
+        ]}]}}
+        sekcja = self._sekcja({
+            "Failed": {"data": {"result": [{"value": [1758530000, "203"]}]}},
+            "fail2ban": {"data": {"result": []}},
+            "query_range": logowania,
+        })
+        self.assertEqual(sekcja["state"], "ok")
+        self.assertEqual(sekcja["ssh_failed_24h"], 203)
+        # fail2ban nie pisze banów do journala -> None, a nie fałszywe zero
+        self.assertIsNone(sekcja["ssh_bans_24h"])
+        self.assertEqual(len(sekcja["logins_24h"]), 2)
+        pierwsze = sekcja["logins_24h"][0]
+        self.assertEqual(pierwsze["service"], "ubuntu")
+        self.assertEqual(pierwsze["ip"], "195.60.64.7")
+        self.assertEqual(pierwsze["method"], "publickey")
+        self.assertTrue(pierwsze["at"].endswith("Z"), pierwsze["at"])
+        self.assertEqual(sekcja["logins_24h"][1]["service"], "root")
+
+    def test_loki_nie_odpowiada_to_stan_unknown_bez_zer(self):
+        blad = OSError("connection refused")
+        sekcja = self._sekcja({"loki": blad})
+        self.assertEqual(sekcja["state"], "unknown")
+        self.assertIsNone(sekcja["ssh_failed_24h"])
+        self.assertIsNone(sekcja["ssh_bans_24h"])
+        self.assertEqual(sekcja["logins_24h"], [])
+
+    def test_brak_listy_logowan_nie_psuje_licznikow(self):
+        sekcja = self._sekcja({
+            "Failed": {"data": {"result": [{"value": [0, "7"]}]}},
+            "fail2ban": {"data": {"result": [{"value": [0, "3"]}]}},
+            "query_range": OSError("timeout"),
+        })
+        self.assertEqual(sekcja["state"], "ok")
+        self.assertEqual(sekcja["ssh_failed_24h"], 7)
+        self.assertEqual(sekcja["ssh_bans_24h"], 3)
+        self.assertEqual(sekcja["logins_24h"], [])
+
+    def test_szum_sshd_nie_udaje_logowania(self):
+        """`Accepted key ... found at ...` to nie logowanie (zmierzone w Loki).
+
+        sshd loguje tak każde dopasowanie klucza z authorized_keys — przy
+        luźniejszym wzorcu lista logowań puchłaby od szumu.
+        """
+        sekcja = self._sekcja({
+            "Failed": {"data": {"result": [{"value": [0, "1"]}]}},
+            "fail2ban": {"data": {"result": []}},
+            "query_range": {"data": {"result": [{"values": [
+                ["1758530000000000000",
+                 "Sep 22 10:13:20 vps sshd[1]: Accepted key ED25519 SHA256:abc "
+                 "found at /home/dsh/.ssh/authorized_keys:1"],
+            ]}]}},
+        })
+        self.assertEqual(sekcja["logins_24h"], [])
+
+    def test_smieciowa_odpowiedz_loki_nie_wywala_sekcji(self):
+        sekcja = self._sekcja({
+            "Failed": {"data": {"result": [{"value": []}]}},
+            "fail2ban": {"data": {"result": [{"cos": "innego"}]}},
+            "query_range": {"data": {"result": [{"values": [["nie-liczba", None]]}]}},
+        })
+        self.assertEqual(sekcja["state"], "ok")
+        self.assertIsNone(sekcja["ssh_failed_24h"])
+        self.assertIsNone(sekcja["ssh_bans_24h"])
+        self.assertEqual(sekcja["logins_24h"], [])
+
+    def test_zewnetrzny_json_ma_pierwszenstwo_nad_loki(self):
+        service = build_service(
+            FakeDocker(services=[]),
+            config=make_config(LOKI_URL="http://loki:3100",
+                               SECURITY_JSON_URL="https://przyklad/security.json"),
+            json_get=self._json_get({
+                "security.json": {"ssh_failed_24h": 11, "ssh_bans_24h": 4,
+                                  "logins_24h": [{"service": "ubuntu", "ip": "1.2.3.4", "at": "2026-09-22T08:00:00Z"}]},
+            }),
+        )
+        sekcja = service.security_section()
+        self.assertEqual(sekcja["ssh_failed_24h"], 11)
+        self.assertEqual(sekcja["ssh_bans_24h"], 4)
+        self.assertEqual(sekcja["state"], "ok")
+
+
 if __name__ == "__main__":
     unittest.main()

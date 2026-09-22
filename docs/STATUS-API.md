@@ -38,7 +38,7 @@ w takim przypadku pola uzupełniane są zerami, a `overall` degraduje się do `w
     { "name": "AppDown", "severity": "critical", "stack": "ventiplan-prod",
       "summary": "…", "since": "…" }
   ],
-  "security": { "ssh_failed_24h": 0, "ssh_bans_24h": 0, "logins_24h": [], "state": "ok" },
+  "security": { "ssh_failed_24h": 203, "ssh_bans_24h": null, "logins_24h": [], "state": "ok" },
   "tools": [
     { "id": "grafana", "name": "Grafana", "url": "/grafana", "embed": true,
       "embed_query": "kiosk", "state": "ok", "kind": "internal", "icon": "chart-line",
@@ -60,3 +60,10 @@ w takim przypadku pola uzupełniane są zerami, a `overall` degraduje się do `w
   (pomiar na produkcji: 319 px szerokości odzyskane dla wykresów).
 - Pole `tools[].url` wewnętrznych narzędzi jest **względne** (`/grafana`) — dzięki temu
   panel działa niezależnie od domeny.
+- Sekcja `security` liczy się z Loki (`LOKI_URL`), bo promtail zbiera journald
+  hosta: `ssh_failed_24h` to `count_over_time` linii „Failed password"
+  z jednostki `ssh.service`, a `logins_24h` to ostatnie 20 linii „Accepted"
+  (użytkownik, IP, czas). Gdy Loki nie odpowiada, `state` = `unknown`,
+  a liczniki są `null` — panel pokazuje wtedy „—", żeby nie udawać zera.
+  Bany (`ssh_bans_24h`) są `null`, bo fail2ban pisze do journala tylko
+  start/stop; pełne dane da zewnętrzny `SECURITY_JSON_URL` (ma pierwszeństwo).
