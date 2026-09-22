@@ -327,12 +327,26 @@ def main() -> int:
         print(f"  ✓ kopia PRZED zmianą: {kopia}")
         # Najpierw zapis env (bez wdrożenia), potem redeploy — dwie wyraźne operacje.
         # `endpointId` również tutaj — bez niego Portainer szuka środowiska o id=0.
-        kod, odp = api("POST", f"/api/stacks/{sid}/git?endpointId={eid}", {
-            "Env": env, "Prune": True, "RepositoryReferenceName": stack.get("RepositoryReferenceName"),
-            "RepositoryAuthentication": bool(stack.get("RepositoryAuthentication")),
-            "RepositoryUsername": stack.get("RepositoryUsername") or "", "RepositoryPassword": ""})
-        print(f"  zapis env → HTTP {kod} {'✓' if kod == 200 else '✗ ' + str(odp)[:150]}")
-        if kod != 200:
+        # Stack oparty na PLIKU (nasz monitoring właśnie tak wygląda) nie ma
+        # konfiguracji gita, a trasa `/git` odpowiada wtedy „No Git config in the
+        # found stack” (HTTP 500 — zmierzone 22.09.2026, dokładnie przy próbie
+        # ustawienia HC_PING_BACKUP). Dlatego dla takich stacków zapisujemy env
+        # razem z treścią compose z katalogu roboczego — tą samą trasą co --redeploy.
+        if stack.get("RepositoryURL") or stack.get("GitConfig"):
+            kod, odp = api("POST", f"/api/stacks/{sid}/git?endpointId={eid}", {
+                "Env": env, "Prune": True, "RepositoryReferenceName": stack.get("RepositoryReferenceName"),
+                "RepositoryAuthentication": bool(stack.get("RepositoryAuthentication")),
+                "RepositoryUsername": stack.get("RepositoryUsername") or "", "RepositoryPassword": ""})
+        else:
+            tresc = open(plik, encoding="utf-8").read()
+            kod, odp = api("PUT", f"/api/stacks/{sid}?endpointId={eid}", {
+                "stackFileContent": tresc,
+                "env": env,
+                "prune": False,
+                "pullImage": bool(args.pull),
+            })
+        print(f"  zapis env → HTTP {kod} {'✓' if kod in (200, 201) else '✗ ' + str(odp)[:150]}")
+        if kod not in (200, 201):
             return 3
 
     if args.backup:
