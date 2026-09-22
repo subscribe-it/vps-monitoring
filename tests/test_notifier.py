@@ -123,8 +123,9 @@ class NtfyMessageTests(unittest.TestCase):
         config = make_config()
         warning = notifier.group_from_webhook(webhook([make_alert(severity="warning")]))
         info = notifier.group_from_webhook(webhook([make_alert(severity="info")]))
-        self.assertEqual(notifier.build_ntfy_message(warning, config)["priority"], "default")
-        self.assertEqual(notifier.build_ntfy_message(info, config)["priority"], "low")
+        self.assertIn(notifier.build_ntfy_message(warning, config)["priority"], ("low", "min"))
+        # info jest jeszcze cichsze niż warning — oba nie brzęczą
+        self.assertEqual(notifier.build_ntfy_message(info, config)["priority"], "min")
 
     def test_custom_priorities_from_env(self):
         config = make_config(NTFY_PRIORITY_CRITICAL="max", NTFY_PRIORITY_WARNING="high")
@@ -577,7 +578,9 @@ class ConfigTests(unittest.TestCase):
         config = notifier.Config(env={})
         self.assertEqual(config.ntfy_url, "https://ntfy.sh")
         self.assertEqual(config.ntfy_priority_critical, "urgent")
-        self.assertEqual(config.ntfy_priority_warning, "default")
+        # domyślnie ostrzeżenie jest CICHE — inaczej budziłoby w nocy
+        self.assertEqual(config.ntfy_priority_warning, "low")
+        self.assertEqual(config.ntfy_priority_info, "min")
         self.assertEqual(config.smtp_port, 587)
         self.assertFalse(config.smtp_secure)
         self.assertEqual(config.email_min_severity, "warning")
@@ -601,3 +604,21 @@ class ConfigTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PriorytetyNtfyTests(unittest.TestCase):
+    """Hałasuje tylko krytyczne — ostrzeżenie o 3:00 nie może budzić."""
+
+    def test_tylko_krytyczne_brzeczy(self):
+        config = notifier.Config(env={})
+        self.assertEqual(notifier.ntfy_priority("critical", config), "urgent")
+        for cicho in ("warning", "info"):
+            priorytet = notifier.ntfy_priority(cicho, config)
+            self.assertIn(priorytet, ("low", "min"), f"{cicho} nie może brzęczeć (jest {priorytet})")
+        self.assertEqual(notifier.ntfy_priority("info", config), "min")
+        self.assertEqual(notifier.ntfy_priority("warning", config), "low")
+
+    def test_mozna_nadpisac_z_env(self):
+        config = notifier.Config(env={"NTFY_PRIORITY_WARNING": "high", "NTFY_PRIORITY_INFO": "default"})
+        self.assertEqual(notifier.ntfy_priority("warning", config), "high")
+        self.assertEqual(notifier.ntfy_priority("info", config), "default")

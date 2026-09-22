@@ -78,7 +78,11 @@ class Config:
         self.ntfy_topic = (env.get("NTFY_TOPIC", "") or "").strip()
         self.ntfy_token = (env.get("NTFY_TOKEN", "") or "").strip()
         self.ntfy_priority_critical = (env.get("NTFY_PRIORITY_CRITICAL", "urgent") or "urgent").strip()
-        self.ntfy_priority_warning = (env.get("NTFY_PRIORITY_WARNING", "default") or "default").strip()
+        # Domyślnie TYLKO krytyczne hałasuje. Warning/info trafiają do telefonu
+        # jako ciche powiadomienia (widać je rano, nie budzą), bo przy `default`
+        # ostrzeżenie o 3:00 zwyczajnie brzęczy.
+        self.ntfy_priority_warning = (env.get("NTFY_PRIORITY_WARNING", "low") or "low").strip()
+        self.ntfy_priority_info = (env.get("NTFY_PRIORITY_INFO", "min") or "min").strip()
         self.smtp_host = (env.get("SMTP_HOST", "") or "").strip()
         self.smtp_port = _env_int(env, "SMTP_PORT", 587)
         self.smtp_secure = _env_bool(env, "SMTP_SECURE", False)
@@ -283,12 +287,17 @@ def group_from_event(title, message, severity, url=""):
 # Treść powiadomień
 # --------------------------------------------------------------------------
 def ntfy_priority(severity, config):
+    """Priorytet ntfy: 5=urgent (brzęczy), 2=low/min (cicho, widoczne w historii).
+
+    Hałasuje wyłącznie `critical` — ostrzeżenie o 3:00 w nocy ma poczekać do rana,
+    ale ma być widoczne.
+    """
     severity = normalize_severity(severity)
     if severity == "critical":
         return config.ntfy_priority_critical or "urgent"
     if severity == "warning":
-        return config.ntfy_priority_warning or "default"
-    return "low"
+        return config.ntfy_priority_warning or "low"
+    return config.ntfy_priority_info or "min"
 
 
 def ntfy_tags(group, severity):

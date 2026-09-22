@@ -71,7 +71,10 @@ Nadpisania per usługa (labele w Portainerze):
 
 ## Poziomy istotności
 
-- `critical` — push na telefon **i** e-mail; stacki z `CRITICAL_STACKS`
-- `warning` — tylko e-mail; domyślnie dla nowo wykrytych aplikacji
-- `info` — e-mail raz na dobę (deploy, logowania, nowe usługi)
+- `critical` — push **głośny** (ntfy `urgent`) + e-mail; stacki z `CRITICAL_STACKS`
+- `warning` — push **cichy** (ntfy `low`) + e-mail; domyślnie dla nowo wykrytych aplikacji
+- `info` — push cichy (ntfy `min`); e-mail dopiero od `EMAIL_MIN_SEVERITY`
+
+Wszystko trafia do telefonu, ale **hałasuje wyłącznie `critical`** — ostrzeżenie
+o 3:00 w nocy ma poczekać do rana i być widoczne.
 - `none` — tylko watchdog (nie jest awarią)

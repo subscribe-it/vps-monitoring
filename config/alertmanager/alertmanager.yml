@@ -63,11 +63,25 @@ receivers:
         send_resolved: false
 
 inhibit_rules:
-  # Krytyczny wycisza ostrzeżenie o tym samym problemie.
+  # Awaria EDGE wycisza sondy aplikacji: gdy Traefik nie przyjmuje ruchu, wszystkie
+  # sondy padają, a to JEDNA przyczyna — nie 12 osobnych problemów.
+  - source_matchers: ['alertname="EdgeNotAcceptingTraffic"']
+    target_matchers: ['alertname=~"AppDown|AppSlow|MonitoringChainBroken|ManyPublicAppsDown"']
+    equal: []
+
+  # Brak node-exportera wycisza alerty o zasobach hosta — nie ma z czego ich liczyć.
+  # (Bez `equal`: instancje tych alertów mają różne etykiety i nigdy by się nie zgadzały.)
+  - source_matchers: ['alertname="NodeExporterDown"']
+    target_matchers: ['alertname=~"Host.*"']
+    equal: []
+
+  # Usługa bez pełnych replik wycisza sondę TEJ SAMEJ aplikacji — najpierw napraw
+  # repliki, potem zastanawiaj się nad 502.
+  - source_matchers: ['alertname="SwarmServiceReplicasMismatch"']
+    target_matchers: ['alertname=~"AppDown|AppSlow"']
+    equal: ['stack']
+
+  # Krytyczny wycisza ostrzeżenie o tym samym problemie (ten sam alert i stack).
   - source_matchers: ['severity="critical"']
     target_matchers: ['severity="warning"']
     equal: ['alertname', 'stack']
-  # Gdy padł cały host (brak metryk), nie zasypuj powiadomieniami o każdej usłudze.
-  - source_matchers: ['alertname="NodeExporterDown"']
-    target_matchers: ['alertname=~"Host.*"']
-    equal: ['instance']
