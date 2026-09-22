@@ -184,7 +184,9 @@ docker service ps ventiplan-prod_postgres
 
 ## <a name="logs"></a>🟡 TraefikNoAccessLogs — i jak czytać logi
 **Co to znaczy:** od 15 minut nie ma nowych wpisów w access logu edge — analiza po fakcie będzie niemożliwa.
-**Stan zmierzony 22.09.2026:** access log działa. `/traefik-logs/access.log` (wolumen `portainer-edge-gateway_traefik-logs`; w kontenerze Traefika ten sam wolumen jest pod `/var/log/traefik`) ma ~2,0 MB i ~2,3 tys. wpisów na godzinę, a promtail przeczytał go w całości. Cisza oznacza więc realną awarię, nie brak konfiguracji.
+**Stan zmierzony 22.09.2026 (skorygowany — poprzedni wpis był błędny):** access log **nie powstaje od 17.08.2026**. `/traefik-logs/access.log` (wolumen `portainer-edge-gateway_traefik-logs`; w kontenerze Traefika ten sam wolumen jest pod `/var/log/traefik`) stoi na **2 019 076 B**, a ostatnia linia ma `StartUTC: 2026-08-16T22:59:07Z`. Promtail przeczytał go w całości (`promtail_read_bytes_total` = `promtail_file_bytes_total`), więc cisza w Loki oznacza brak zapisu po stronie Traefika — i dlatego ten alert jest aktywny.
+
+**Pułapka, która wcześniej wprowadziła w błąd (nie powtarzaj tego błędu):** po naprawie `positions` (wolumen zamiast `/tmp`) promtail **przeczytał cały plik od początku**, a że w jobie `traefik` nie ma etapu `timestamp`, **wszystkie linie z sierpnia dostały w Loki dzisiejszy czas odczytu**. Przez kilka godzin wyglądało to jak „ruch na żywo” (~2,3 tys. wpisów/h, `jpolskina6.pl` 9 100/24 h, 875× 403/429), po czym seria się urwała. Te liczby opisują **ruch z 16–17.08.2026**, nie bieżący. Przy analizie ruchu zawsze sprawdź, czy w oknie są świeże wpisy (`sum(count_over_time({job="traefik"}[5m]))` > 0).
 
 **Gdzie patrzeć:** Grafana → dashboard **„Logi — przeglądanie”** (uid `vps-logs`). Zmienne `Stack`/`Serwis` wybierają kontener, panel *Surowe logi 5xx* pokazuje błędy Traefika. Trzy źródła rozróżnia etykieta `job`:
 `docker` — stdout kontenerów (etykiety `container`, `service`, `stack`), `journald` — journal hosta (`unit`, `transport`), `traefik` — access log edge (`RequestHost`, `filename`).
@@ -237,6 +239,46 @@ sum by (entryPointName) (count_over_time({job="traefik"} | json [24h]))
     volumes:
       - traefik-logs:/var/log/traefik
 ```
+
+## <a name="ruch"></a>🟡 TrafficRequestSpike / TrafficErrorSpike — skok ruchu albo błędów per aplikacja
+**Co to znaczy:** na jednej domenie (`RequestHost`) w oknie 15 minut jest **ponad 3× więcej** żądań (albo odpowiedzi 4xx/5xx) niż w tym samym oknie **tydzień wcześniej** — i jednocześnie powyżej progu bezwzględnego. Progi są dwa celowo: sam mnożnik alarmowałby na stronach z ruchem 2 żądania/godzinę (2 → 7 to „3×”), sam próg nie zauważyłby skoku na dużej stronie.
+- `TrafficRequestSpike`: > 3× baseline **i** > 100 żądań / 15 min, `for: 15m`, `severity: warning`
+- `TrafficErrorSpike`: > 3× baseline **i** > 5 błędów 4xx/5xx / 15 min, `for: 15m`, `severity: warning`
+
+**Warunek wstępny (sprawdź ZAWSZE najpierw):** te reguły czytają access log Traefika, a ten **nie powstaje od 17.08.2026** (patrz sekcja `#logs`). Dopóki alert `TraefikNoAccessLogs` jest aktywny, reguły ruchu **milczą z braku danych** — cisza nie znaczy „ruch w normie”. Drugi warunek: porównanie `offset 7d` potrzebuje **8 dni historii**; zaraz po przywróceniu logu seria bazowa jest pusta (dlatego reguły nie alarmują fałszywie). Chcesz krótszy horyzont wcześniej — w `config/loki/rules/fake/ruch.yml` zamień `offset 7d` na `offset 1h`.
+
+**Sprawdź (LogQL — Grafana → Explore → datasource Loki):**
+```logql
+# 1) czy źródło w ogóle żyje (0 = log nie powstaje, nie „brak ruchu”)
+sum(count_over_time({job="traefik"}[5m]))
+
+# 2) TOP 10 adresów IP w 24 h (bez wewnętrznego sondowania traefik:8080/metrics)
+topk(10, sum by (ClientHost) (count_over_time({job="traefik"} | json | __error__="" | RequestHost != "traefik" [24h])))
+
+# 3) TOP 10 adresów IP, które najczęściej dostają 403/404 (skanery, boty)
+topk(10, sum by (ClientHost) (count_over_time({job="traefik"} | json | __error__="" | RequestHost != "traefik" | DownstreamStatus = 403 or DownstreamStatus = 404 [24h])))
+
+# 4) TOP 10 ścieżek 403/404 per domena — tu widać /wp-login.php, /xmlrpc.php, /.env
+topk(10, sum by (RequestHost, RequestPath) (count_over_time({job="traefik"} | json | __error__="" | RequestHost != "traefik" | DownstreamStatus = 403 or DownstreamStatus = 404 [24h])))
+
+# 5) natezenie ruchu per aplikacja: teraz (15 min) vs tydzien temu
+sum by (RequestHost) (count_over_time({job="traefik"} | json | __error__="" | RequestHost != "traefik" [15m]))
+sum by (RequestHost) (count_over_time({job="traefik"} | json | __error__="" | RequestHost != "traefik" [15m] offset 7d))
+
+# 6) to samo z horyzontem godziny (dziala bez tygodnia historii)
+sum by (RequestHost) (count_over_time({job="traefik"} | json | __error__="" | RequestHost != "traefik" [15m] offset 1h))
+```
+
+**Gdzie patrzeć:** Grafana → dashboard **„Logi — przeglądanie”** (uid `vps-logs`) → rząd **„Analityka ruchu (access log Traefika)”**: panel tekstowy ze statusem źródła, trzy tabele (top IP, top IP z 403/404, top ścieżek 403/404) oraz dwa wykresy „teraz vs 7 dni temu” i „teraz vs godzina temu”. Rozkład kodów odpowiedzi i p95 czasu usługi są w dashboardzie **„Ruch i obciążenie”** (uid `vps-ruch`), w rzędzie „Ruch HTTP”.
+
+**Ograniczenia, o których trzeba wiedzieć (zmierzone):**
+- **Adresy IP są bezużyteczne, dopóki edge nie loguje nagłówka.** W access logu `ClientHost` to adres wejściowy Swarma (`10.0.0.2`) dla **wszystkich** żądań — panele „Top IP” pokażą jeden wiersz. Żeby zobaczyć prawdziwych klientów, w statycznej konfiguracji Traefika trzeba dodać `--accesslog.fields.headers.names.X-Forwarded-For=keep`. **To zmiana w cudzym stacku — Twoja decyzja**, ten runbook nic tam nie zmienia.
+- `Duration` w logu jest w **nanosekundach** (1 s = `1000000000`).
+- `RequestHost="traefik"` to nasze własne sondowanie `traefik:8080/metrics` (404) — każda reguła ruchu musi je wykluczać, inaczej wewnętrzny szum udaje ruch aplikacji.
+
+**Działaj, gdy alert zadzwoni:** najpierw panel „Top 10 ścieżek 403/404” i tabela IP (skanowanie → zablokuj adres w CrowdSec/edge; kampania → potwierdź u klienta), potem dashboard `vps-ruch` (czy wzrost to prawdziwe żądania, czy pętla retry po błędach 5xx). Przy skoku błędów sprawdź `{job="docker", service="<stack>_<usługa>"}` dla aplikacji z alertu.
+
+---
 
 ## <a name="security"></a>⚪/🟡 SshLoginAccepted / SshAuthFailuresSpike / Fail2banBanSpike / CockpitLogin
 **Co to znaczy:** ktoś loguje się (albo próbuje) do hosta lub do panelu Cockpit.

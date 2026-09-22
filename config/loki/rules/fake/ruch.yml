@@ -1,0 +1,67 @@
+# Analiza ruchu z access logu Traefika (Loki).
+#
+# Skad dane: promtail czyta wolumen `portainer-edge-gateway_traefik-logs`, plik
+# access.log Traefika (jeden strumien, etykieta `RequestHost`; reszta pol —
+# ClientHost, RequestPath, DownstreamStatus, Duration — jest w TRESCI linii,
+# wiec kazde zapytanie musi zaczynac sie od `| json`).
+#
+# ZMIERZONE 22.09.2026 (wazne przy czytaniu tych regul):
+#   1. Access log edge'a NIE jest zapisywany od 17.08.2026 — plik
+#      /traefik-logs/access.log stoi na 2 019 076 B, ostatnia linia z
+#      2026-08-17 00:59:07 +0200. Alert `TraefikNoAccessLogs` jest przez to
+#      aktywny, a te reguly milcza (brak danych) — to stan ZRODLA, nie awaria
+#      regul. Po przywroceniu logu dzialaja bez zmian.
+#   2. Duration w access logu Traefika jest w NANOSEKUNDACH (realny wpis
+#      /xmlrpc.php: 1323116166 = 1,32 s). Progi czasu licz w ns.
+#   3. `RequestHost="traefik"` to nasze wlasne sondowanie traefik:8080/metrics
+#      (404) — kazda reguła ruchu musi je wykluczac, inaczej wewnetrzny szum
+#      udaje ruch aplikacji.
+#
+# Progi (dolna granica jest po to, zeby mala strona nie alarmowala szumem):
+#   ruch:  > 3x tydzien wczesniej  ORAZ  > 100 zadania / 15 min
+#   bledy: > 3x tydzien wczesniej  ORAZ  > 5 bledow 4xx/5xx / 15 min
+#
+# Gdy potrzebujesz krotszego horyzontu niz tydzien (np. zaraz po przywroceniu
+# logu, zanim zbierze sie 8 dni historii), zamien `offset 7d` na `offset 1h`.
+groups:
+  - name: ruch-access-log
+    interval: 30s
+    rules:
+
+      - alert: TrafficRequestSpike
+        expr: |
+          sum by (RequestHost) (
+            count_over_time({job="traefik"} | json | RequestHost != "traefik" [15m])
+          ) > 3 * sum by (RequestHost) (
+            count_over_time({job="traefik"} | json | RequestHost != "traefik" [15m] offset 7d)
+          )
+          and
+          sum by (RequestHost) (
+            count_over_time({job="traefik"} | json | RequestHost != "traefik" [15m])
+          ) > 100
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Skok ruchu na {{ $labels.RequestHost }}"
+          description: "{{ $value | printf \"%.0f\" }} zadan w 15 minut — ponad 3x wiecej niz w tym samym oknie tydzien wczesniej (i wiecej niz 100). Sprawdz, czy to kampania, boty czy atak: top adresow IP i sciezek znajdziesz w dashboardzie „Logi — przegladanie”, a rozklad kodow w „Ruch i obciazenie”."
+          runbook: "#ruch"
+
+      - alert: TrafficErrorSpike
+        expr: |
+          sum by (RequestHost) (
+            count_over_time({job="traefik"} | json | RequestHost != "traefik" | DownstreamStatus >= 400 [15m])
+          ) > 3 * sum by (RequestHost) (
+            count_over_time({job="traefik"} | json | RequestHost != "traefik" | DownstreamStatus >= 400 [15m] offset 7d)
+          )
+          and
+          sum by (RequestHost) (
+            count_over_time({job="traefik"} | json | RequestHost != "traefik" | DownstreamStatus >= 400 [15m])
+          ) > 5
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Skok bledow 4xx/5xx na {{ $labels.RequestHost }}"
+          description: "{{ $value | printf \"%.0f\" }} odpowiedzi 4xx/5xx w 15 minut — ponad 3x wiecej niz tydzien wczesniej (i wiecej niz 5). Zwiastun awarii aplikacji albo skanowania; sprawdz panel „Top 10 sciezek 403/404”."
+          runbook: "#ruch"

@@ -78,6 +78,10 @@ scrape_configs:
         source_labels: ['__journal__systemd_unit', '__journal__transport']
         regex: '(ssh\.service|cockpit[^;]*|fail2ban\.service|docker\.service|containerd\.service);.*|;kernel'
 
+  # UWAGA (zmierzone 22.09.2026): bez etapu `timestamp` promtail nadaje
+  # przeczytanym liniom czas odczytu. Po naprawie `positions` przeczytał cały
+  # access log od początku i sierpniowy ruch (plik stanął 17.08) trafił do Loki
+  # z dzisiejszą datą — w panelach wyglądał jak ruch „z ostatnich 24 h”.
   # --- 3) access log Traefika (cudzy wolumen, tylko :ro) --------------------
   # Zmierzone 22.09.2026: plik `/traefik-logs/access.log` istnieje i rośnie
   # (2,0 MB, ~2,3 tys. wpisów/h), a promtail przeczytał go w całości — czyli
@@ -96,6 +100,10 @@ scrape_configs:
     pipeline_stages:
       - json:
           expressions:
+            # `StartUTC` MUSI być w mapie pól, inaczej etap `timestamp` niżej nie
+            # ma skąd wziąć czasu i linie dostają czas odczytu (zmierzone
+            # 22.09.2026: przez to sierpniowy access log udawał dzisiejszy ruch).
+            StartUTC: StartUTC
             RequestHost: RequestHost
             DownstreamStatus: DownstreamStatus
             Duration: Duration
