@@ -122,6 +122,8 @@ def uslugi_stacku(api, eid, przestrzen):
 
 def pokaz_uslugi(api, eid, przestrzen):
     uslugi, licznik, bledy = uslugi_stacku(api, eid, przestrzen)
+    filtr = urllib.parse.quote(json.dumps({"label": ["com.docker.stack.namespace=%s" % przestrzen]}))
+    _kod, zadania_wszystkie = api("GET", f"/api/endpoints/{eid}/docker/tasks?filters={filtr}")
     ok = 0
     print(f"  usług w stacku: {len(uslugi)}")
     for u in sorted(uslugi, key=lambda x: (x.get("Spec") or {}).get("Name", "")):
@@ -135,6 +137,18 @@ def pokaz_uslugi(api, eid, przestrzen):
         print(f"    {znacznik} {nazwa:38s} {ma}/{chce}")
         if not pelne and u.get("ID") in bledy:
             print(f"        powód: {bledy[u['ID']][:150]}")
+        # Swarm potrafi sam wycofywać aktualizację (rollback) — wtedy usługa
+        # restartuje się w pętli, a Traefik traci jej labelki (np. middleware).
+        stan_akt = u.get("UpdateStatus") or {}
+        if stan_akt.get("State"):
+            print(f"        aktualizacja: {stan_akt.get('State')} {stan_akt.get('Message') or ''}".rstrip())
+        if not pelne:
+            zadania_uslugi = sorted([z for z in (zadania_wszystkie or []) if z.get("ServiceID") == u.get("ID")],
+                                    key=lambda z: (z.get("CreatedAt") or ""), reverse=True)[:3]
+            for z in zadania_uslugi:
+                st = z.get("Status") or {}
+                print(f"        zadanie: {st.get('State')} desired={z.get('DesiredState')} "
+                      f"{str(st.get('Err') or '')[:80]} @{(z.get('CreatedAt') or '')[11:19]}")
     print(f"  z pełnymi replikami: {ok}/{len(uslugi)}")
     return ok == len(uslugi)
 
