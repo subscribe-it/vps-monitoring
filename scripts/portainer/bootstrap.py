@@ -142,13 +142,12 @@ def pokaz_uslugi(api, eid, przestrzen):
         stan_akt = u.get("UpdateStatus") or {}
         if stan_akt.get("State"):
             print(f"        aktualizacja: {stan_akt.get('State')} {stan_akt.get('Message') or ''}".rstrip())
-        if not pelne:
-            zadania_uslugi = sorted([z for z in (zadania_wszystkie or []) if z.get("ServiceID") == u.get("ID")],
-                                    key=lambda z: (z.get("CreatedAt") or ""), reverse=True)[:3]
-            for z in zadania_uslugi:
-                st = z.get("Status") or {}
-                print(f"        zadanie: {st.get('State')} desired={z.get('DesiredState')} "
-                      f"{str(st.get('Err') or '')[:80]} @{(z.get('CreatedAt') or '')[11:19]}")
+        zadania_uslugi = sorted([z for z in (zadania_wszystkie or []) if z.get("ServiceID") == u.get("ID")],
+                                key=lambda z: (z.get("CreatedAt") or ""), reverse=True)[:2 if pelne else 3]
+        for z in zadania_uslugi:
+            st = z.get("Status") or {}
+            print(f"        zadanie: {st.get('State'):9s} desired={z.get('DesiredState'):9s} "
+                  f"@{(z.get('CreatedAt') or '')[11:19]} {str(st.get('Err') or '')[:60]}")
     print(f"  z pełnymi replikami: {ok}/{len(uslugi)}")
     return ok == len(uslugi)
 
@@ -203,6 +202,9 @@ def main() -> int:
     dziala = (stack.get("Status") or 0) == 1
     print(f"  stack „{args.stack}”: id={sid}, endpoint={eid}, "
           f"status={'działa' if dziala else 'zatrzymany'}")
+    auto = stack.get("AutoUpdate") or {}
+    if auto:
+        print(f"  auto-aktualizacja z Gita: {auto}")
 
     if args.show_env:
         # Tylko NAZWY — wartości to sekrety (hasła, tokeny), nie mogą trafić do logu.
