@@ -49,13 +49,18 @@ wyjścia — wybierz jedno:
 
 | Wyjście | Co zrobić | Pakiety |
 | --- | --- | --- |
-| **A. Ten sekret** | klasyczny PAT z zakresem `write:packages` → sekret `GHCR_ADMIN_TOKEN` → uruchom workflow `Package visibility` | stają się publiczne |
-| **B. UI** | organizacja → **Packages** → pakiet → **Package settings** → Danger Zone → **Change visibility** (11 pakietów) | stają się publiczne |
-| **C. Zostaw prywatne** | Portainer → **Registries** → `ghcr.io` + PAT z `read:packages` → wskaż rejestr w stacku | zostają prywatne |
+| **C. Rejestr w Portainerze — zalecane** | Portainer → **Registries → Add registry → Custom**: URL `ghcr.io`, użytkownik `DawidXXX`, hasło = PAT (wystarczy `read:packages`, wystarczy też `write:packages`). Portainer przekazuje te poświadczenia przy deployu stacka w Swarmie (`DeploySwarmStack(..., registries, ...)` — sprawdzone w źródłach 2.33) | zostają prywatne |
+| **B. UI** | organizacja → **Packages** → pakiet → **Package settings** → Danger Zone → **Change visibility** (11 pakietów, ręcznie) | stają się publiczne |
+| **A. Ten sekret** | klasyczny PAT z `write:packages` → sekret `GHCR_ADMIN_TOKEN` → workflow `Package visibility` | **nie zadziałało** (patrz niżej) |
 
-A i B są wygodne w utrzymaniu (zero danych logowania w Portainerze, obrazy nie
-zawierają sekretów — wszystko wrażliwe idzie zmiennymi środowiskowymi).
-C jest najbezpieczniejsze, jeśli wolisz nie publikować obrazów.
+**Zmierzone (2026-09-22):** `GET /orgs/subscribe-it/packages/container/<nazwa>`
+zwraca **200** (token widzi pakiet), ale `PATCH` na tym samym adresie zwraca
+**404 bez informacji o zakresach** — i to zarówno dla tokenu z `repo, write:packages`
+od właściciela organizacji, jak i dla tokenu z `admin:org`. Kontrolny `PATCH`
+tokenem bez `read:packages` też daje 404 (a `GET` tym samym tokenem daje czytelne
+403 o brakującym zakresie), więc endpoint odrzuca żądanie, zanim sprawdzi zakresy.
+Wniosek praktyczny: **zmiana widoczności pakietów organizacji przez API nie działa**
+— zostaje UI (B) albo rejestr w Portainerze (C).
 
 ## Czego tu NIE ma (i nie powinno być)
 
