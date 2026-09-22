@@ -26,7 +26,7 @@ import ToolGrid from '../components/ToolGrid.astro';
 
 <Base title="Panel monitoringu — stan usług">
   <div id="app" class="flex min-h-dvh flex-col" data-view="status" data-endpoint="/status/api.json" data-refresh-ms="30000">
-    <main id="main" class="shell flex min-h-0 flex-1 flex-col gap-3 py-3">
+    <main id="main" class="shell shell-vertical flex min-h-0 flex-1 flex-col gap-3">
       <StatusBar />
       <ErrorBanner />
       <StatusHeader />
@@ -370,6 +370,18 @@ import ToolGrid from '../components/ToolGrid.astro';
       if (tool.embed && tool.url) return `#/tool/${encodeURIComponent(tool.id)}`;
       if (tool.url) return tool.url;
       return '#/';
+    }
+
+    /**
+     * Adres osadzanego narzędzia. `embed_query` przychodzi z API (Grafana
+     * dostaje `kiosk`, czyli bez własnego menu) — panel nie musi znać
+     * specyfiki narzędzi, a wykresy nie tracą 300 px na cudzą nawigację.
+     */
+    function embedSrc(tool: Tool): string {
+      if (!tool.url) return '';
+      const parametr = tool.embed_query?.trim();
+      if (!parametr) return tool.url;
+      return `${tool.url}${tool.url.includes('?') ? '&' : '?'}${parametr}`;
     }
 
     /**
@@ -971,7 +983,7 @@ import ToolGrid from '../components/ToolGrid.astro';
       holder.replaceChildren();
       const next = document.createElement('iframe');
       next.className = 'frame-ops';
-      next.src = tool.url;
+      next.src = embedSrc(tool);
       next.title = `Podgląd narzędzia: ${tool.name}`;
       next.setAttribute('referrerpolicy', 'same-origin');
       holder.append(next);
@@ -985,9 +997,39 @@ import ToolGrid from '../components/ToolGrid.astro';
       else showStatus();
     }
 
+    /**
+     * Pełny ekran dla osadzonego narzędzia: ramka zajmuje całe okno razem
+     * z paskiem narzędzi panelu. Przy dashboardach z kilkunastoma wykresami
+     * to jedyny sposób, żeby oddać im naprawdę całą szerokość i wysokość.
+     */
+    async function toggleFullscreen(): Promise<void> {
+      const wrap = q<HTMLElement>(app, '[data-role="frame-wrap"]');
+      if (!wrap) return;
+      try {
+        if (document.fullscreenElement) await document.exitFullscreen();
+        else await wrap.requestFullscreen();
+      } catch {
+        // Przeglądarka może odmówić (polityka ramek, brak gestu) — wtedy nic nie
+        // zmieniamy i nie udajemy, że tryb się włączył.
+      }
+    }
+
+    function renderFullscreenState(): void {
+      const aktywny = document.fullscreenElement !== null;
+      const button = q<HTMLElement>(app, '[data-role="frame-fullscreen"]');
+      if (!button) return;
+      button.setAttribute('aria-pressed', aktywny ? 'true' : 'false');
+      setText(
+        button,
+        '[data-role="frame-fullscreen-label"]',
+        aktywny ? 'Zamknij pełny ekran' : 'Pełny ekran',
+      );
+    }
+
     /* ---------------- zdarzenia ---------------- */
 
     window.addEventListener('hashchange', applyRoute);
+    document.addEventListener('fullscreenchange', renderFullscreenState);
 
     document.addEventListener('click', (event) => {
       const target = event.target;
@@ -996,6 +1038,7 @@ import ToolGrid from '../components/ToolGrid.astro';
       if (!(trigger instanceof HTMLElement)) return;
       const action = trigger.dataset.action;
       if (action === 'refresh' || action === 'retry') void load();
+      if (action === 'fullscreen') void toggleFullscreen();
     });
 
     document.addEventListener('visibilitychange', () => {

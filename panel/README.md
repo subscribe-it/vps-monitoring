@@ -111,7 +111,7 @@ To samo pochodzenie (same-origin), ciasteczka wysyłane domyślnie
   "security": { "ssh_failed_24h": 416, "ssh_bans_24h": 53, "logins_24h": [ { "service": "cockpit", "ip": "1.2.3.4", "at": "2026-09-21T12:00:00Z" } ], "state": "warning" },
   "tools": [
     { "id": "status", "name": "Stan usług", "url": null, "embed": false, "state": "ok", "kind": "internal", "icon": "activity", "description": "Widok domyślny" },
-    { "id": "grafana", "name": "Grafana", "url": "/grafana", "embed": true, "state": "ok", "kind": "internal", "icon": "chart-line", "description": "Dashboardy i logi" },
+    { "id": "grafana", "name": "Grafana", "url": "/grafana", "embed": true, "embed_query": "kiosk", "state": "ok", "kind": "internal", "icon": "chart-line", "description": "Dashboardy i logi" },
     { "id": "prometheus", "name": "Prometheus", "url": "/prometheus", "embed": true, "state": "ok", "kind": "internal", "icon": "database", "description": "Metryki i targety" },
     { "id": "alertmanager", "name": "Alertmanager", "url": "/alertmanager", "embed": true, "state": "ok", "kind": "internal", "icon": "bell", "description": "Aktywne alerty" },
     { "id": "healthchecks", "name": "Healthchecks.io", "url": "https://healthchecks.io/checks", "embed": false, "state": "ok", "kind": "external", "icon": "heart-pulse", "description": "Watchdog zewnętrzny" },

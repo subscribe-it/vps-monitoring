@@ -312,6 +312,18 @@
     white-space: nowrap;
   }
 
+  /*
+   * Rząd stanu kafelka. Trzymamy go w klasie (nie w utilach `flex mt-*`), bo
+   * utilities Tailwinda wygrywają z warstwą `components` — wtedy reguła
+   * `[data-view="tool"] .tile-state { display: none }` nie mogłaby zadziałać.
+   */
+  .tile-state {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    margin-top: 0.375rem;
+  }
+
   .tile-icon {
     flex: none;
     display: grid;
@@ -598,22 +610,73 @@
     display: none;
   }
 
+  /*
+   * Osadzone narzędzie dostaje całe okno. Zmierzone na produkcji (2560 px):
+   * iframe miał 2504 px, bo 56 px zjadał padding powłoki, a pasek narzędzi
+   * 84 px wysokości. Po zmianie ramka idzie od krawędzi do krawędzi,
+   * a pasek narzędzi jest o połowę niższy.
+   */
+  [data-view="tool"] main {
+    padding-inline: 0;
+    padding-block: 0;
+    gap: 0;
+  }
+
+  /* Krawędzie do krawędzi: w podglądzie nie ma zaokrągleń ani bocznych ramek. */
+  [data-view="tool"] [data-section="tools"],
+  [data-view="tool"] .frame-wrap {
+    border-radius: 0;
+    border-inline: 0;
+  }
+
   /* W podglądzie kafelki zamieniają się w zwarty, poziomy pasek przełączania. */
   [data-view="tool"] [data-section="tools"] > .card-head {
     display: none;
   }
 
+  /*
+   * W podglądzie kafelki zamieniają się w pasek przełączania. Pasek ZAWIJA się
+   * zamiast przewijać: przy 1440 px siedem narzędzi mieści się w jednym rzędzie,
+   * a na węższym ekranie dochodzi drugi rząd — lepsze to niż ukryta treść.
+   */
   [data-view="tool"] .tools-grid {
     display: flex;
-    gap: 0.5rem;
-    padding: 0.375rem 0.75rem;
-    overflow-x: auto;
-    overscroll-behavior-x: contain;
+    flex-wrap: wrap;
+    gap: 0.3125rem;
+    padding: 0.3125rem 0.5rem;
   }
 
   [data-view="tool"] .tools-grid .tile {
     flex: 0 0 auto;
-    width: 13rem;
+    width: auto;
+    gap: 0.4375rem;
+    padding: 0.25rem 0.5rem;
+  }
+
+  [data-view="tool"] .tools-grid .tile-icon {
+    width: 1.5rem;
+    height: 1.5rem;
+  }
+
+  /* W pasku nie ma miejsca na znacznik „nowa karta" — zostaje w podpowiedzi. */
+  [data-view="tool"] .tools-grid .tile [data-role="marker"] {
+    display: none;
+  }
+
+  /*
+   * W pasku przełączania kafelek jest jednoliniowy (ikona, nazwa, stan) —
+   * schodzi z ~74 px do ~44 px, a te piksele dostaje osadzone narzędzie.
+   */
+  [data-view="tool"] .tools-grid .tile > span:last-child {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  [data-view="tool"] .tools-grid .tile-state {
+    /* W pasku przełączania stan niesie kolor ikony i obramowania kafelka;
+       pigułka tylko rozpychała pasek (przy 1440 px wymuszała zawijanie). */
+    display: none;
   }
 
   [data-view="tool"] .tile-desc {
@@ -643,6 +706,15 @@
     width: 100%;
     margin-inline: auto;
     padding-inline: clamp(0.75rem, 1.1vw, 2.5rem);
+  }
+
+  /*
+   * Pionowy oddech treści trzymamy w klasie, a nie w utilu `py-*`: w widoku
+   * podglądu narzędzia padding musi zniknąć, a utilities Tailwinda wygrywają
+   * z warstwą `components` niezależnie od specyficzności.
+   */
+  .shell-vertical {
+    padding-block: 0.75rem;
   }
 
   /* Pionowy rytm widoku stanu. */

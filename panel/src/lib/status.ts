@@ -122,6 +122,8 @@ export interface Tool {
   name: string;
   url: string | null;
   embed: boolean;
+  /** Parametry dokładane do adresu podglądu (np. `kiosk` dla Grafany). */
+  embed_query: string | null;
   state: State;
   kind: string;
   icon: string;
@@ -547,6 +549,7 @@ function parseTools(raw: unknown): Tool[] {
     name: str(row.name) ?? str(row.id) ?? 'Narzędzie',
     url: str(row.url),
     embed: bool(row.embed),
+    embed_query: str(row.embed_query),
     state: normalizeState(row.state),
     kind: str(row.kind) ?? 'internal',
     icon: str(row.icon) ?? '',

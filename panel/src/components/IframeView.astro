@@ -2,8 +2,12 @@
 /**
  * Podgląd narzędzia w iframe (ten sam origin, `#/tool/<id>`).
  *
- * Ramka wypełnia całą dostępną wysokość: w widoku podglądu `#app` przechodzi
- * w układ `100dvh` z kolumną flex, a `.frame-wrap` zabiera resztę miejsca.
+ * Ramka wypełnia całą dostępną wysokość i szerokość: w widoku podglądu `#app`
+ * przechodzi w układ `100dvh`, `main` traci padding (patrz reguły
+ * `[data-view="tool"]` w global.css), a `.frame-wrap` zabiera resztę miejsca.
+ * Dzięki temu osadzona aplikacja dostaje praktycznie całe okno — plus przycisk
+ * pełnego ekranu, gdy i tego mało.
+ *
  * Sam element `<iframe>` tworzy skrypt klienta — dzięki temu nie ładujemy
  * narzędzia, dopóki użytkownik go nie wybierze.
  */
@@ -11,29 +15,36 @@ import { Icon } from 'astro-icon/components';
 ---
 
 <section class="frame-wrap" data-role="frame-wrap" aria-labelledby="frame-title" hidden>
-  <div class="flex flex-wrap items-center gap-2 border-b border-base-300 bg-base-200 px-4 py-2.5">
+  <div class="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-base-300 bg-base-200 px-3 py-1.5">
     <a class="btn-ops" href="#/" data-role="back">
       <Icon name="lucide:arrow-left" size={14} aria-hidden="true" />
       <span>Wróć do stanu</span>
     </a>
-    <h2 class="text-sm font-semibold" id="frame-title" data-role="frame-title">—</h2>
+    <h2 class="min-w-0 truncate text-sm font-semibold" id="frame-title" data-role="frame-title">—</h2>
     <span class="state-pill" data-role="frame-state" data-state="unknown">
       <span class="state-dot" aria-hidden="true"></span>
       <span data-role="frame-state-label">Nieznany</span>
     </span>
-    <a
-      class="btn-ops ml-auto"
-      data-role="frame-open"
-      target="_blank"
-      rel="noopener"
-      hidden
-    >
-      <Icon name="lucide:external-link" size={14} aria-hidden="true" />
-      <span>Otwórz w nowej karcie</span>
-    </a>
+    <span class="ml-auto flex items-center gap-2">
+      <button
+        type="button"
+        class="btn-ops"
+        data-action="fullscreen"
+        data-role="frame-fullscreen"
+        aria-pressed="false"
+        title="Ramka na całe okno (bez pasków panelu)"
+      >
+        <Icon name="lucide:maximize-2" size={14} aria-hidden="true" />
+        <span data-role="frame-fullscreen-label">Pełny ekran</span>
+      </button>
+      <a class="btn-ops" data-role="frame-open" target="_blank" rel="noopener" hidden>
+        <Icon name="lucide:external-link" size={14} aria-hidden="true" />
+        <span>Otwórz w nowej karcie</span>
+      </a>
+    </span>
   </div>
 
-  <p class="muted border-b border-base-300 px-4 py-2 text-[11px] md:hidden">
+  <p class="muted border-b border-base-300 px-3 py-1.5 text-xs md:hidden">
     Wąski ekran — podgląd może być niewygodny.
     <a class="link-ops" data-role="frame-open-mobile" target="_blank" rel="noopener" hidden>
       Otwórz w nowej karcie

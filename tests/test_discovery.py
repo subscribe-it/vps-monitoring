@@ -594,6 +594,10 @@ class ApiJsonTests(unittest.TestCase):
         tools = {tool["id"]: tool for tool in payload["tools"]}
         self.assertEqual(tools["grafana"]["url"], "/grafana")
         self.assertTrue(tools["grafana"]["embed"])
+        # Grafana w ramce panelu chowa własne menu (`?kiosk`) — bez tego jej
+        # dashboard traci ~300 px szerokości na nawigację (pomiar na produkcji).
+        self.assertEqual(tools["grafana"]["embed_query"], "kiosk")
+        self.assertIsNone(tools["prometheus"].get("embed_query"))
         self.assertFalse(tools["healthchecks"]["embed"])
         self.assertEqual(tools["healthchecks"]["state"], "unknown")
         self.assertEqual(tools["portainer"]["url"], "https://portainer.subscribeit.pl")

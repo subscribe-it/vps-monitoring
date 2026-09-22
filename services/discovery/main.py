@@ -1316,8 +1316,13 @@ def empty_security():
 TOOLS = (
     {"id": "status", "name": "Stan usług", "url": None, "embed": False, "kind": "internal",
      "icon": "activity", "description": "Przegląd stanu usług, certyfikatów i backupu"},
+    # Grafana w ramce panelu dostaje `?kiosk`, czyli bez własnego paska
+    # nawigacji. Zmierzone na produkcji przy ramce 2504 px: bez `kiosk`
+    # siatka dashboardu miała 2062 px, bo 319 px zabierało menu Grafany;
+    # z `kiosk` rośnie do 2448 px (panel nie musi znać specyfiki narzędzi —
+    # parametr jedzie z API jako `embed_query`).
     {"id": "grafana", "name": "Grafana", "url": "/grafana", "embed": True, "kind": "internal",
-     "icon": "chart-line", "description": "Dashboardy i logi"},
+     "embed_query": "kiosk", "icon": "chart-line", "description": "Dashboardy i logi"},
     {"id": "prometheus", "name": "Prometheus", "url": "/prometheus", "embed": True, "kind": "internal",
      "icon": "chart-area", "description": "Metryki i zapytania PromQL"},
     {"id": "alertmanager", "name": "Alertmanager", "url": "/alertmanager", "embed": True, "kind": "internal",

@@ -41,7 +41,8 @@ w takim przypadku pola uzupełniane są zerami, a `overall` degraduje się do `w
   "security": { "ssh_failed_24h": 0, "ssh_bans_24h": 0, "logins_24h": [], "state": "ok" },
   "tools": [
     { "id": "grafana", "name": "Grafana", "url": "/grafana", "embed": true,
-      "state": "ok", "kind": "internal", "icon": "chart-line", "description": "…" }
+      "embed_query": "kiosk", "state": "ok", "kind": "internal", "icon": "chart-line",
+      "description": "…" }
   ]
 }
 ```
@@ -54,5 +55,8 @@ w takim przypadku pola uzupełniane są zerami, a `overall` degraduje się do `w
   `running < desired`; `warning`, gdy cokolwiek jest `warning` lub `discovery_up == 0`.
 - Kafelki `embed: true` ładują się w iframe (ten sam origin → jedno logowanie);
   `embed: false` otwierają nową kartę (zewnętrzne serwisy blokują osadzanie).
+- `tools[].embed_query` (opcjonalne) to parametry dokładane do adresu podglądu —
+  Grafana jedzie z `kiosk`, więc w ramce panelu nie pokazuje własnego menu
+  (pomiar na produkcji: 319 px szerokości odzyskane dla wykresów).
 - Pole `tools[].url` wewnętrznych narzędzi jest **względne** (`/grafana`) — dzięki temu
   panel działa niezależnie od domeny.
