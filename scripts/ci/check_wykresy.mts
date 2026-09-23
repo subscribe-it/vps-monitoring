@@ -26,6 +26,7 @@ import {
   kluczSerii,
   limitCpuProcent,
   opisCpu,
+  opisDysku,
   opisRam,
   opisSieci,
   osieY,
@@ -34,13 +35,22 @@ import {
   punktyWykresu,
   statystyki,
   statystykiCpu,
+  statystykiDysku,
   statystykiRam,
   statystykiSieci,
   zHaszaWykresy,
   zakresZId,
   zapytaniaZbiorcze,
+  zapytaniaTop,
+  zapytanieTop,
+  zbudujUrlQueryInstant,
   zbudujUrlQueryRange,
   znajdzUsluge,
+  formatujWartoscTop,
+  metrykaTopZId,
+  ograniczTop,
+  parsujTop,
+  szerokoscSlupka,
 } from '../../panel/src/lib/wykresy.ts';
 
 let sprawdzen = 0;
@@ -227,11 +237,19 @@ ok(
 /* ---------------- zapytania do Prometheusa ---------------- */
 
 const zapytania = zapytaniaZbiorcze();
-rowne(zapytania.length, 5, 'zapytania: pięć metryk na cały widok');
+rowne(zapytania.length, 7, 'zapytania: siedem metryk na cały widok');
 rowne(
   zapytania.map((z) => z.id),
-  ['cpu', 'ram', 'limit', 'rx', 'tx'],
+  ['cpu', 'ram', 'limit', 'rx', 'tx', 'io_r', 'io_w'],
   'zapytania: kolejność i identyfikatory',
+);
+ok(
+  zapytania.some((z) => z.id === 'io_r' && z.expr.includes('block_read_bytes_total')),
+  'zapytania: I/O dysku — odczyt z licznika blokowego',
+);
+ok(
+  zapytania.some((z) => z.id === 'io_w' && z.expr.includes('rate(swarm_container_block_write_bytes_total')),
+  'zapytania: I/O dysku — zapis liczony jako rate (B/s), nie licznik narastający',
 );
 ok(
   zapytania.every((z) => z.expr.includes('by (stack, service)')),
@@ -293,6 +311,92 @@ rowne(znajdzUsluge(uslugi, 'api')?.stack, 'ventiplan-prod', 'wybór: po jednozna
 rowne(znajdzUsluge(uslugi, 'db'), null, 'wybór: powtarzalna nazwa bez stacka jest niejednoznaczna → null');
 rowne(znajdzUsluge(uslugi, 'nie-ma-takiej'), null, 'wybór: nieznana usługa → null');
 rowne(znajdzUsluge(uslugi, null), null, 'wybór: brak segmentu → null');
+
+/* ---------------- dysk (I/O) ---------------- */
+
+ok(opisDysku(2048, 1024, 4096).includes('odczyt'), 'dysk: podpis odczytu');
+ok(opisDysku(2048, 1024, 4096).includes('zapis'), 'dysk: podpis zapisu');
+ok(opisDysku(2048, 1024, 4096).includes('/s'), 'dysk: jednostka na sekundę (rate, nie licznik)');
+ok(opisDysku(null, null, null).includes('—'), 'dysk: brak danych → kreska, nie zero');
+rowne(opisDysku(1024, null, null).includes('maks.'), false, 'dysk: bez maksimum nie zmyślamy podpisu');
+ok(
+  statystykiDysku(statystyki([1, 2, 3]), statystyki([4, 5, 6])).includes('średnia'),
+  'dysk: statystyki mają średnią',
+);
+
+/* ---------------- ranking „Top 10 usług" ---------------- */
+
+const rankingi = zapytaniaTop();
+rowne(rankingi.length, 3, 'top: trzy metryki przełącznika (CPU / RAM / sieć)');
+rowne(
+  rankingi.map((r) => r.id),
+  ['cpu', 'ram', 'siec'],
+  'top: kolejność i identyfikatory przełącznika',
+);
+ok(
+  rankingi.every((r) => r.expr.startsWith('topk(10, ')),
+  'top: dziesięć pozycji liczy Prometheus, nie panel',
+);
+ok(
+  rankingi.every((r) => r.expr.includes('by (stack, service)')),
+  'top: jedno zapytanie na metrykę dla wszystkich usług',
+);
+ok(
+  (rankingi.find((r) => r.id === 'siec')?.expr ?? '').includes('network_receive_bytes_total')
+    && (rankingi.find((r) => r.id === 'siec')?.expr ?? '').includes('network_transmit_bytes_total'),
+  'top: sieć to rx + tx (oba kierunki w jednym rankingu)',
+);
+rowne(zapytanieTop('ram').jednostka, 'bajty', 'top: jednostka RAM to bajty');
+rowne(zapytanieTop('siec').jednostka, 'przeplywnosc', 'top: jednostka sieci to przepustowość');
+rowne(metrykaTopZId('bzdura'), 'cpu', 'top: nieznana metryka → CPU');
+rowne(metrykaTopZId(null), 'cpu', 'top: brak metryki → CPU');
+rowne(formatujWartoscTop('cpu', 12.34), '12,3%', 'top: formatowanie procentu');
+ok(formatujWartoscTop('ram', 536_870_912).includes('MiB'), 'top: formatowanie bajtów');
+ok(formatujWartoscTop('siec', 2048).includes('/s'), 'top: formatowanie przepustowości na sekundę');
+rowne(formatujWartoscTop('cpu', null), '—', 'top: brak wartości → kreska');
+
+rowne(szerokoscSlupka(50, 100), 50, 'słupek: połowa wartości = połowa szerokości');
+rowne(szerokoscSlupka(100, 100), 100, 'słupek: maksimum = pełna szerokość');
+rowne(szerokoscSlupka(0, 100), 0, 'słupek: zero = brak słupka (nie kłamie o zużyciu)');
+rowne(szerokoscSlupka(0.001, 1000), 2, 'słupek: wartość śladowa ma minimalną szerokość');
+rowne(szerokoscSlupka(1000, 0), 0, 'słupek: brak maksimum → brak słupka (bez dzielenia przez zero)');
+rowne(szerokoscSlupka(null, 100), 0, 'słupek: brak wartości → brak słupka');
+
+const odpTop = {
+  data: {
+    result: [
+      { metric: { stack: 'a', service: 'api' }, value: [1758567000, '4'] },
+      { metric: { stack: 'b', service: 'db' }, value: [1758567000, '9'] },
+      { metric: { service: 'bez-stacka' }, value: [1758567000, '7'] },
+      { metric: { stack: 'c', service: 'x' } },
+      'śmieć',
+    ],
+  },
+};
+const pozycje = parsujTop(odpTop);
+rowne(pozycje.length, 2, 'top: serie bez kompletu etykiet pominięte');
+rowne(pozycje[0]?.usluga, 'db', 'top: sortowanie malejąco po wartości');
+rowne(pozycje[0]?.klucz, 'b/db', 'top: klucz serii zgodny z mapą przebiegów');
+const instant = zbudujUrlQueryInstant('topk(10, up)', 1_700_000_000);
+ok(instant.startsWith('/prometheus/api/v1/query?'), 'top: ranking pyta o migawkę (instant), nie o przebieg');
+rowne(new URLSearchParams(instant.split('?')[1]).get('time'), '1700000000', 'top: czas migawki przekazany');
+ok(
+  parsujTop({ data: { result: [{ metric: { stack: 'a', service: 'b' }, values: [[1, '1'], [2, '5']] }] } })[0]
+    ?.wartosc === 5,
+  'top: macierz z query_range też działa (bierzemy ostatni punkt)',
+);
+rowne(parsujTop(null), [], 'top: null → pusta lista');
+rowne(ograniczTop(pozycje, 10).length, 2, 'top: lista krótsza niż limit zostaje bez zmian');
+rowne(
+  ograniczTop(
+    Array.from({ length: 50 }, (_, i) => ({ stack: 's', usluga: `u${i}`, klucz: `s/u${i}`, wartosc: 50 - i })),
+    10,
+  ).length,
+  10,
+  'top: lista dłuższa niż limit jest przycinana do 10',
+);
+rowne(ograniczTop(pozycje, 0).length, 0, 'top: limit 0 daje pustą listę');
+rowne(parsujTop({ data: { result: 'bzdura' } }), [], 'top: zły kształt → pusta lista');
 
 /* ---------------- wynik ---------------- */
 

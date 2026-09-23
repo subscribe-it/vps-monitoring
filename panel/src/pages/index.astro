@@ -27,6 +27,7 @@ import StatusBar from '../components/StatusBar.astro';
 import StatusHeader from '../components/StatusHeader.astro';
 import ToolGrid from '../components/ToolGrid.astro';
 import WykresyView from '../components/WykresyView.astro';
+import LogiView from '../components/LogiView.astro';
 ---
 
 <Base title="Panel monitoringu — stan usług">
@@ -63,6 +64,8 @@ import WykresyView from '../components/WykresyView.astro';
       <IframeView />
 
       <WykresyView />
+
+      <LogiView />
     </main>
 
     <footer class="border-t border-base-300 py-3" data-role="footer">
@@ -153,6 +156,7 @@ import WykresyView from '../components/WykresyView.astro';
     kluczSerii,
     limitCpuProcent,
     opisCpu,
+    opisDysku,
     opisRam,
     opisSieci,
     osieY,
@@ -160,17 +164,59 @@ import WykresyView from '../components/WykresyView.astro';
     punktyWykresu,
     statystyki,
     statystykiCpu,
+    statystykiDysku,
     statystykiRam,
     statystykiSieci,
     zHaszaWykresy,
     zakresZId,
     zapytaniaZbiorcze,
+    zbudujUrlQueryInstant,
     zbudujUrlQueryRange,
     znajdzUsluge,
+    formatujWartoscTop,
+    metrykaTopZId,
+    ograniczTop,
+    parsujTop,
+    szerokoscSlupka,
+    zapytanieTop,
     type Granice,
+    type MetrykaTop,
+    type PozycjaTop,
     type Zakres,
     type ZakresId,
   } from '../lib/wykresy';
+  import {
+    ZRODLA_LOGOW,
+    bladLogow,
+    czyTrasaLogow,
+    doHaszaLogi,
+    eksportLogow,
+    filtrujLinie,
+    formatujCzasLogu,
+    limitLiniiZId,
+    linkGrafanaExplore,
+    parsujOdpowiedzLoki,
+    podpowiedzPustki,
+    podsumowanieLogow,
+    zHaszaLogi,
+    zakresLogowZId,
+    zapytanieZrodla,
+    zbudujUrlLogow,
+    zrodloLogowZId,
+    type LiniaLogu,
+    type ZakresLogow,
+    type ZakresLogowId,
+    type ZrodloLogowId,
+  } from '../lib/logi';
+  import {
+    komendyDocker,
+    linkPortainer,
+    obrazBezDigestu,
+    odKiedy,
+    opisRestartow,
+    opisZadania,
+    skrotDigest,
+  } from '../lib/usluga';
 
   function bootstrap(app: HTMLElement): void {
     const endpoint = app.dataset.endpoint ?? '/status/api.json';
@@ -1039,9 +1085,19 @@ import WykresyView from '../components/WykresyView.astro';
       usluga: string | null;
       zakres: ZakresId;
     }
-    type Route = RouteStatus | RouteTool | RouteWykresy;
+    interface RouteLogi {
+      kind: 'logi';
+      usluga: string | null;
+      zakres: ZakresLogowId;
+      zrodlo: ZrodloLogowId;
+    }
+    type Route = RouteStatus | RouteTool | RouteWykresy | RouteLogi;
 
     function parseRoute(): Route {
+      if (czyTrasaLogow(window.location.hash)) {
+        const trasa = zHaszaLogi(window.location.hash);
+        return { kind: 'logi', usluga: trasa.usluga, zakres: trasa.zakres, zrodlo: trasa.zrodlo };
+      }
       if (czyTrasaWykresow(window.location.hash)) {
         const trasa = zHaszaWykresy(window.location.hash);
         return { kind: 'wykresy', usluga: trasa.usluga, zakres: trasa.zakres };
@@ -1074,10 +1130,17 @@ import WykresyView from '../components/WykresyView.astro';
       if (wykresy) wykresy.hidden = !visible;
     }
 
+    /** Widok logów — druga „podstrona" panelu (obok wykresów). */
+    function setLogiViewVisible(visible: boolean): void {
+      const logi = q<HTMLElement>(app, '[data-role="logi-view"]');
+      if (logi) logi.hidden = !visible;
+    }
+
     function showStatus(): void {
       app.dataset.view = 'status';
       setStatusViewVisible(true);
       setWykresyViewVisible(false);
+      setLogiViewVisible(false);
       const wrap = q<HTMLElement>(app, '[data-role="frame-wrap"]');
       if (wrap) wrap.hidden = true;
       highlightActiveTool(null);
@@ -1089,6 +1152,8 @@ import WykresyView from '../components/WykresyView.astro';
       app.dataset.view = 'tool';
       setStatusViewVisible(false);
       setWykresyViewVisible(false);
+      setLogiViewVisible(false);
+      setLogiViewVisible(false);
       if (wrap) wrap.hidden = false;
       highlightActiveTool(id);
 
@@ -1160,7 +1225,53 @@ import WykresyView from '../components/WykresyView.astro';
       const route = parseRoute();
       if (route.kind === 'tool') showTool(route.id);
       else if (route.kind === 'wykresy') showWykresy(route);
+      else if (route.kind === 'logi') showLogi(route);
       else showStatus();
+    }
+
+    /**
+     * Widok logów. Trasa niesie usługę, zakres i źródło, więc widok odtwarza
+     * się z adresu — link „te logi w 24 h" działa i przeżywa odświeżenie.
+     */
+    function showLogi(route: RouteLogi): void {
+      app.dataset.view = 'logi';
+      setStatusViewVisible(false);
+      setWykresyViewVisible(false);
+      setLogiViewVisible(true);
+      const wrap = q<HTMLElement>(app, '[data-role="frame-wrap"]');
+      if (wrap) wrap.hidden = true;
+      highlightActiveTool(null);
+
+      const powrot = q<HTMLAnchorElement>(app, '[data-role="logi-powrot"]');
+      if (powrot) powrot.href = ostatniHaszStatusu;
+
+      for (const przycisk of qa<HTMLElement>(app, '[data-action="log-zakres"]')) {
+        przycisk.setAttribute(
+          'aria-pressed',
+          przycisk.dataset.zakres === route.zakres ? 'true' : 'false',
+        );
+      }
+
+      const zakres = zakresLogowZId(route.zakres);
+      const naglowek = q<HTMLElement>(app, '[data-role="logi-naglowek"]');
+      const podpis = q<HTMLElement>(app, '[data-role="logi-podpis"]');
+      if (route.usluga) {
+        if (naglowek) naglowek.textContent = `Logi · ${route.usluga}`;
+        if (podpis) podpis.textContent = `Kontenery usługi · ${zakres.podpis}`;
+        document.title = `${route.usluga} — logi panelu monitoringu`;
+      } else {
+        if (naglowek) naglowekLogow(route.zrodlo, naglowek);
+        if (podpis) podpis.textContent = `Logi · ${zakres.podpis}`;
+        document.title = 'Logi — panel monitoringu';
+      }
+
+      void renderLogi(route, zakres);
+    }
+
+    /** Nagłówek listy bez wybranej usługi zależy od źródła. */
+    function naglowekLogow(zrodlo: ZrodloLogowId, element: HTMLElement): void {
+      const zrodloOpis = ZRODLA_LOGOW.find((item) => item.id === zrodlo);
+      element.textContent = zrodlo === 'usluga' ? 'Logi' : `Logi · ${zrodloOpis?.nazwa ?? zrodlo}`;
     }
 
     /**
@@ -1171,6 +1282,8 @@ import WykresyView from '../components/WykresyView.astro';
       app.dataset.view = 'wykresy';
       setStatusViewVisible(false);
       setWykresyViewVisible(true);
+      setLogiViewVisible(false);
+      setLogiViewVisible(false);
       const wrap = q<HTMLElement>(app, '[data-role="frame-wrap"]');
       if (wrap) wrap.hidden = true;
       highlightActiveTool(null);
@@ -1269,11 +1382,19 @@ import WykresyView from '../components/WykresyView.astro';
       return hash.startsWith('#/tool/');
     }
 
+    /**
+     * Czy hasz należy do „podstrony" panelu (podgląd narzędzia, wykresy, logi)?
+     * Każda z nich niesie własne parametry, więc hasz filtra nie może ich
+     * nadpisać — inaczej klik w „Logi" nic by nie robił.
+     */
+    function czyTrasaPodstrony(hash: string = window.location.hash): boolean {
+      return czyTrasaNarzedzia(hash) || czyTrasaWykresow(hash) || czyTrasaLogow(hash);
+    }
+
     function syncHash(): void {
-      // Trasa podglądu narzędzia i widoku wykresów niosą własne parametry —
+      // Podstrony (narzędzie, wykresy, logi) niosą własne parametry —
       // hasz filtra nie może ich nadpisać.
-      if (czyTrasaNarzedzia()) return;
-      if (czyTrasaWykresow(window.location.hash)) return;
+      if (czyTrasaPodstrony()) return;
       if (app.dataset.view !== 'status') return;
       const docelowy = doHasza(filtr, fokus);
       if (window.location.hash === docelowy) return;
@@ -1289,10 +1410,9 @@ import WykresyView from '../components/WykresyView.astro';
     /** Wejście z linku (albo Wstecz): hasz jest źródłem prawdy dla filtra i fokusu. */
     function wczytajStanZHasza(): void {
       if (haszZNaszegoPisania) return;
-      // Trasa narzędzia i wykresów nie zawiera filtra — wejście w podgląd
-      // (i powrót z niego przez Wstecz) nie może kasować ustawień widoku stanu.
-      if (czyTrasaNarzedzia()) return;
-      if (czyTrasaWykresow(window.location.hash)) return;
+      // Podstrony nie zawierają filtra — wejście w nie (i powrót przez Wstecz)
+      // nie może kasować ustawień widoku stanu.
+      if (czyTrasaPodstrony()) return;
       const stan = zHasza(window.location.hash);
       filtr = stan.filtr;
       fokus = stan.fokus;
@@ -1409,6 +1529,127 @@ import WykresyView from '../components/WykresyView.astro';
     }
 
     /** Wiersz szczegółów usługi: dane, przyciski kopiowania, linki, przebieg 6 h. */
+    /**
+     * Diagnostyka usługi w szczegółach (widok stanu i widok wykresów).
+     *
+     * Panel jest TYLKO DO ODCZYTU: pokazuje, co Docker wie (digest obrazu, czas
+     * aktualizacji, restarty, powód padnięcia zadania) i daje gotowe komendy do
+     * skopiowania. Żadnej operacji nie wykonujemy stąd — panel ma poświadczenia
+     * do Dockera, więc „restart jednym klikiem" byłby zbyt łatwy do przypadkowego
+     * użycia. Role są parami, bo oba widoki mają własne prefiksy (`d-*`, `wyk-d-*`).
+     */
+    interface RoleDiagnostyki {
+      digest: string;
+      updated: string;
+      restarty: string;
+      zadanie: string;
+      bladLinia: string;
+      blad: string;
+      obraz: string;
+      kopiujPs: string;
+      kopiujLogs: string;
+      kopiujInspect: string;
+      kopiujObraz: string;
+      portainer: string;
+    }
+
+    const ROLE_STATUS: RoleDiagnostyki = {
+      digest: 'd-digest',
+      updated: 'd-updated',
+      restarty: 'd-restarty',
+      zadanie: 'd-zadanie',
+      bladLinia: 'd-blad-linia',
+      blad: 'd-blad',
+      obraz: 'd-obraz',
+      kopiujPs: 'kopiuj-ps',
+      kopiujLogs: 'kopiuj-logs',
+      kopiujInspect: 'kopiuj-inspect',
+      kopiujObraz: 'kopiuj-obraz',
+      portainer: 'd-portainer',
+    };
+
+    const ROLE_WYKRESY: RoleDiagnostyki = {
+      digest: 'wyk-d-digest',
+      updated: 'wyk-d-updated',
+      restarty: 'wyk-d-restarty',
+      zadanie: 'wyk-d-zadanie',
+      bladLinia: 'wyk-d-blad-linia',
+      blad: 'wyk-d-blad',
+      obraz: 'wyk-d-obraz',
+      kopiujPs: 'wyk-d-kopiuj-ps',
+      kopiujLogs: 'wyk-d-kopiuj-logs',
+      kopiujInspect: 'wyk-d-kopiuj-inspect',
+      kopiujObraz: 'wyk-d-kopiuj-obraz',
+      portainer: 'wyk-d-portainer',
+    };
+
+    function wypelnijDiagnostyke(
+      kontener: HTMLElement,
+      role: RoleDiagnostyki,
+      usluga: Service,
+    ): void {
+      const teraz = Math.floor(Date.now() / 1000);
+      const digest = skrotDigest(usluga.image);
+      setText(
+        kontener,
+        `[data-role="${role.digest}"]`,
+        digest ?? 'brak digestu (obraz wskazywany tagiem)',
+      );
+      setText(
+        kontener,
+        `[data-role="${role.updated}"]`,
+        usluga.updated_at
+          ? `${odKiedy(usluga.updated_at, teraz)} · ${fmtDateTimeUTC(usluga.updated_at)}`
+          : DASH,
+      );
+      setText(kontener, `[data-role="${role.restarty}"]`, opisRestartow(usluga.restarts_1h));
+
+      const zadanie = opisZadania(usluga.last_task_state, usluga.last_task_error);
+      setText(kontener, `[data-role="${role.zadanie}"]`, zadanie.tekst);
+      setState(kontener, `[data-role="${role.zadanie}"]`, zadanie.stan);
+
+      const liniaBledu = q<HTMLElement>(kontener, `[data-role="${role.bladLinia}"]`);
+      if (liniaBledu) liniaBledu.hidden = zadanie.szczegol === null;
+      if (zadanie.szczegol !== null) {
+        setText(kontener, `[data-role="${role.blad}"]`, zadanie.szczegol);
+      }
+
+      setText(kontener, `[data-role="${role.obraz}"]`, obrazBezDigestu(usluga.image));
+
+      const komendy = komendyDocker(usluga.full_name);
+      const przyciski: Array<[string, string]> = [
+        [role.kopiujPs, komendy[0]?.komenda ?? ''],
+        [role.kopiujLogs, komendy[1]?.komenda ?? ''],
+        [role.kopiujInspect, komendy[2]?.komenda ?? ''],
+      ];
+      for (const [rola, komenda] of przyciski) {
+        const przycisk = q<HTMLButtonElement>(kontener, `[data-role="${rola}"]`);
+        if (!przycisk) continue;
+        przycisk.dataset.kopiuj = komenda;
+        przycisk.disabled = komenda.length === 0;
+        przycisk.title = komenda || 'brak nazwy usługi w API';
+      }
+      const kopiujObraz = q<HTMLButtonElement>(kontener, `[data-role="${role.kopiujObraz}"]`);
+      if (kopiujObraz) {
+        kopiujObraz.dataset.kopiuj = usluga.image ?? '';
+        kopiujObraz.disabled = !usluga.image;
+      }
+
+      const portainer = linkPortainer(
+        snapshot?.tools.find((narzedzie) => narzedzie.id === 'portainer')?.url ?? null,
+        usluga.full_name,
+      );
+      const link = q<HTMLAnchorElement>(kontener, `[data-role="${role.portainer}"]`);
+      if (link) {
+        if (portainer) {
+          link.href = portainer;
+          link.hidden = false;
+        } else {
+          link.hidden = true;
+        }
+      }
+    }
+
     function zbudujSzczegoly(stack: Stack, service: Service): HTMLElement | null {
       const row = instantiate('tpl-service-detail');
       if (!row) return null;
@@ -1437,6 +1678,8 @@ import WykresyView from '../components/WykresyView.astro';
       );
       setText(row, '[data-role="d-ram"]', fmtBytes(service.mem_bytes));
       setText(row, '[data-role="d-restarty"]', fmtInt(service.restarts_1h));
+
+      wypelnijDiagnostyke(row, ROLE_STATUS, service);
 
       for (const [rola, tekst] of [
         ['kopiuj-usluga', pelna],
@@ -1599,6 +1842,9 @@ import WykresyView from '../components/WykresyView.astro';
       limitCpu: number | null;
       rx: number[];
       tx: number[];
+      /** I/O dysku — odczyt i zapis w B/s (rate z liczników blokowych). */
+      ioR: number[];
+      ioW: number[];
     }
 
     /**
@@ -1624,6 +1870,8 @@ import WykresyView from '../components/WykresyView.astro';
         limitCpu: usluga.cpu_limit_cores ?? null,
         rx: seriaZ(dane, 'rx', stack, usluga.name),
         tx: seriaZ(dane, 'tx', stack, usluga.name),
+        ioR: seriaZ(dane, 'io_r', stack, usluga.name),
+        ioW: seriaZ(dane, 'io_w', stack, usluga.name),
       };
     }
 
@@ -1639,17 +1887,21 @@ import WykresyView from '../components/WykresyView.astro';
     }
 
     /**
-     * Trzy figury dla jednej usługi: CPU, RAM (z linią limitu) i sieć (rx/tx).
+     * Cztery figury dla jednej usługi: CPU, RAM (z linią limitu), sieć (rx/tx),
+     * dysk (odczyt/zapis).
      *
      * Liczby „teraz" bierzemy z API (świeższe niż ostatni punkt serii), a limity
-     * i przebiegi z Prometheusa; limit CPU nie istnieje w danych i mówimy to
-     * wprost, zamiast liczyć procent z niczego.
+     * i przebiegi z Prometheusa; limity CPU i RAM bierzemy z API (panel pokazuje
+     * „teraz vs limit"), a gdy limitu nie ma — mówimy to wprost, zamiast liczyć
+     * procent z niczego.
      */
     function opisFigur(metryki: MetrykiUslugi, usluga: Service): OpisFigury[] {
       const stCpu = statystyki(metryki.cpu);
       const stRam = statystyki(metryki.ram);
       const stRx = statystyki(metryki.rx);
       const stTx = statystyki(metryki.tx);
+      const stIoR = statystyki(metryki.ioR);
+      const stIoW = statystyki(metryki.ioW);
       const terazCpu = usluga.cpu_percent ?? stCpu.teraz;
       const terazRam = usluga.mem_bytes ?? stRam.teraz;
       const limitCpuProc = limitCpuProcent(metryki.limitCpu);
@@ -1662,6 +1914,7 @@ import WykresyView from '../components/WykresyView.astro';
         ...(metryki.limit === null ? [] : [metryki.limit]),
       ]);
       const graniceSiec = graniceWykresu([...metryki.rx, ...metryki.tx], { odZera: true });
+      const graniceDysk = graniceWykresu([...metryki.ioR, ...metryki.ioW], { odZera: true });
 
       return [
         {
@@ -1696,6 +1949,19 @@ import WykresyView from '../components/WykresyView.astro';
           granice: graniceSiec,
           jednostka: (v) => formatujPrzeplywnosc(v, 0),
           aria: `Ruch sieciowy usługi ${usluga.name}`,
+        },
+        {
+          tytul: 'Dysk (odczyt / zapis)',
+          liczby: opisDysku(stIoR.teraz, stIoW.teraz, stIoR.maks),
+          statystyki: statystykiDysku(stIoR, stIoW),
+          serie: [
+            { rola: 'wyk-linia', wartosci: metryki.ioR },
+            { rola: 'wyk-linia2', wartosci: metryki.ioW },
+          ],
+          limit: null,
+          granice: graniceDysk,
+          jednostka: (v) => formatujPrzeplywnosc(v, 0),
+          aria: `Wejście i wyjście dysku usługi ${usluga.name}`,
         },
       ];
     }
@@ -1853,6 +2119,7 @@ import WykresyView from '../components/WykresyView.astro';
           zbudujSzczegolyWykresow(znaleziona.stack, znaleziona.usluga, zakres);
         } else {
           zbudujListeWykresow(pary, zakres);
+          void renderTop(zakres);
         }
       }
 
@@ -1929,6 +2196,7 @@ import WykresyView from '../components/WykresyView.astro';
         '[data-role="wyk-repliki-uslugi"]',
         usluga.replicas_text ?? `${usluga.running ?? 0}/${usluga.desired ?? 0}`,
       );
+      wypelnijDiagnostyke(kontener, ROLE_WYKRESY, usluga);
       const czas = etykietyCzasu(zakres, Math.floor(Date.now() / 1000));
       const siatka = q<HTMLElement>(kontener, '[data-role="wyk-duze"]');
       if (siatka) {
@@ -1976,6 +2244,7 @@ import WykresyView from '../components/WykresyView.astro';
           '[data-role="wyk-repliki-uslugi"]',
           usluga.replicas_text ?? `${usluga.running ?? 0}/${usluga.desired ?? 0}`,
         );
+        wypelnijDiagnostyke(kontener, ROLE_WYKRESY, usluga);
         return;
       }
 
@@ -2208,7 +2477,261 @@ import WykresyView from '../components/WykresyView.astro';
       ustawAriaSort();
     }
 
+    /* ---------------- ranking „Top 10 usług" ---------------- */
+
+    /** Wybrana metryka rankingu (stan w pamięci — nie zaśmieca hasza widoku). */
+    let metrykaTop: MetrykaTop = 'cpu';
+    /** Cache rankingu per metryka — 60 s, jak cache przebiegów. */
+    const topCache = new Map<MetrykaTop, { kiedy: number; pozycje: PozycjaTop[] }>();
+
+    async function pobierzTop(metryka: MetrykaTop): Promise<PozycjaTop[] | null> {
+      const zapisane = topCache.get(metryka);
+      if (zapisane && Date.now() - zapisane.kiedy < 60_000) return zapisane.pozycje;
+      const teraz = Math.floor(Date.now() / 1000);
+      try {
+        const odpowiedz = await fetchWithTimeout(
+          zbudujUrlQueryInstant(zapytanieTop(metryka).expr, teraz),
+        );
+        if (!odpowiedz.ok) throw new Error(`HTTP ${odpowiedz.status}`);
+        const pozycje = parsujTop(await odpowiedz.json());
+        topCache.set(metryka, { kiedy: Date.now(), pozycje });
+        return pozycje;
+      } catch {
+        // Brak Prometheusa nie może psuć widoku — pokazujemy to wprost.
+        return null;
+      }
+    }
+
+    /** Rysuje ranking w istniejącym DOM (bez przebudowy przy odświeżeniu danych). */
+    function rysujTop(kontener: HTMLElement, wszystkie: readonly PozycjaTop[]): void {
+      const pozycje = ograniczTop(wszystkie);
+      const maks = pozycje[0]?.wartosc ?? 0;
+      const wiersze: HTMLElement[] = [];
+      for (const pozycja of pozycje) {
+        const wiersz = instantiate('tpl-wykres-top');
+        if (!wiersz) continue;
+        const nazwa = q<HTMLAnchorElement>(wiersz, '[data-role="top-nazwa"]');
+        if (nazwa) {
+          nazwa.textContent = `${pozycja.stack} / ${pozycja.usluga}`;
+          nazwa.href = doHaszaWykresow(pozycja.klucz, zakresZId(zHaszaWykresy(window.location.hash).zakres).id);
+          nazwa.title = `Szczegóły: ${pozycja.klucz}`;
+        }
+        const slupek = q<HTMLElement>(wiersz, '[data-role="top-slup"]');
+        if (slupek) slupek.style.width = `${szerokoscSlupka(pozycja.wartosc, maks)}%`;
+        setText(wiersz, '[data-role="top-wartosc"]', formatujWartoscTop(metrykaTop, pozycja.wartosc));
+        wiersze.push(wiersz);
+      }
+      kontener.replaceChildren(...wiersze);
+    }
+
+    async function renderTop(zakres: Zakres): Promise<void> {
+      const kontener = q<HTMLElement>(app, '[data-role="wykresy-top-lista"]');
+      const pusta = q<HTMLElement>(app, '[data-role="wykresy-top-pusta"]');
+      if (!kontener) return;
+      for (const przycisk of qa<HTMLElement>(app, '[data-action="wykres-top"]')) {
+        przycisk.setAttribute(
+          'aria-pressed',
+          przycisk.dataset.metryka === metrykaTop ? 'true' : 'false',
+        );
+      }
+      setText(
+        app,
+        '[data-role="wykresy-top-podpis"]',
+        `${zapytanieTop(metrykaTop).etykieta} · ${podpisZakresu(zakres)} · topk(10)`,
+      );
+      const pozycje = await pobierzTop(metrykaTop);
+      if (pusta) pusta.hidden = pozycje !== null && pozycje.length > 0;
+      if (pozycje === null) {
+        kontener.replaceChildren();
+        return;
+      }
+      rysujTop(kontener, pozycje);
+    }
+
+    /* ---------------- widok logów (własny, bez ramki Grafany) ---------------- */
+
+    /** Ostatnio pobrane linie i to, co z nich widać po filtrze. */
+    let ostatnieLogi: LiniaLogu[] = [];
+    let widoczneLogi: LiniaLogu[] = [];
+    /** Sygnatura listy — bez zmiany nie rusza się DOM (inaczej scroll skakałby co 30 s). */
+    let sygnaturaLogow = '';
+    let debounceLogow: number | null = null;
+    /** Zapytanie LogQL zwrócone przez serwer (dla deep-linku do Grafany). */
+    let ostatnieZapytanieLogow = '';
+
+    /** Lista usług do wyboru — pełna, nieprzefiltrowana (logi to nie widok stanu). */
+    function opcjeUslug(): Array<{ klucz: string; etykieta: string }> {
+      if (!snapshot) return [];
+      return snapshot.stacks
+        .flatMap((stack) => stack.services.map((usluga) => ({
+          klucz: kluczSerii(stack.name, usluga.name),
+          etykieta: `${stack.name} / ${usluga.name}`,
+        })))
+        .sort((a, b) => a.etykieta.localeCompare(b.etykieta, 'pl'));
+    }
+
+    function wypelnijUslugi(trasa: RouteLogi): void {
+      const select = q<HTMLSelectElement>(app, '[data-role="logi-usluga"]');
+      if (!select) return;
+      const opcje = opcjeUslug();
+      const obecne = opcje.map((opcja) => opcja.klucz).join('|');
+      if (select.dataset.pelny !== obecne) {
+        select.dataset.pelny = obecne;
+        select.replaceChildren(
+          ...opcje.map((opcja) => {
+            const element = document.createElement('option');
+            element.value = opcja.klucz;
+            element.textContent = opcja.etykieta;
+            return element;
+          }),
+        );
+      }
+      select.value = trasa.usluga ?? '';
+    }
+
+    function ustawPolaLogow(trasa: RouteLogi): void {
+      const zrodlo = q<HTMLSelectElement>(app, '[data-role="logi-zrodlo"]');
+      if (zrodlo) zrodlo.value = trasa.zrodlo;
+      // Wybór usługi ma sens tylko dla źródła „usługa" — przy hoście i Traefiku
+      // chowamy go, żeby nie sugerować, że da się filtrować po usłudze.
+      const poleUslugi = q<HTMLElement>(app, '.logi-pole-usluga');
+      if (poleUslugi) poleUslugi.hidden = trasa.zrodlo !== 'usluga';
+      wypelnijUslugi(trasa);
+    }
+
+    function pokazKomunikatLogow(tekst: string | null): void {
+      const komunikat = q<HTMLElement>(app, '[data-role="logi-komunikat"]');
+      if (!komunikat) return;
+      komunikat.hidden = tekst === null;
+      komunikat.textContent = tekst ?? '';
+    }
+
+    function rysujLinieLogow(): void {
+      const lista = q<HTMLElement>(app, '[data-role="logi-lista"]');
+      const pustka = q<HTMLElement>(app, '[data-role="logi-pustka"]');
+      if (!lista) return;
+      const zakres = zakresLogowZId(zHaszaLogi(window.location.hash).zakres);
+
+      const wiersze: HTMLElement[] = [];
+      for (const linia of widoczneLogi) {
+        const wiersz = instantiate('tpl-log-linia');
+        if (!wiersz) continue;
+        setText(wiersz, '[data-role="log-czas"]', formatujCzasLogu(linia.czas, zakres));
+        setText(wiersz, '[data-role="log-strumien"]', linia.strumien);
+        setText(wiersz, '[data-role="log-tresc"]', linia.tekst);
+        wiersz.title = linia.tekst;
+        wiersze.push(wiersz);
+      }
+      lista.replaceChildren(...wiersze);
+      if (pustka) pustka.hidden = widoczneLogi.length > 0;
+    }
+
+    async function renderLogi(route: RouteLogi, zakres: ZakresLogow): Promise<void> {
+      const lista = q<HTMLElement>(app, '[data-role="logi-lista"]');
+      if (!lista) return;
+      ustawPolaLogow(route);
+
+      if (route.zrodlo === 'usluga' && !route.usluga) {
+        ostatnieLogi = [];
+        widoczneLogi = [];
+        sygnaturaLogow = '';
+        lista.replaceChildren();
+        pokazKomunikatLogow('Wybierz usługę z listy powyżej (albo wejdź tu z widoku stanu, klikając „Logi" przy usłudze).');
+        const pustkaWybór = q<HTMLElement>(app, '[data-role="logi-pustka"]');
+        if (pustkaWybór) pustkaWybór.hidden = true;
+        return;
+      }
+
+      const limit = limitLiniiZId(q<HTMLSelectElement>(app, '[data-role="logi-limit"]')?.value);
+      // `rozbijFokus` zwraca obiekt (albo null), a nie krotkę — usługa z trasy
+      // może być zapisana jako `stack/usługa` albo samą nazwą.
+      const czesciUslugi = rozbijFokus(route.usluga);
+      const stack = czesciUslugi?.stack ?? '';
+      const usluga = czesciUslugi?.usluga ?? '';
+      const adres = zbudujUrlLogow(stack, usluga, route.zrodlo, zakres, limit);
+
+      let dane: unknown = null;
+      try {
+        const odpowiedz = await fetchWithTimeout(adres);
+        dane = await odpowiedz.json();
+        if (!odpowiedz.ok) {
+          pokazKomunikatLogow(bladLogow(dane) ?? `Nie udało się pobrać logów (HTTP ${odpowiedz.status}).`);
+          return;
+        }
+      } catch {
+        // Brak Loki nie może psuć panelu — mówimy wprost, że nie wiemy.
+        pokazKomunikatLogow('Nie udało się pobrać logów — usługa zbierająca nie odpowiedziała.');
+        return;
+      }
+
+      const blad = bladLogow(dane);
+      if (blad) {
+        pokazKomunikatLogow(blad);
+        return;
+      }
+      pokazKomunikatLogow(null);
+
+      const fraza = q<HTMLInputElement>(app, '[data-role="logi-filtr"]')?.value ?? '';
+      ostatnieLogi = parsujOdpowiedzLoki(dane);
+      widoczneLogi = filtrujLinie(ostatnieLogi, fraza);
+      ostatnieZapytanieLogow =
+        (typeof (dane as { zapytanie?: unknown })?.zapytanie === 'string'
+          ? ((dane as { zapytanie: string }).zapytanie)
+          : '') || zapytanieZrodla(route.zrodlo, stack, usluga);
+
+      const sygnatura = [
+        route.zrodlo,
+        route.usluga ?? '',
+        zakres.id,
+        String(limit),
+        fraza,
+        String(widoczneLogi.length),
+        String(widoczneLogi[0]?.czas ?? 0),
+      ].join('|');
+      if (sygnatura !== sygnaturaLogow) {
+        sygnaturaLogow = sygnatura;
+        rysujLinieLogow();
+      }
+
+      setText(app, '[data-role="logi-licznik"]', podsumowanieLogow(widoczneLogi.length, ostatnieLogi.length, limit));
+      setText(app, '[data-role="logi-zapytanie"]', ostatnieZapytanieLogow);
+
+      const grafana = q<HTMLAnchorElement>(app, '[data-role="logi-grafana"]');
+      if (grafana) grafana.href = linkGrafanaExplore(ostatnieZapytanieLogow, zakres);
+
+      const pustka = q<HTMLElement>(app, '[data-role="logi-pustka"]');
+      if (pustka) {
+        pustka.hidden = widoczneLogi.length > 0;
+        setText(
+          pustka,
+          '[data-role="logi-pustka-tekst"]',
+          ostatnieLogi.length > 0
+            ? 'Żadna linia nie pasuje do filtra — wyczyść filtr.'
+            : podpowiedzPustki(route.zrodlo, zakres),
+        );
+      }
+    }
+
+    /** Zapis widocznych linii do pliku (to samo, co idzie do schowka). */
+    function pobierzLogi(): void {
+      if (widoczneLogi.length === 0) return;
+      const zakres = zakresLogowZId(zHaszaLogi(window.location.hash).zakres);
+      const znacznik = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
+      const plik = new Blob([eksportLogow(widoczneLogi, zakres)], {
+        type: 'text/plain;charset=utf-8',
+      });
+      const url = URL.createObjectURL(plik);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `monitoring-logi-${znacznik}.log`;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    }
+
     /* ---------------- zdarzenia ---------------- */
+
 
     window.addEventListener('hashchange', () => {
       wczytajStanZHasza();
@@ -2246,6 +2769,26 @@ import WykresyView from '../components/WykresyView.astro';
           window.location.hash = doHaszaWykresow(trasa.usluga, zakres.id);
           return;
         }
+        if (action === 'wykres-top') {
+          metrykaTop = metrykaTopZId(trigger.dataset.metryka);
+          void renderTop(zakresZId(zHaszaWykresy(window.location.hash).zakres));
+          return;
+        }
+        if (action === 'log-zakres') {
+          const zakres = zakresLogowZId(trigger.dataset.zakres);
+          const trasa = zHaszaLogi(window.location.hash);
+          window.location.hash = doHaszaLogi(trasa.usluga, zakres.id, trasa.zrodlo);
+          return;
+        }
+        if (action === 'log-kopiuj') {
+          const zakres = zakresLogowZId(zHaszaLogi(window.location.hash).zakres);
+          void kopiuj(eksportLogow(widoczneLogi, zakres), trigger);
+          return;
+        }
+        if (action === 'log-pobierz') {
+          pobierzLogi();
+          return;
+        }
         if (action === 'wykres-usluga') {
           const zakres = zakresZId(zHaszaWykresy(window.location.hash).zakres);
           window.location.hash = doHaszaWykresow(trigger.dataset.usluga ?? null, zakres.id);
@@ -2270,7 +2813,41 @@ import WykresyView from '../components/WykresyView.astro';
 
     document.addEventListener('input', (event) => {
       const target = event.target;
-      if (!(target instanceof HTMLInputElement) || target.dataset.role !== 'filter-input') return;
+      if (!(target instanceof HTMLInputElement)) return;
+      // Filtr logów działa na już pobranych liniach (podciąg), więc nie pyta
+      // serwera ponownie — wystarczy przerysować listę.
+      if (target.dataset.role === 'logi-filtr') {
+        const fraza = target.value;
+        if (debounceLogow !== null) window.clearTimeout(debounceLogow);
+        debounceLogow = window.setTimeout(() => {
+          debounceLogow = null;
+          const trasa = zHaszaLogi(window.location.hash);
+          const zakres = zakresLogowZId(trasa.zakres);
+          widoczneLogi = filtrujLinie(ostatnieLogi, fraza);
+          sygnaturaLogow = '';
+          rysujLinieLogow();
+          setText(
+            app,
+            '[data-role="logi-licznik"]',
+            podsumowanieLogow(widoczneLogi.length, ostatnieLogi.length, limitLiniiZId(
+              q<HTMLSelectElement>(app, '[data-role="logi-limit"]')?.value,
+            )),
+          );
+          const pustka = q<HTMLElement>(app, '[data-role="logi-pustka"]');
+          if (pustka) {
+            pustka.hidden = widoczneLogi.length > 0;
+            setText(
+              pustka,
+              '[data-role="logi-pustka-tekst"]',
+              ostatnieLogi.length > 0
+                ? 'Żadna linia nie pasuje do filtra — wyczyść filtr.'
+                : podpowiedzPustki(trasa.zrodlo, zakres),
+            );
+          }
+        }, 120);
+        return;
+      }
+      if (target.dataset.role !== 'filter-input') return;
       const wartosc = target.value;
       // Debounce: przy 47 usługach przemalowanie sekcji na każde naciśnięcie
       // klawisza to zauważalne miganie.
@@ -2297,6 +2874,26 @@ import WykresyView from '../components/WykresyView.astro';
         };
         odswiezWidok();
       }
+      if (target instanceof HTMLSelectElement && target.dataset.role === 'logi-zrodlo') {
+        const trasa = zHaszaLogi(window.location.hash);
+        // Zmiana źródła kasuje wybór usługi tylko wtedy, gdy nowe źródło jej
+        // nie używa — inaczej powrót do „Usługa" gubiłby kontekst.
+        window.location.hash = doHaszaLogi(trasa.usluga, trasa.zakres, zrodloLogowZId(target.value).id);
+        return;
+      }
+      if (target instanceof HTMLSelectElement && target.dataset.role === 'logi-usluga') {
+        const trasa = zHaszaLogi(window.location.hash);
+        window.location.hash = doHaszaLogi(target.value || null, trasa.zakres, trasa.zrodlo);
+        return;
+      }
+      if (target instanceof HTMLSelectElement && target.dataset.role === 'logi-limit') {
+        // Limit zmienia zapytanie (ile linii pobrać), więc pobieramy od nowa.
+        const trasa = zHaszaLogi(window.location.hash);
+        void renderLogi(
+          { kind: 'logi', usluga: trasa.usluga, zakres: trasa.zakres, zrodlo: trasa.zrodlo },
+          zakresLogowZId(trasa.zakres),
+        );
+      }
     });
 
     document.addEventListener('keydown', (event) => {
@@ -2307,11 +2904,26 @@ import WykresyView from '../components/WykresyView.astro';
         aktywne instanceof HTMLSelectElement;
       if (event.key === '/' && !wPolu) {
         event.preventDefault();
-        q<HTMLInputElement>(app, '[data-role="filter-input"]')?.focus();
+        // „/” trafia w pole TEGO widoku, który jest na ekranie — w widoku logów
+        // filtrowanie jest pierwszą rzeczą, po którą sięgamy.
+        const pole = app.dataset.view === 'logi'
+          ? q<HTMLInputElement>(app, '[data-role="logi-filtr"]')
+          : q<HTMLInputElement>(app, '[data-role="filter-input"]');
+        pole?.focus();
         return;
       }
       if (event.key === 'Escape') {
         if (wPolu && aktywne instanceof HTMLElement) aktywne.blur();
+        if (app.dataset.view === 'logi') {
+          const pole = q<HTMLInputElement>(app, '[data-role="logi-filtr"]');
+          if (pole && pole.value !== '') {
+            pole.value = '';
+            widoczneLogi = filtrujLinie(ostatnieLogi, '');
+            sygnaturaLogow = '';
+            rysujLinieLogow();
+            return;
+          }
+        }
         wyczyscFiltr();
       }
     });

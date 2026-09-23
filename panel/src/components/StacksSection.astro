@@ -128,6 +128,31 @@ import SortableTh from './SortableTh.astro';
             <span class="subtle">RAM:</span> <span class="num" data-role="d-ram"></span>
             <span class="subtle">Restarty 1 h:</span> <span class="num" data-role="d-restarty"></span>
           </p>
+          <p class="detail-linia detail-liczby">
+            <span class="subtle">Wersja:</span> <span class="num" data-role="d-digest"></span>
+            <span class="subtle">Zaktualizowano:</span> <span class="num" data-role="d-updated"></span>
+            <span class="subtle">Ostatnie zadanie:</span> <span class="num" data-role="d-zadanie"></span>
+          </p>
+          <p class="detail-linia detail-blad" data-role="d-blad-linia" hidden>
+            <span class="subtle">Powód z Dockera:</span>
+            <code class="num detail-blad-tresc" data-role="d-blad"></code>
+          </p>
+          <div class="detail-linki detail-linki-komendy">
+            <button type="button" class="btn-ops btn-kopiuj" data-action="kopiuj" data-role="kopiuj-ps">
+              Kopiuj: zadania
+            </button>
+            <button type="button" class="btn-ops btn-kopiuj" data-action="kopiuj" data-role="kopiuj-logs">
+              Kopiuj: logi
+            </button>
+            <button type="button" class="btn-ops btn-kopiuj" data-action="kopiuj" data-role="kopiuj-inspect">
+              Kopiuj: inspect
+            </button>
+            <a class="btn-ops" data-role="d-portainer" target="_blank" rel="noopener" hidden>
+              <Icon name="lucide:external-link" size={14} aria-hidden="true" />
+              <span>Portainer</span>
+            </a>
+            <span class="subtle text-xs">Panel jest tylko do odczytu — komendy wklej na hoście.</span>
+          </div>
           <div class="detail-linki">
             <a class="btn-ops" data-role="d-link-wykresy" target="_blank" rel="noopener">
               <Icon name="lucide:chart-line" size={14} aria-hidden="true" />

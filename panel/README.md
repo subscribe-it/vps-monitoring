@@ -161,8 +161,10 @@ listy dostaje bezpieczny zamiennik (`box`) — kafelek nigdy nie zostaje pusty.
 | --- | --- |
 | `#/` | widok stanu (domyślny) |
 | `#/tool/<id>` | podgląd narzędzia w `<iframe>` |
-| `#/wykresy` | wykresy per usługa (własne, bez ramki Grafany) |
-| `#/wykresy/<usługa>?zakres=1h\|6h\|24h\|7d` | szczegóły usługi: duże wykresy + statystyki |
+| `#/wykresy` | wykresy per usługa (własne, bez ramki Grafany) + ranking „Top 10 usług" |
+| `#/wykresy/<stack>/<usługa>?zakres=1h\|6h\|24h\|7d` | szczegóły usługi: cztery duże wykresy, diagnostyka |
+| `#/logi` | logi: źródło (usługa / host / Traefik), filtr, limit linii |
+| `#/logi/<stack>/<usługa>?zakres=15m\|1h\|24h&zrodlo=usluga\|host\|traefik` | logi jednej usługi |
 
 Routing opiera się na zdarzeniu `hashchange`, więc przycisk wstecz/dalej
 przeglądarki działa, a widok odtwarza się po odświeżeniu strony.
@@ -173,6 +175,9 @@ Po co: żeby ocenić zużycie jednej usługi nie trzeba wchodzić do Grafany —
 osadzona ramka oddaje wykresy razem z cudzą nawigacją i nie da się w niej
 przeskoczyć „ta usługa, ale w 24 h".
 
+- **Ranking** (góra `#/wykresy`) — „Top 10 usług" z przełącznikiem CPU / RAM /
+  sieć; jedno zapytanie `topk(10, …)` na metrykę (migawka, nie przebieg), klik
+  w wiersz otwiera szczegóły tej usługi.
 - **Lista** (`#/wykresy`) — karta na każdą usługę widoczną po filtrach
   (filtrowanie i sortowanie per stack działa jak w widoku stanu): CPU, RAM
   (z linią limitu) i sieć rx/tx. Pod każdym wykresem liczby tekstem, np.
@@ -180,7 +185,7 @@ przeskoczyć „ta usługa, ale w 24 h".
   `CPU: 12,00% · limit 0,25 vCPU · 48,0% limitu` (linia limitu także na
   wykresie CPU — limit z API przeliczamy na procent jednego rdzenia: 0,25 vCPU
   = 25%).
-- **Szczegóły** (`#/wykresy/<stack>/<usługa>?zakres=…`) — trzy duże wykresy
+- **Szczegóły** (`#/wykresy/<stack>/<usługa>?zakres=…`) — cztery duże wykresy
   z osią czasu (UTC), statystykami (`teraz / maks. / średnia`) oraz przyciskami
   zakresu 1 h / 6 h / 24 h / 7 d. Stan zakresu siedzi w haszu, więc link do
   „ta usługa w 24 h" działa i przeżywa odświeżenie.
@@ -224,6 +229,42 @@ swojego stanu przy skoku do stanu i z powrotem).
   `<use href="#i-…">`,
 - jedyne „zewnętrzne” adresy w `dist/` to komentarz licencyjny TailwindCSS
   i przestrzeń nazw SVG (`http://www.w3.org/2000/svg`, nie jest pobierana).
+
+### Widok „Logi" (`#/logi`)
+
+Po co: przy incydencie najpierw czyta się linie, a dopiero potem idzie w narzędzia.
+Wcześniej jedyną drogą były ramka Grafany (z jej nawigacją) albo `docker service logs`
+po SSH.
+
+- **Źródła**: kontenery wybranej usługi (`job="docker"`), journal hosta
+  (`job="journald"`, m.in. sshd i jądro) oraz access log Traefika (`job="traefik"`).
+- **Zapytanie buduje serwer** (`GET /status/logs` w usłudze discovery) z parametrów
+  `zrodlo`, `stack`, `usluga`, `zakres`, `limit` — tekst użytkownika **nigdy** nie
+  trafia do LogQL, a filtr jest zwykłym podciągiem (bez rozróżniania wielkości liter,
+  kilka słów = AND).
+- **Zakres**: 15 min / 1 h / 24 h; **limit linii**: 200 / 500 / 1000 (Loki bez limitu
+  potrafi oddać dziesiątki tysięcy linii).
+- **Akcje**: kopiowanie widocznych linii, pobranie `.log`, deep link „Otwórz w Grafanie"
+  (Explore z tym samym zapytaniem), licznik „widoczne z pobranych".
+- Pusty wynik tłumaczy się wprost: dla Traefika przypomina, że access log edge’a bywa
+  wyłączony (alert `TraefikNoAccessLogs`), a brak linii nie znaczy „brak ruchu".
+- Trasa i filtry siedzą w `src/lib/logi.ts` (testy: `node scripts/ci/check_logi.mts`),
+  a panel używa wyłącznie `textContent` — logi to dane z zewnątrz, więc zero `innerHTML`.
+
+### Diagnostyka usługi (oba widoki)
+
+W szczegółach usługi (widok stanu **i** widok wykresów) panel pokazuje: obraz bez
+digestu + skrót `sha256:…`, czas ostatniej aktualizacji („2 h temu · data UTC"),
+restarty z ostatniej godziny oraz **powód padnięcia zadania** prosto z Dockera
+(`last_task_state` + `last_task_error`, np. „No such image: …" albo „unhealthy
+container"). Do tego trzy przyciski kopiowania gotowych komend
+(`docker service ps --no-trunc`, `docker service logs --tail 200`,
+`docker service inspect`) i link do Portainera.
+
+**Panel jest tylko do odczytu** — nie restartuje, nie skaluje i nie usuwa niczego.
+Komendy są do wklejenia na hoście, świadomie, po SSH. Test pilnuje, żeby wśród
+komend nie pojawiła się żadna operacja zmieniająca
+(`node scripts/ci/check_usluga.mts`).
 
 ## Dostępność
 

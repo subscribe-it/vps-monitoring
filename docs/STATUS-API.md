@@ -27,7 +27,10 @@ w takim przypadku pola uzupełniane są zerami, a `overall` degraduje się do `w
           "desired": 1, "running": 1, "image": "ghcr.io/…:prod",
           "cpu_percent": 1.2, "mem_bytes": 125829120,
           "cpu_limit_cores": 0.25, "mem_limit_bytes": 536870912,
-          "restarts_1h": 0, "replicas_text": "1/1" }
+          "restarts_1h": 0, "replicas_text": "1/1",
+          "updated_at": "2026-09-22T19:09:51Z",
+          "last_task_state": "rejected",
+          "last_task_error": "No such image: coreruleset/modsecurity-crs:4.26.0-nginx-alpine" }
       ] }
   ],
   "certs": [
@@ -47,6 +50,36 @@ w takim przypadku pola uzupełniane są zerami, a `overall` degraduje się do `w
   ]
 }
 ```
+
+## `GET /status/logs` — logi dla panelu
+
+Panel nie woła Loki'ego wprost: pyta naszą usługę discovery, a ta buduje LogQL
+z parametrów strukturalnych. Powody: (1) tekst użytkownika **nigdy** nie trafia do
+zapytania ( filtr jest podciągiem po stronie panelu), (2) działa niezależnie od
+tego, czy edge wystawia `/loki` na tym samym originie — `/status/*` jest trasowane
+na pewno, bo panel już z niego czyta stan.
+
+Parametry (wszystkie nieobowiązkowe, śmieci → wartości domyślne):
+
+| Parametr | Dozwolone wartości | Domyślnie |
+| --- | --- | --- |
+| `zrodlo` | `usluga` \| `host` \| `traefik` | `usluga` |
+| `stack`, `usluga` | nazwy z Dockera (czyszczone do `[A-Za-z0-9_.:/-]`) | — |
+| `zakres` | `15m` \| `1h` \| `24h` | `1h` |
+| `limit` | `200` \| `500` \| `1000` | `200` |
+
+Odpowiedź `200`:
+
+```json
+{ "zrodlo": "usluga", "zakres": "1h", "limit": 200,
+  "zapytanie": "{job=\"docker\", stack=\"monitoring\", service=\"monitoring_panel\"}",
+  "linie": [ { "czas": 1758567060.123, "tekst": "…", "strumien": "monitoring_panel" } ] }
+```
+
+Linie są posortowane malejąco po czasie. `400` = brak usługi przy źródle `usluga`,
+`503` = brak `LOKI_URL` albo Loki nie odpowiedziało (pole `error` ma czytelny powód).
+Etykieta `service` w Loki ma **prefiks stacka** (`<stack>_<usługa>`), bo tak ustawia
+ją promtail z `com.docker.swarm.service.name`.
 
 ## Zasady
 
@@ -69,6 +102,13 @@ w takim przypadku pola uzupełniane są zerami, a `overall` degraduje się do `w
   Panel używa `mem_limit_bytes` jako pierwszego źródła limit RAM, a metrykę
   `swarm_container_memory_limit_bytes` (z `docker stats`) tylko jako fallback;
   limit CPU ma wyłącznie tutaj (metryki go nie wystawiają).
+- `updated_at` (ISO Z, `null` gdy brak) to czas ostatniej aktualizacji usługi,
+  a `last_task_state` / `last_task_error` opisują **najnowsze zadanie, które
+  padło** (`failed` albo `rejected`) — treść `Status.Err` z Dockera, czyli
+  dosłowną przyczynę („No such image: …", „task: non-zero exit (137):
+  dockerexec: unhealthy container"). Bez danych oba pola są `null`; sam stan bez
+  treści też jest możliwy (puste `Err` zamieniamy na `null`, żeby panel pokazał
+  „brak danych", a nie pusty prostokąt).
 - Sekcja `security` liczy się z Loki (`LOKI_URL`), bo promtail zbiera journald
   hosta: `ssh_failed_24h` to `count_over_time` linii „Failed password"
   z jednostki `ssh.service`, a `logins_24h` to ostatnie 20 linii „Accepted"

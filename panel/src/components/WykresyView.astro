@@ -46,6 +46,34 @@ import { Icon } from 'astro-icon/components';
 
   <p class="wykresy-komunikat subtle" data-role="wykresy-komunikat" role="status" aria-live="polite" hidden></p>
 
+  <section class="card-ops wykresy-top" data-role="wykresy-top" aria-label="Ranking usług">
+    <header class="wykresy-top-naglowek">
+      <h3 class="card-title">Top 10 usług</h3>
+      <div
+        class="wykresy-top-metryki"
+        role="group"
+        aria-label="Metryka rankingu"
+        data-role="wykresy-top-metryki"
+      >
+        <button type="button" class="zakres-btn" data-action="wykres-top" data-metryka="cpu" aria-pressed="true">
+          CPU
+        </button>
+        <button type="button" class="zakres-btn" data-action="wykres-top" data-metryka="ram" aria-pressed="false">
+          RAM
+        </button>
+        <button type="button" class="zakres-btn" data-action="wykres-top" data-metryka="siec" aria-pressed="false">
+          Sieć
+        </button>
+      </div>
+      <span class="subtle text-xs" data-role="wykresy-top-podpis">Ranking liczy Prometheus (jedno zapytanie).</span>
+    </header>
+    <div class="wykresy-top-lista" data-role="wykresy-top-lista"></div>
+    <p class="empty-ops" data-role="wykresy-top-pusta" hidden>
+      <Icon name="lucide:bar-chart-3" size={16} aria-hidden="true" />
+      <span>Brak danych rankingu — Prometheus nie odpowiedział albo brak serii w tym zakresie.</span>
+    </p>
+  </section>
+
   <div class="wykresy-siatka" data-role="wykresy-lista"></div>
 
   <div class="wykresy-szczegoly" data-role="wykresy-szczegoly" hidden></div>
@@ -55,7 +83,9 @@ import { Icon } from 'astro-icon/components';
     <span class="num">cpu_limit_cores</span> / <span class="num">mem_limit_bytes</span> ze spec usługi)
     oraz <span class="num">/prometheus/api/v1/query_range</span> (przebiegi). Limit RAM bierzemy z API,
     a gdy go nie ma — z metryki <span class="num">swarm_container_memory_limit_bytes</span>.
-    Sieć nie ma limitu, więc pokazujemy przepustowość, nie procent. Gdy limit nie jest ustawiony,
+    Sieć i dysk nie mają limitu, więc pokazujemy przepustowość (rx/tx, odczyt/zapis), nie procent.
+    Na górze widoku jest ranking „Top 10 usług" (CPU / RAM / sieć) liczony po stronie Prometheusa.
+    Gdy limit nie jest ustawiony,
     piszemy wprost „limit: brak w API".
   </p>
 </section>
@@ -98,7 +128,54 @@ import { Icon } from 'astro-icon/components';
         <span>Pokaż w widoku stanu</span>
       </a>
     </div>
+    <div class="usluga-diagnostyka" data-role="wyk-diagnostyka">
+      <p class="detail-linia">
+        <span class="subtle">Obraz:</span>
+        <span class="num" data-role="wyk-d-obraz"></span>
+        <span class="subtle">digest:</span>
+        <span class="num" data-role="wyk-d-digest"></span>
+        <button type="button" class="btn-ops btn-kopiuj" data-action="kopiuj" data-role="wyk-d-kopiuj-obraz">
+          Kopiuj obraz
+        </button>
+      </p>
+      <p class="detail-linia detail-liczby">
+        <span class="subtle">Zaktualizowano:</span> <span class="num" data-role="wyk-d-updated"></span>
+        <span class="subtle">Restarty:</span> <span class="num" data-role="wyk-d-restarty"></span>
+        <span class="subtle">Zadanie:</span> <span class="num" data-role="wyk-d-zadanie"></span>
+      </p>
+      <p class="detail-linia detail-blad" data-role="wyk-d-blad-linia" hidden>
+        <span class="subtle">Powód z Dockera:</span>
+        <code class="num detail-blad-tresc" data-role="wyk-d-blad"></code>
+      </p>
+      <div class="detail-linki">
+        <button type="button" class="btn-ops btn-kopiuj" data-action="kopiuj" data-role="wyk-d-kopiuj-ps">
+          Kopiuj: zadania
+        </button>
+        <button type="button" class="btn-ops btn-kopiuj" data-action="kopiuj" data-role="wyk-d-kopiuj-logs">
+          Kopiuj: logi
+        </button>
+        <button type="button" class="btn-ops btn-kopiuj" data-action="kopiuj" data-role="wyk-d-kopiuj-inspect">
+          Kopiuj: inspect
+        </button>
+        <a class="btn-ops" data-role="wyk-d-portainer" target="_blank" rel="noopener" hidden>
+          <Icon name="lucide:external-link" size={13} aria-hidden="true" />
+          <span>Portainer</span>
+        </a>
+        <span class="subtle text-xs">Panel jest tylko do odczytu — komendy wklej na hoście.</span>
+      </div>
+    </div>
     <div class="wykres-siatka-duza" data-role="wyk-duze"></div>
+  </div>
+</template>
+
+<!-- Wiersz rankingu „Top 10": nazwa, słupek, wartość. -->
+<template id="tpl-wykres-top">
+  <div class="top-wiersz" data-role="top-wiersz">
+    <a class="top-nazwa row-name" data-role="top-nazwa" href="#/wykresy"></a>
+    <span class="top-slup" aria-hidden="true">
+      <span class="top-slup-wypelnienie" data-role="top-slup"></span>
+    </span>
+    <span class="top-wartosc num" data-role="top-wartosc"></span>
   </div>
 </template>
 

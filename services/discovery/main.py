@@ -930,7 +930,14 @@ def normalize_task_state(raw_state):
 
 
 def aggregate_tasks(tasks, now_ts, window_seconds=3600.0):
-    """ServiceID -> {'states': {...}, 'running': n, 'failed_1h': n}."""
+    """ServiceID -> {'states': {...}, 'running': n, 'failed_1h': n, 'last_state', 'last_error'}.
+
+    `last_state`/`last_error` opisują NAJNOWSZE zadanie w stanie `failed` albo
+    `rejected` — to jedyne miejsce, w którym Docker mówi WPROST, dlaczego usługa
+    się przewraca („No such image: …”, „task: non-zero exit (137): dockerexec:
+    unhealthy container”). Panel pokazuje to w szczegółach usługi, więc nie
+    trzeba zgadywać przyczyny z liczby restartów. Brak danych => `None`.
+    """
     stats = {}
     for task in as_list(tasks, "GET /tasks"):
         if not isinstance(task, dict):
@@ -938,9 +945,13 @@ def aggregate_tasks(tasks, now_ts, window_seconds=3600.0):
         service_id = str(task.get("ServiceID") or "").strip()
         if not service_id:
             continue
-        entry = stats.setdefault(service_id, {"states": {}, "running": 0, "failed_1h": 0})
-        state = normalize_task_state((task.get("Status") or {}).get("State")
-                                     if isinstance(task.get("Status"), dict) else None)
+        entry = stats.setdefault(
+            service_id,
+            {"states": {}, "running": 0, "failed_1h": 0,
+             "last_state": None, "last_error": None, "last_error_at": 0.0},
+        )
+        status = task.get("Status") if isinstance(task.get("Status"), dict) else {}
+        state = normalize_task_state(status.get("State"))
         entry["states"][state] = entry["states"].get(state, 0) + 1
         if state == "running":
             entry["running"] += 1
@@ -950,6 +961,19 @@ def aggregate_tasks(tasks, now_ts, window_seconds=3600.0):
             age = now_ts - created.timestamp()
             if 0.0 <= age <= window_seconds:
                 entry["failed_1h"] += 1
+        if state in ("failed", "rejected"):
+            # Kolejność: `UpdatedAt` jest świeższe niż `CreatedAt` (zadanie mogło
+            # paść po restarcie kontenera), ale bierzemy to, co jest.
+            znacznik_zmian = parse_rfc3339(task.get("UpdatedAt"))
+            kiedy = znacznik_zmian or created
+            znacznik = kiedy.timestamp() if kiedy is not None else 0.0
+            if znacznik >= entry["last_error_at"]:
+                # Puste i białe „błędy” traktujemy jak brak treści — panel ma
+                # pokazać „brak danych”, a nie pusty prostokąt.
+                blad = str(status.get("Err") or "").strip() or None
+                entry["last_state"] = state
+                entry["last_error"] = blad
+                entry["last_error_at"] = znacznik
     return stats
 
 
@@ -1468,6 +1492,70 @@ HOST_QUERIES = {
 # --------------------------------------------------------------------------
 # Serwis
 # --------------------------------------------------------------------------
+# --------------------------------------------------------------------------
+# Logi z Loki dla panelu (`/status/logs`)
+# --------------------------------------------------------------------------
+# Po co proxy w tej usłudze, a nie bezpośrednio z przeglądarki do Loki:
+# 1. panel nie musi znać LogQL — wysyła parametry strukturalne (stack, usługa,
+#    źródło, zakres), a zapytanie buduje serwer, więc **tekst użytkownika nigdy
+#    nie trafia do zapytania** (żadnego wstrzykiwania/regexów w LogQL),
+# 2. działa niezależnie od tego, czy edge wystawia `/loki` na tym samym
+#    originie (trasy nie dało się potwierdzić z zewnątrz: ForwardAuth zwraca 401
+#    na każdą ścieżkę), a `/status/*` jest trasowane na pewno — panel już z niego
+#    czyta stan,
+# 3. odpowiedź jest przycięta do tego, co panel pokazuje (czas, treść, strumień).
+LOGI_ZAKRESY = {"15m": 900, "1h": 3600, "24h": 86400}
+LOGI_ZAKRES_DOMYSLNY = "1h"
+LOGI_LIMITY = (200, 500, 1000)
+LOGI_LIMIT_DOMYSLNY = 200
+LOGI_ZRODLA = ("usluga", "host", "traefik")
+
+
+def _bezpieczna_etykieta(wartosc):
+    """Czyści wartość do użycia w selektorze LogQL.
+
+    Nazwy usług/stacków pochodzą z Dockera, ale nie ufamy im bezgranicznie:
+    cudzysłów albo backslash w nazwie rozjechałby selektor (albo pozwolił
+    dopisać własny warunek). Zostawiamy wyłącznie znaki legalne w nazwach.
+    """
+    return re.sub(r"[^A-Za-z0-9_.:/-]", "", str(wartosc or "")).strip()
+
+
+def logi_zapytanie(zrodlo, stack, usluga):
+    """Buduje selektor LogQL z parametrów strukturalnych (patrz komentarz wyżej)."""
+    zrodlo = zrodlo if zrodlo in LOGI_ZRODLA else "usluga"
+    if zrodlo == "host":
+        return '{job="journald", unit=~".+"}'
+    if zrodlo == "traefik":
+        return '{job="traefik"}'
+    stack_czysty = _bezpieczna_etykieta(stack)
+    usluga_czysta = _bezpieczna_etykieta(usluga)
+    if not stack_czysty or not usluga_czysta:
+        return None
+    # Etykieta `service` w Loki ma PREFIKS stacka — tak ustawia ją promtail
+    # z `com.docker.swarm.service.name`.
+    return '{job="docker", stack="%s", service="%s_%s"}' % (stack_czysty, stack_czysty, usluga_czysta)
+
+
+def logi_parametry(zapytanie):
+    """Waliduje parametry żądania `/status/logs` (śmieci => wartości domyślne)."""
+    def jeden(klucz, dozwolone, domyslna):
+        wartosc = (zapytanie.get(klucz) or [""])[0].strip()
+        return wartosc if wartosc in dozwolone else domyslna
+
+    try:
+        limit = int((zapytanie.get("limit") or [""])[0])
+    except (TypeError, ValueError):
+        limit = LOGI_LIMIT_DOMYSLNY
+    return {
+        "zrodlo": jeden("zrodlo", LOGI_ZRODLA, "usluga"),
+        "zakres": jeden("zakres", LOGI_ZAKRESY.keys(), LOGI_ZAKRES_DOMYSLNY),
+        "limit": limit if limit in LOGI_LIMITY else LOGI_LIMIT_DOMYSLNY,
+        "stack": (zapytanie.get("stack") or [""])[0].strip(),
+        "usluga": (zapytanie.get("usluga") or [""])[0].strip(),
+    }
+
+
 class DiscoveryService:
     def __init__(self, config, docker=None, probe_fn=None, json_get=None, cert_fn=None, clock=time.time):
         self.config = config
@@ -1586,6 +1674,9 @@ class DiscoveryService:
             # Limity z spec usługi (NanoCPUs/MemoryBytes) — panel pokazuje nimi
             # „teraz vs limit"; `None` = limit nieustawiony, nie zero.
             entry["cpu_limit_cores"], entry["mem_limit_bytes"] = service_limits(task_template)
+            # Dlaczego usługa się przewraca — wprost z Dockera, bez zgadywania.
+            entry["last_task_state"] = stats.get("last_state")
+            entry["last_task_error"] = stats.get("last_error")
             entry["replicas_text"] = "%d/%d" % (entry["running"], entry["desired"])
             snapshot.services.append(entry)
             snapshot.stacks.setdefault(stack, []).append(entry)
@@ -1839,6 +1930,12 @@ class DiscoveryService:
                         "mem_limit_bytes": service.get("mem_limit_bytes"),
                         "restarts_1h": service["failed_1h"],
                         "replicas_text": service["replicas_text"],
+                        # Czasy w ISO Z (jak `generated_at`), `None` = brak danych.
+                        "updated_at": (
+                            iso_z(service["updated_at"]) if service.get("updated_at") else None
+                        ),
+                        "last_task_state": service.get("last_task_state"),
+                        "last_task_error": service.get("last_task_error"),
                     }
                 )
             stacks.append(
@@ -1922,6 +2019,67 @@ class DiscoveryService:
                 }
             )
         return alerts
+
+    def logs_section(self, zapytanie):
+        """Linie logów z Loki dla panelu. Zwraca `(kod HTTP, payload)`.
+
+        Brak źródła (Loki nie odpowiada) to nie wyjątek, a czytelny komunikat:
+        panel ma pokazać, że nie wie, a nie udawać pustkę.
+        """
+        parametry = logi_parametry(zapytanie)
+        selektor = logi_zapytanie(parametry["zrodlo"], parametry["stack"], parametry["usluga"])
+        if selektor is None:
+            return 400, {
+                "error": "Brak usługi — wybierz usługę albo przełącz źródło na host/Traefik.",
+                "zrodlo": parametry["zrodlo"],
+            }
+        if not self.config.loki_url:
+            return 503, {"error": "Loki nie jest skonfigurowane (LOKI_URL).", "zapytanie": selektor}
+
+        teraz = int(self.clock())
+        sekundy = LOGI_ZAKRESY[parametry["zakres"]]
+        adres = "%s/loki/api/v1/query_range?%s" % (
+            self.config.loki_url,
+            urllib.parse.urlencode({
+                "query": selektor,
+                "start": str((teraz - sekundy) * 1_000_000_000),
+                "end": str(teraz * 1_000_000_000),
+                "limit": str(parametry["limit"]),
+                "direction": "backward",
+            }),
+        )
+        try:
+            dane = self.json_get(adres, timeout=10.0)
+        except Exception as exc:  # noqa: BLE001 - brak Loki => komunikat, nie 500
+            log("Logi: Loki nie odpowiedziało (%s)", exc)
+            return 503, {"error": "Loki nie odpowiedziało — spróbuj ponownie.", "zapytanie": selektor}
+
+        linie = []
+        for strumien in ((dane or {}).get("data") or {}).get("result") or []:
+            if not isinstance(strumien, dict):
+                continue
+            etykiety = strumien.get("stream") if isinstance(strumien.get("stream"), dict) else {}
+            opis = (etykiety.get("service") or etykiety.get("unit") or etykiety.get("container")
+                    or etykiety.get("RequestHost") or etykiety.get("job") or "")
+            for wpis in strumien.get("values") or []:
+                if not isinstance(wpis, list) or len(wpis) < 2:
+                    continue
+                try:
+                    czas = float(wpis[0]) / 1e9
+                except (TypeError, ValueError):
+                    continue
+                tresc = wpis[1] if isinstance(wpis[1], str) else None
+                if tresc is None:
+                    continue
+                linie.append({"czas": czas, "tekst": tresc, "strumien": opis})
+        linie.sort(key=lambda linia: linia["czas"], reverse=True)
+        return 200, {
+            "zrodlo": parametry["zrodlo"],
+            "zakres": parametry["zakres"],
+            "limit": parametry["limit"],
+            "zapytanie": selektor,
+            "linie": linie,
+        }
 
     def security_section(self):
         default = empty_security()
@@ -2125,11 +2283,16 @@ def make_handler(service):
                     self._send(200, service.metrics(), "text/plain; version=0.0.4; charset=utf-8")
                 elif route == "/status/api.json":
                     self._send_json(service.api_json())
+                elif route == "/status/logs":
+                    kod, payload = service.logs_section(urllib.parse.parse_qs(
+                        urllib.parse.urlsplit(self.path).query))
+                    self._send_json(payload, kod)
                 elif route == "/":
                     self._send_json(
                         {
                             "service": NAME,
-                            "endpoints": ["/health", "/sd/http.json", "/metrics", "/status/api.json"],
+                            "endpoints": ["/health", "/sd/http.json", "/metrics", "/status/api.json",
+                                       "/status/logs"],
                         }
                     )
                 else:

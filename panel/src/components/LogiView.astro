@@ -1,0 +1,117 @@
+---
+/**
+ * Widok „Logi" — przeglądanie logów bez wchodzenia do Grafany.
+ *
+ * Po co: przy incydencie trzeba najpierw zobaczyć linie, a dopiero potem iść
+ * w narzędzia. Wcześniej jedyną drogą do logów była ramka Grafany (z jej
+ * nawigacją) albo `docker service logs` po SSH.
+ *
+ * Źródła: kontenery wybranej usługi (`job="docker"`), journal hosta
+ * (`job="journald"`) oraz access log Traefika (`job="traefik"`). Zapytanie
+ * buduje nasza usługa discovery (`/status/logs`), więc tekst użytkownika nigdy
+ * nie trafia do LogQL — panel wysyła tylko parametry strukturalne.
+ *
+ * Role mają prefiks `log-`/`logi-`, żeby nie kolidowały z rolami innych widoków
+ * (`d-*`, `wyk-*`, `sticky-*`).
+ */
+import { Icon } from 'astro-icon/components';
+---
+
+<section class="logi-view" data-role="logi-view" aria-label="Logi usług" hidden>
+  <div class="card-ops logi-naglowek">
+    <a class="btn-ops" data-role="logi-powrot" href="#/">
+      <Icon name="lucide:arrow-left" size={14} aria-hidden="true" />
+      <span>Wróć do stanu</span>
+    </a>
+    <div class="logi-tytul">
+      <h2 class="card-title" data-role="logi-naglowek">Logi</h2>
+      <p class="subtle text-xs" data-role="logi-podpis">Logi usług, hosta i edge’a.</p>
+    </div>
+    <div class="logi-zakresy" role="group" aria-label="Zakres czasu logów" data-role="logi-zakresy">
+      <button type="button" class="zakres-btn" data-action="log-zakres" data-zakres="15m" aria-pressed="false">
+        15 min
+      </button>
+      <button type="button" class="zakres-btn" data-action="log-zakres" data-zakres="1h" aria-pressed="true">
+        1 h
+      </button>
+      <button type="button" class="zakres-btn" data-action="log-zakres" data-zakres="24h" aria-pressed="false">
+        24 h
+      </button>
+    </div>
+  </div>
+
+  <div class="card-ops logi-sterowanie">
+    <label class="logi-pole">
+      <span class="subtle text-xs">Źródło</span>
+      <select class="logi-select" data-role="logi-zrodlo" aria-label="Źródło logów">
+        <option value="usluga">Usługa (kontenery)</option>
+        <option value="host">Host (journald)</option>
+        <option value="traefik">Traefik (access log)</option>
+      </select>
+    </label>
+    <label class="logi-pole logi-pole-usluga">
+      <span class="subtle text-xs">Usługa</span>
+      <select class="logi-select" data-role="logi-usluga" aria-label="Wybierz usługę"></select>
+    </label>
+    <label class="logi-pole logi-pole-filtr">
+      <span class="subtle text-xs">Filtr (podciąg, bez regexów)</span>
+      <input
+        type="search"
+        class="logi-input"
+        data-role="logi-filtr"
+        placeholder="np. error 502"
+        autocomplete="off"
+      />
+    </label>
+    <label class="logi-pole">
+      <span class="subtle text-xs">Linii</span>
+      <select class="logi-select" data-role="logi-limit" aria-label="Limit linii">
+        <option value="200">200</option>
+        <option value="500">500</option>
+        <option value="1000">1000</option>
+      </select>
+    </label>
+    <span class="count-chip num" data-role="logi-licznik">—</span>
+  </div>
+
+  <div class="card-ops logi-akcje">
+    <button type="button" class="btn-ops" data-action="log-kopiuj" data-role="logi-kopiuj">
+      <Icon name="lucide:clipboard-copy" size={13} aria-hidden="true" />
+      <span>Kopiuj widoczne</span>
+    </button>
+    <button type="button" class="btn-ops" data-action="log-pobierz" data-role="logi-pobierz">
+      <Icon name="lucide:download" size={13} aria-hidden="true" />
+      <span>Pobierz .log</span>
+    </button>
+    <a class="btn-ops" data-role="logi-grafana" target="_blank" rel="noopener">
+      <Icon name="lucide:external-link" size={13} aria-hidden="true" />
+      <span>Otwórz w Grafanie</span>
+    </a>
+    <span class="subtle text-xs" data-role="logi-zapytanie"></span>
+  </div>
+
+  <p class="logi-komunikat subtle" data-role="logi-komunikat" role="status" aria-live="polite" hidden></p>
+
+  <div class="logi-lista" data-role="logi-lista" role="log" aria-label="Linie logów"></div>
+
+  <p class="logi-pustka empty-ops" data-role="logi-pustka" hidden>
+    <Icon name="lucide:scroll-text" size={16} aria-hidden="true" />
+    <span data-role="logi-pustka-tekst"></span>
+  </p>
+
+  <p class="subtle logi-stopka text-xs">
+    Źródło danych: <span class="num">/status/logs</span> (nasza usługa discovery) →
+    <span class="num">Loki</span>. Zapytanie buduje serwer z parametrów, więc filtr
+    jest zwykłym podciągiem, a nie częścią zapytania. Limity linii chronią przeglądarkę:
+    LogQL bez limitu potrafi oddać dziesiątki tysięcy linii.
+  </p>
+</section>
+
+<!-- Jedna linia logu: czas, strumień, treść. -->
+<template id="tpl-log-linia">
+  <div class="log-linia" data-role="log-linia">
+    <span class="log-czas num" data-role="log-czas"></span>
+    <span class="log-strumien num" data-role="log-strumien"></span>
+    <span class="log-tresc" data-role="log-tresc"></span>
+  </div>
+</template>

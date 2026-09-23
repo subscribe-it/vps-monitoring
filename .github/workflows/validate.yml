@@ -271,5 +271,17 @@ jobs:
       - name: Testy logiki wykresów (zakresy, osie, limity)
         run: node scripts/ci/check_wykresy.mts
 
+      # Logi: selektory LogQL, parsowanie odpowiedzi, filtr podciągiem i trasa
+      # `#/logi`. Pomyłka w selektorze pokazuje logi NIE TEJ usługi (etykieta
+      # `service` ma prefiks stacka), a pomyłka w filtrze — pustą listę bez powodu.
+      - name: Testy logiki logów (zapytania, filtr, trasa)
+        run: node scripts/ci/check_logi.mts
+
+      # Obsługa usługi: powód padnięcia zadania, skrót digestu, komendy
+      # diagnostyczne. Panel jest tylko do odczytu — test pilnuje, żeby wśród
+      # komend nie pojawiła się żadna operacja zmieniająca.
+      - name: Testy obsługi usługi (diagnostyka, komendy)
+        run: node scripts/ci/check_usluga.mts
+
       - name: Kontrola artefaktu
         run: test -f panel/dist/index.html

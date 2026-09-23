@@ -1191,5 +1191,175 @@ class ServiceLimitsTests(unittest.TestCase):
         self.assertEqual(discovery.service_limits(None), (None, None))
 
 
+class ServiceFailureReasonTests(unittest.TestCase):
+    """Dlaczego usługa się przewraca — `last_task_state` + `last_task_error` w API.
+
+    Powód istnienia: panel pokazywał tylko liczbę restartów, więc przyczynę
+    („No such image: …”, „unhealthy container”) trzeba było szukać ręcznie na
+    serwerze. Docker podaje ją wprost w `Status.Err` zadania, które padło.
+    """
+
+    def _usluga(self, tasks):
+        docker = FakeDocker(
+            services=[make_service("monitoring_panel")],
+            tasks=tasks,
+            containers=[make_container("c1", "monitoring_panel", stack="monitoring")],
+        )
+        service = build_service(docker)
+        service.refresh()
+        return service.api_json()["stacks"][0]["services"][0]
+
+    def _zadanie(self, state, blad, updated="2026-09-21T20:00:00Z"):
+        zadanie = make_task("svc-monitoring_panel", state=state)
+        zadanie["Status"] = {"State": state, "Err": blad}
+        zadanie["UpdatedAt"] = updated
+        return zadanie
+
+    def test_odrzucone_zadanie_oddaje_powod(self):
+        usluga = self._usluga([
+            make_task("svc-monitoring_panel"),
+            self._zadanie("rejected", "No such image: coreruleset/modsecurity-crs:4.26.0-nginx-alpine"),
+        ])
+        self.assertEqual(usluga["last_task_state"], "rejected")
+        self.assertIn("No such image", usluga["last_task_error"])
+
+    def test_padniete_zadanie_oddaje_powod(self):
+        usluga = self._usluga([
+            self._zadanie("failed", "task: non-zero exit (137): dockerexec: unhealthy container"),
+        ])
+        self.assertEqual(usluga["last_task_state"], "failed")
+        self.assertIn("unhealthy container", usluga["last_task_error"])
+
+    def test_brak_padnietych_zadan_to_none(self):
+        usluga = self._usluga([make_task("svc-monitoring_panel")])
+        self.assertIsNone(usluga["last_task_state"])
+        self.assertIsNone(usluga["last_task_error"])
+
+    def test_brak_zadan_w_ogole_to_none(self):
+        usluga = self._usluga([])
+        self.assertIsNone(usluga["last_task_state"])
+        self.assertIsNone(usluga["last_task_error"])
+
+    def test_biore_najnowszy_blad_a_nie_pierwszy_z_listy(self):
+        usluga = self._usluga([
+            self._zadanie("failed", "stary blad", updated="2026-09-21T18:00:00Z"),
+            self._zadanie("rejected", "nowy blad", updated="2026-09-21T21:00:00Z"),
+        ])
+        self.assertEqual(usluga["last_task_state"], "rejected")
+        self.assertEqual(usluga["last_task_error"], "nowy blad")
+
+    def test_smieci_nie_udaja_bledu(self):
+        usluga = self._usluga([
+            self._zadanie("failed", None),
+            self._zadanie("rejected", "   "),
+        ])
+        # Stan bierzemy (zadanie naprawdę padło), ale nie zmyślamy treści błędu.
+        self.assertIsNotNone(usluga["last_task_state"])
+        self.assertIsNone(usluga["last_task_error"])
+
+    def test_api_podaje_kiedy_usluge_aktualizowano(self):
+        usluga = self._usluga([make_task("svc-monitoring_panel")])
+        self.assertEqual(usluga["updated_at"], "2026-09-21T19:40:00Z")
+
+    def test_helper_agreguje_stan_i_blad(self):
+        stats = discovery.aggregate_tasks(
+            [
+                make_task("svc-a"),
+                {"ServiceID": "svc-a", "DesiredState": "running", "Status": {"State": "failed", "Err": "bum"},
+                 "CreatedAt": "2026-09-21T19:00:00Z", "UpdatedAt": "2026-09-21T19:30:00Z"},
+            ],
+            1_800_000_000.0,
+        )
+        self.assertEqual(stats["svc-a"]["last_state"], "failed")
+        self.assertEqual(stats["svc-a"]["last_error"], "bum")
+        self.assertEqual(stats["svc-a"]["running"], 1)
+
+
+class LogsEndpointTests(unittest.TestCase):
+    """`/status/logs` — logi dla panelu bez LogQL-u z przeglądarki.
+
+    Powód istnienia proxy w discovery: (1) tekst użytkownika nie może trafić do
+    zapytania, (2) trasa `/loki` na edge bywa niepewna, a `/status/*` działa,
+    (3) odpowiedź ma być przycięta do tego, co panel pokazuje.
+    """
+
+    def _service(self, odpowiedz=None, blad=None):
+        def json_get(url, timeout=5.0):
+            if blad is not None:
+                raise blad
+            self.assertIn("/loki/api/v1/query_range?", url)
+            self.zapytania.append(url)
+            return odpowiedz if odpowiedz is not None else {"data": {"result": []}}
+
+        self.zapytania = []
+        return build_service(
+            FakeDocker(services=[], tasks=[], containers=[]),
+            config=make_config(LOKI_URL="http://loki:3100"),
+            json_get=json_get,
+        )
+
+    def test_selektor_uslugi_ma_prefiks_stacka(self):
+        rowne = discovery.logi_zapytanie("usluga", "monitoring", "panel")
+        self.assertEqual(rowne, '{job="docker", stack="monitoring", service="monitoring_panel"}')
+
+    def test_selektory_hosta_i_traefika(self):
+        self.assertEqual(discovery.logi_zapytanie("host", "", ""), '{job="journald", unit=~".+"}')
+        self.assertEqual(discovery.logi_zapytanie("traefik", "", ""), '{job="traefik"}')
+
+    def test_nazwy_sa_czyszczone_z_cudzyslowow(self):
+        # Nazwa z cudzysłowem/backslashem nie może rozjechać selektora ani
+        # dopisać własnego warunku (wstrzyknięcie do LogQL).
+        selektor = discovery.logi_zapytanie("usluga", 'a"b', "c\\d} |~ x")
+        self.assertNotIn('"b', selektor.replace('stack="ab"', ""))
+        self.assertNotIn("|~", selektor)
+        self.assertIn('stack="ab"', selektor)
+
+    def test_brak_uslugi_to_400(self):
+        service = self._service()
+        kod, payload = service.logs_section({})
+        self.assertEqual(kod, 400)
+        self.assertIn("error", payload)
+
+    def test_brak_loki_to_503(self):
+        service = build_service(FakeDocker(services=[]), config=make_config())
+        kod, payload = service.logs_section({"zrodlo": ["host"]})
+        self.assertEqual(kod, 503)
+        self.assertIn("LOKI_URL", payload["error"])
+
+    def test_linie_sa_parsowane_i_sortowane(self):
+        service = self._service({"data": {"result": [
+            {"stream": {"service": "monitoring_panel"},
+             "values": [["1758567000000000000", "starsza"], ["1758567060000000000", "nowsza"]]},
+            {"stream": {"unit": "ssh.service"}, "values": [["1758567030000000000", "sshd"]]},
+            {"stream": {"unit": "x"}, "values": [["zły", "śmieć"], ["1758567090000000000", None]]},
+            "śmieć",
+        ]}})
+        kod, payload = service.logs_section({"zrodlo": ["host"], "zakres": ["1h"], "limit": ["500"]})
+        self.assertEqual(kod, 200)
+        self.assertEqual([linia["tekst"] for linia in payload["linie"]], ["nowsza", "sshd", "starsza"])
+        self.assertEqual(payload["linie"][0]["strumien"], "monitoring_panel")
+        self.assertEqual(payload["limit"], 500)
+        self.assertIn("journald", payload["zapytanie"])
+
+    def test_smieci_w_parametrach_nie_wywracaja_koncowki(self):
+        service = self._service()
+        kod, payload = service.logs_section({
+            "zrodlo": ["bzdura"], "zakres": ["1000 lat"], "limit": ["999999"],
+            "stack": ["  monitoring  "], "usluga": [" panel "],
+        })
+        # Nieznane wartości => domyślne, a spacje w nazwach przycięte.
+        self.assertEqual(kod, 200)
+        self.assertEqual(payload["zrodlo"], "usluga")
+        self.assertEqual(payload["zakres"], "1h")
+        self.assertEqual(payload["limit"], 200)
+        self.assertIn('service="monitoring_panel"', payload["zapytanie"])
+
+    def test_brak_loki_w_czasie_zadania_to_503(self):
+        service = self._service(blad=OSError("connection refused"))
+        kod, payload = service.logs_section({"zrodlo": ["traefik"]})
+        self.assertEqual(kod, 503)
+        self.assertIn("Loki nie odpowiedziało", payload["error"])
+
+
 if __name__ == "__main__":
     unittest.main()

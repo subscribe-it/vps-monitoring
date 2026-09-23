@@ -1579,3 +1579,225 @@
     padding: 0 0.25rem 0.5rem;
   }
 }
+
+/* --------------------------------------------------------------------------
+ * Widok „Logi" (`#/logi`) oraz ranking „Top 10" i diagnostyka usługi.
+ *
+ * Powód istnienia tego bloku: to nie są ozdoby, a czytelność przy incydencie —
+ * linie logów muszą być gęste, ale nie ściśnięte, a lista w rankingu musi
+ * pokazywać, KTÓRA usługa dominuje, zanim zaczniemy czytać liczby.
+ * -------------------------------------------------------------------------- */
+@layer components {
+  .logi-view {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .logi-naglowek,
+  .logi-sterowanie,
+  .logi-akcje {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 0.75rem;
+    padding: 0.6rem 0.85rem;
+  }
+
+  .logi-tytul {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    min-width: 0;
+    flex: 1 1 12rem;
+  }
+
+  .logi-zakresy {
+    display: flex;
+    gap: 0.35rem;
+    margin-left: auto;
+  }
+
+  .logi-pole {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    min-width: 0;
+  }
+
+  .logi-pole-filtr {
+    flex: 1 1 14rem;
+  }
+
+  .logi-select,
+  .logi-input {
+    min-height: 28px;
+    padding: 0.2rem 0.45rem;
+    border: 1px solid var(--color-base-300, #3a3f46);
+    border-radius: 0.4rem;
+    background: var(--color-base-200, #1e2126);
+    color: inherit;
+    font-size: 0.8125rem;
+    max-width: 22rem;
+  }
+
+  .logi-lista {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--color-base-300, #3a3f46);
+    border-radius: 0.5rem;
+    overflow: hidden;
+    max-height: 60vh;
+    overflow-y: auto;
+  }
+
+  .log-linia {
+    display: grid;
+    grid-template-columns: 9.5rem 12rem minmax(0, 1fr);
+    gap: 0.6rem;
+    padding: 0.2rem 0.7rem;
+    font-size: 0.75rem;
+    line-height: 1.45;
+    border-bottom: 1px solid color-mix(in oklab, var(--color-base-300, #3a3f46) 45%, transparent);
+  }
+
+  .log-linia:nth-child(odd) {
+    background: color-mix(in oklab, var(--color-base-200, #1e2126) 45%, transparent);
+  }
+
+  .log-czas {
+    color: var(--color-subtle, #9aa3ad);
+    white-space: nowrap;
+  }
+
+  .log-strumien {
+    color: var(--color-subtle, #9aa3ad);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Treść logu łamie się, ale nie rozjeżdża układu: przy logach JSON-a
+     zawijanie jest jedynym sposobem, żeby cokolwiek przeczytać. */
+  .log-tresc {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-family: var(--font-mono, ui-monospace, monospace);
+  }
+
+  .logi-komunikat {
+    padding: 0.5rem 0.75rem;
+    border: 1px dashed var(--color-base-300, #3a3f46);
+    border-radius: 0.5rem;
+  }
+
+  .logi-pustka {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .logi-stopka {
+    padding: 0 0.25rem 0.5rem;
+  }
+
+  /* --- ranking „Top 10 usług" --- */
+  .wykresy-top-naglowek {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 0.75rem;
+    padding: 0.55rem 0.85rem 0.35rem;
+  }
+
+  .wykresy-top-metryki {
+    display: flex;
+    gap: 0.35rem;
+    margin-left: auto;
+  }
+
+  .wykresy-top-lista {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0.25rem 0.85rem 0.75rem;
+  }
+
+  .top-wiersz {
+    display: grid;
+    grid-template-columns: minmax(9rem, 16rem) minmax(0, 1fr) 6.5rem;
+    align-items: center;
+    gap: 0.6rem;
+    font-size: 0.8125rem;
+  }
+
+  .top-nazwa {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .top-slup {
+    display: block;
+    height: 0.6rem;
+    border-radius: 0.3rem;
+    background: color-mix(in oklab, var(--color-base-300, #3a3f46) 55%, transparent);
+    overflow: hidden;
+  }
+
+  .top-slup-wypelnienie {
+    display: block;
+    height: 100%;
+    border-radius: 0.3rem;
+    background: var(--color-primary, #4c8bf5);
+    transition: width 200ms ease-out;
+  }
+
+  .top-wartosc {
+    text-align: right;
+  }
+
+  /* --- diagnostyka usługi (oba widoki) --- */
+  .usluga-diagnostyka {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    padding: 0.5rem 0.85rem 0.25rem;
+    border-bottom: 1px solid var(--color-base-300, #3a3f46);
+  }
+
+  .detail-linki-komendy {
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem 0.5rem;
+  }
+
+  .detail-blad {
+    align-items: flex-start;
+    gap: 0.4rem;
+  }
+
+  /* Powód z Dockera bywa długi („No such image: …”) — łamie się w miejscu,
+     a nie rozpycha całej tabeli szczegółów. */
+  .detail-blad-tresc {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: 0.75rem;
+    color: var(--color-warning, #f0b429);
+  }
+
+  @media (max-width: 720px) {
+    .log-linia {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 0.1rem;
+    }
+
+    .top-wiersz {
+      grid-template-columns: minmax(0, 1fr) 5.5rem;
+    }
+
+    .top-slup {
+      display: none;
+    }
+  }
+}

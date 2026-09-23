@@ -77,6 +77,12 @@ export interface Service {
   mem_limit_bytes: number | null;
   restarts_1h: number | null;
   replicas_text: string | null;
+  /** Kiedy Swarm ostatnio aktualizował usługę (ISO Z); `null` = brak danych. */
+  updated_at: string | null;
+  /** Stan najnowszego zadania, które padło (`failed`/`rejected`); `null` = brak. */
+  last_task_state: string | null;
+  /** Treść `Status.Err` tego zadania — DLACZEGO usługa się przewraca. */
+  last_task_error: string | null;
 }
 
 export interface Stack {
@@ -496,6 +502,9 @@ function parseServices(raw: unknown): Service[] {
     mem_limit_bytes: num(row.mem_limit_bytes),
     restarts_1h: num(row.restarts_1h),
     replicas_text: str(row.replicas_text),
+    updated_at: str(row.updated_at),
+    last_task_state: str(row.last_task_state),
+    last_task_error: str(row.last_task_error),
   }));
 }
 

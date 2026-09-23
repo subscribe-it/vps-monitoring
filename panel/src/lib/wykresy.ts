@@ -262,6 +262,25 @@ export function statystykiSieci(
  * Statystyki serii
  * ------------------------------------------------------------------ */
 
+/** Opis liczb dla wykresu dysku (odczyt / zapis) — jak `opisSieci`, inne słowa. */
+export function opisDysku(
+  odczyt: number | null | undefined,
+  zapis: number | null | undefined,
+  maksOdczyt: number | null | undefined,
+): string {
+  const czesc = (nazwa: string, wartosc: number | null | undefined): string =>
+    `${nazwa} ${formatujPrzeplywnosc(wartosc, 1)}`;
+  const maks = czyLiczba(maksOdczyt) ? ` · maks. odczyt ${formatujPrzeplywnosc(maksOdczyt, 1)}` : '';
+  return `${czesc('odczyt', odczyt)} · ${czesc('zapis', zapis)}${maks}`;
+}
+
+/** Statystyki dla szczegółów: teraz / maks. / średnia dla obu kierunków I/O. */
+export function statystykiDysku(stOdczyt: Statystyki, stZapis: Statystyki): string {
+  const czesc = (nazwa: string, st: Statystyki): string =>
+    `${nazwa} teraz ${formatujPrzeplywnosc(st.teraz, 1)} · maks. ${formatujPrzeplywnosc(st.maks, 1)} · średnia ${formatujPrzeplywnosc(st.srednia, 1)}`;
+  return `${czesc('odczyt', stOdczyt)} · ${czesc('zapis', stZapis)}`;
+}
+
 export interface Statystyki {
   teraz: number | null;
   maks: number | null;
@@ -401,15 +420,15 @@ export function punktyWykresu(
  * ------------------------------------------------------------------ */
 
 export interface ZapytanieZbiorcze {
-  id: 'cpu' | 'ram' | 'limit' | 'rx' | 'tx';
+  id: 'cpu' | 'ram' | 'limit' | 'rx' | 'tx' | 'io_r' | 'io_w';
   expr: string;
   opis: string;
 }
 
 /**
- * Pięć zapytań na CAŁY widok (zamiast trzech na usługę).
+ * Siedem zapytań na CAŁY widok (zamiast trzech na usługę).
  *
- * Powód: lista pokazuje ~50 usług × 3 wykresy — zapytanie per usługa to ~150
+ * Powód: lista pokazuje ~50 usług × 4 wykresy — zapytanie per usługa to ~200
  * żądań na jedno wejście. Prometheus oddaje wszystkie serie jednym zapytaniem
  * (`by (stack, service)`), a panel tylko wybiera z nich swoją usługę.
  */
@@ -432,12 +451,34 @@ export function zapytaniaZbiorcze(): readonly ZapytanieZbiorcze[] {
       expr: 'sum by (stack, service) (rate(swarm_container_network_transmit_bytes_total[5m]))',
       opis: 'Sieć wysyłka',
     },
+    {
+      id: 'io_r',
+      expr: 'sum by (stack, service) (rate(swarm_container_block_read_bytes_total[5m]))',
+      opis: 'Dysk odczyt',
+    },
+    {
+      id: 'io_w',
+      expr: 'sum by (stack, service) (rate(swarm_container_block_write_bytes_total[5m]))',
+      opis: 'Dysk zapis',
+    },
   ] as const;
 }
 
 /** Klucz serii w mapie odpowiedzi — `stack/usługa` (jak `kluczFokusa`). */
 export function kluczSerii(stack: string, usluga: string): string {
   return `${stack}/${usluga}`;
+}
+
+/**
+ * Adres zapytania NATYCHMIASTOWEGO (`/prometheus/api/v1/query`).
+ *
+ * Ranking „Top 10" to migawka, nie przebieg: `topk(10, …)` w `query_range`
+ * oddaje macierz (`values`), a nam wystarczy jedna wartość na usługę — wtedy
+ * odpowiedź ma kształt `value` i nie ciągniemy dziesiątek punktów na usługę.
+ */
+export function zbudujUrlQueryInstant(expr: string, teraz: number): string {
+  const parametry = new URLSearchParams({ query: expr, time: String(Math.floor(teraz)) });
+  return `/prometheus/api/v1/query?${parametry.toString()}`;
 }
 
 /** Adres `query_range` dla wyrażenia i zakresu (start liczony od `teraz`). */
@@ -489,6 +530,126 @@ export function zHaszaWykresy(hash: string): TrasaWykresow {
 export function doHaszaWykresow(usluga: string | null, zakres: ZakresId = ZAKRES_DOMYSLNY): string {
   const baza = usluga ? `#/wykresy/${encodeURIComponent(usluga)}` : '#/wykresy';
   return zakres === ZAKRES_DOMYSLNY ? baza : `${baza}?zakres=${zakres}`;
+}
+
+/* ------------------------------------------------------------------ *
+ * Zbiorczy wykres „Top 10 usług" (`#/wykresy`)
+ * ------------------------------------------------------------------ */
+
+/**
+ * Metryki zbiorczego rankingu. Jedno zapytanie na metrykę (`topk(10, …)`
+ * po `sum by (stack, service)`), a nie po jednym na usługę — inaczej wejście
+ * w widok oznaczałoby kilkadziesiąt zapytań do Prometheusa.
+ */
+export type MetrykaTop = 'cpu' | 'ram' | 'siec';
+
+export interface ZapytanieTop {
+  id: MetrykaTop;
+  etykieta: string;
+  expr: string;
+  jednostka: 'procent' | 'bajty' | 'przeplywnosc';
+}
+
+export function zapytaniaTop(): readonly ZapytanieTop[] {
+  return [
+    {
+      id: 'cpu',
+      etykieta: 'CPU',
+      expr: 'topk(10, sum by (stack, service) (swarm_container_cpu_percent))',
+      jednostka: 'procent',
+    },
+    {
+      id: 'ram',
+      etykieta: 'RAM',
+      expr: 'topk(10, sum by (stack, service) (swarm_container_memory_bytes))',
+      jednostka: 'bajty',
+    },
+    {
+      id: 'siec',
+      etykieta: 'Sieć (rx + tx)',
+      expr:
+        'topk(10, sum by (stack, service) (rate(swarm_container_network_receive_bytes_total[5m]))'
+        + ' + sum by (stack, service) (rate(swarm_container_network_transmit_bytes_total[5m])))',
+      jednostka: 'przeplywnosc',
+    },
+  ] as const;
+}
+
+export function zapytanieTop(metryka: MetrykaTop): ZapytanieTop {
+  return zapytaniaTop().find((zapytanie) => zapytanie.id === metryka) ?? (zapytaniaTop()[0] as ZapytanieTop);
+}
+
+export function metrykaTopZId(id: string | null | undefined): MetrykaTop {
+  return zapytaniaTop().find((zapytanie) => zapytanie.id === id)?.id ?? 'cpu';
+}
+
+/** Formatuje wartość słupka w jednostce metryki (jedno miejsce na cały ranking). */
+export function formatujWartoscTop(metryka: MetrykaTop, wartosc: number | null | undefined): string {
+  if (metryka === 'cpu') return formatujProcent(wartosc, 1);
+  if (metryka === 'ram') return formatujBajty(wartosc, 1);
+  return formatujPrzeplywnosc(wartosc, 1);
+}
+
+/**
+ * Szerokość słupka w procentach szerokości wiersza. Wartości poniżej progu
+ * nie znikają całkiem (min. 2%), bo „prawie zero" też jest informacją, a słupek
+ * zerowej szerokości wygląda jak brak danych.
+ */
+export function szerokoscSlupka(wartosc: number | null | undefined, maks: number | null | undefined): number {
+  if (!czyLiczba(wartosc) || wartosc <= 0) return 0;
+  if (!czyLiczba(maks) || maks <= 0) return 0;
+  const udzial = (wartosc / maks) * 100;
+  if (!Number.isFinite(udzial)) return 0;
+  return Math.max(2, Math.min(100, Math.round(udzial * 10) / 10));
+}
+
+/**
+ * Tnie ranking do `ile` pozycji. Prometheus z `topk(10, …)` sam oddaje
+ * najwyżej 10 serii, ale panel nie może polegać na tym, że ktoś nie zmieni
+ * zapytania — lista bez ograniczenia zalałaby widok setką wierszy.
+ */
+export function ograniczTop(pozycje: readonly PozycjaTop[], ile = 10): PozycjaTop[] {
+  return [...pozycje].slice(0, Math.max(0, ile));
+}
+
+export interface PozycjaTop {
+  stack: string;
+  usluga: string;
+  klucz: string;
+  wartosc: number;
+}
+
+/**
+ * Parsuje odpowiedź `topk(…)`. Kolejność: malejąco po wartości (Prometheus
+ * oddaje już posortowane, ale nie polegamy na tym — panel ma pokazać ranking).
+ */
+export function parsujTop(dane: unknown): PozycjaTop[] {
+  const rekord = (wartosc: unknown): Record<string, unknown> | null =>
+    typeof wartosc === 'object' && wartosc !== null && !Array.isArray(wartosc)
+      ? (wartosc as Record<string, unknown>)
+      : null;
+  const wynik = rekord(rekord(dane)?.data)?.result;
+  if (!Array.isArray(wynik)) return [];
+  const pozycje: PozycjaTop[] = [];
+  for (const seria of wynik) {
+    const opis = rekord(seria);
+    if (!opis) continue;
+    const metryki = rekord(opis.metric) ?? {};
+    const stack = typeof metryki.stack === 'string' ? metryki.stack : '';
+    const usluga = typeof metryki.service === 'string' ? metryki.service : '';
+    // Kształt natychmiastowy (`value`) albo macierz z `query_range` (`values`) —
+    // bierzemy ostatni punkt, żeby ranking działał niezależnie od źródła zapytania.
+    const natychmiastowe = Array.isArray(opis.value) ? opis.value : null;
+    const macierz = Array.isArray(opis.values) && opis.values.length > 0
+      ? (opis.values[opis.values.length - 1] as unknown)
+      : null;
+    const punkt = natychmiastowe ?? (Array.isArray(macierz) ? macierz : null);
+    const wartosc = Number(punkt?.[1]);
+    if (!stack || !usluga || !Number.isFinite(wartosc)) continue;
+    pozycje.push({ stack, usluga, klucz: kluczSerii(stack, usluga), wartosc });
+  }
+  pozycje.sort((a, b) => b.wartosc - a.wartosc);
+  return pozycje;
 }
 
 /**
