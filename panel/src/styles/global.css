@@ -1360,21 +1360,39 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 0.75rem;
-    padding: 0.75rem 1rem;
+    column-gap: 0.75rem;
+    row-gap: 0.5rem;
+    padding: 0.625rem 0.875rem;
+  }
+
+  /* Rytm kontrolek: wszystko w nagłówku i w pasku sterowania ma tę samą
+     wysokość (2rem) i jest wyśrodkowane w pionie. Zmierzone przed poprawką:
+     `top` czterech kontrolek rozjeżdżał się o 9 px, a wysokości wynosiły
+     28–47 px, więc rząd „nie leżał równo”. */
+  .wykresy-naglowek > .btn-ops,
+  .wykresy-zakresy,
+  .wykresy-sterowanie > .count-chip,
+  .wykresy-sterowanie > span {
+    display: inline-flex;
+    align-items: center;
+    min-height: 2rem;
   }
 
   .wykresy-tytul {
     display: flex;
     flex-direction: column;
-    gap: 0.125rem;
+    justify-content: center;
+    gap: 0.1rem;
     min-width: 0;
+    min-height: 2rem;
     margin-right: auto;
   }
 
   .wykresy-zakresy {
     display: flex;
+    align-items: center;
     gap: 0.25rem;
+    height: 2rem;
     padding: 0.125rem;
     border-radius: var(--radius-field);
     background: color-mix(in oklab, var(--color-base-200) 70%, transparent);
@@ -1382,12 +1400,16 @@
 
   .zakres-btn {
     /* Tap target ≥ 24 px (mierzony, nie „na oko") — panel ma być klikalny na tablecie. */
-    min-height: 24px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 1.75rem;
     min-width: 2.75rem;
     padding: 0.125rem 0.5rem;
     border-radius: var(--radius-field);
     font-size: 0.75rem;
     font-weight: 600;
+    font-variant-numeric: tabular-nums;
     color: var(--color-base-content);
     background: transparent;
     cursor: pointer;
@@ -1458,6 +1480,52 @@
     vector-effect: non-scaling-stroke;
   }
 
+  /* Etykiety osi Y: każda stoi dokładnie na swojej linii siatki (`top` w %),
+     więc liczba na wykresie i liczba na osi nie mogą się rozjechać. */
+  .wykres-osie-y {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+
+  .wykres-os-y {
+    position: absolute;
+    left: 0.3rem;
+    transform: translateY(-50%);
+    padding: 0 0.25rem;
+    border-radius: 0.25rem;
+    font-size: 0.625rem;
+    line-height: 1.1;
+    white-space: nowrap;
+    background: color-mix(in oklab, var(--color-base-100) 84%, transparent);
+    color: color-mix(in oklab, var(--color-base-content) 72%, transparent);
+  }
+
+  /* Etykiety osi X: rozłożone procentowo, pod rysunkiem, przycięte do krawędzi. */
+  .wykres-osie-x {
+    position: relative;
+    height: 1.05rem;
+    margin-top: 0.15rem;
+  }
+
+  .wykres-os-x {
+    position: absolute;
+    top: 0;
+    transform: translateX(-50%);
+    font-size: 0.625rem;
+    line-height: 1.1;
+    white-space: nowrap;
+    color: color-mix(in oklab, var(--color-base-content) 62%, transparent);
+  }
+
+  .wykres-os-x[data-krawedz='start'] {
+    transform: translateX(0);
+  }
+
+  .wykres-os-x[data-krawedz='koniec'] {
+    transform: translateX(-100%);
+  }
+
   .wykres-linia {
     fill: none;
     stroke: var(--color-primary);
@@ -1477,45 +1545,14 @@
     stroke-width: 1.2;
   }
 
-  .wykres-os {
-    position: absolute;
-    left: 0.25rem;
-    font-size: 0.625rem;
-    line-height: 1;
-    padding: 0 0.125rem;
-    border-radius: 0.25rem;
-    background: color-mix(in oklab, var(--color-base-100) 82%, transparent);
-    color: color-mix(in oklab, var(--color-base-content) 70%, transparent);
-    pointer-events: none;
-  }
-
-  .wykres-os-gora {
-    top: 0.2rem;
-  }
-
-  .wykres-os-srodek {
-    top: 50%;
-    transform: translateY(-50%);
-  }
-
-  .wykres-os-dol {
-    bottom: 0.2rem;
-  }
-
-  .wykres-czas {
-    display: flex;
-    justify-content: space-between;
-    gap: 0.5rem;
-    font-size: 0.625rem;
-  }
-
   /* ---- układ nowego widoku: sekcje podmiotów, maks. 2 wykresy w wierszu ---- */
 
   .wykresy-sterowanie {
     display: flex;
     flex-wrap: wrap;
-    align-items: flex-end;
-    gap: 0.75rem 1rem;
+    align-items: center;
+    column-gap: 1rem;
+    row-gap: 0.5rem;
   }
 
   .wykresy-pole {
@@ -1530,7 +1567,7 @@
   }
 
   .wykresy-select {
-    min-height: 28px;
+    min-height: 2rem;
     padding: 0.2rem 0.45rem;
     border: 1px solid var(--color-base-300, #3a3f46);
     border-radius: 0.4rem;
@@ -1546,14 +1583,15 @@
     gap: 1rem;
   }
 
-  /* Wyraźny podział między podmiotami: ramka + własne tło sekcji. */
+  /* Podział między podmiotami: własne tło sekcji, odstęp i włoskowaty akcent
+     pod nagłówkiem. Świadomie BEZ grubej kolorowej krawędzi bocznej — to
+     rozpoznawalny tell generowanego UI (detektor Impeccable: „side-tab”). */
   .wykres-sekcja {
     display: flex;
     flex-direction: column;
     gap: 0.75rem;
-    padding: 0.75rem;
-    border: 1px solid var(--color-base-300);
-    border-left: 3px solid color-mix(in oklab, var(--color-primary) 55%, transparent);
+    padding: 0.875rem 0.875rem 0.75rem;
+    border: 1px solid color-mix(in oklab, var(--color-base-300) 85%, transparent);
     border-radius: var(--radius-box);
     background: color-mix(in oklab, var(--color-base-100) 94%, transparent);
     min-width: 0;
@@ -1565,7 +1603,7 @@
     align-items: center;
     gap: 0.5rem;
     padding-bottom: 0.5rem;
-    border-bottom: 1px solid var(--color-base-300);
+    border-bottom: 1px solid color-mix(in oklab, var(--color-primary) 35%, var(--color-base-300));
     min-width: 0;
   }
 
@@ -1581,7 +1619,10 @@
     cursor: default;
   }
 
-  /* Maksymalnie DWIE karty w wierszu; karta nie szersza niż 800 px. */
+  /* Skalowanie liczby kolumn (wymaganie użytkownika):
+     13-calowy laptop (1280 px) => 2 karty w wierszu, szeroki ekran => 3, a od
+     2400 px => 4. Karty NIE maleją poniżej ~520 px: przy 4 kolumnach na 2400 px
+     wychodzi ~560 px rysunku, więc wykres zostaje duży i czytelny. */
   .wykres-siatka {
     display: grid;
     grid-template-columns: 1fr;
@@ -1591,6 +1632,18 @@
   @media (min-width: 900px) {
     .wykres-siatka {
       grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (min-width: 1800px) {
+    .wykres-siatka {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
+
+  @media (min-width: 2400px) {
+    .wykres-siatka {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
     }
   }
 
@@ -1604,7 +1657,6 @@
     border-radius: var(--radius-field);
     background: color-mix(in oklab, var(--color-base-200) 40%, transparent);
     min-width: 0;
-    max-width: 800px;
   }
 
   /* Tooltip: własne elementy DOM nad rysunkiem (działa też z klawiatury). */
@@ -1615,15 +1667,22 @@
     vector-effect: non-scaling-stroke;
   }
 
-  .wykres-punkt {
-    fill: var(--color-primary);
-    stroke: var(--color-base-100);
-    stroke-width: 1.5;
-    vector-effect: non-scaling-stroke;
+  /* Kropka kursora: element DOM (nie <circle>), więc w rozciągniętym SVG
+     zostaje okręgiem. Pozycję w pikselach podaje JS. */
+  .wykres-kropka {
+    position: absolute;
+    width: 0.5rem;
+    height: 0.5rem;
+    margin: -0.25rem 0 0 -0.25rem;
+    border-radius: 999px;
+    background: var(--color-primary);
+    box-shadow: 0 0 0 2px color-mix(in oklab, var(--color-base-100) 90%, transparent);
+    pointer-events: none;
+    z-index: 3;
   }
 
-  .wykres-punkt-druga {
-    fill: var(--color-secondary);
+  .wykres-kropka-druga {
+    background: var(--color-secondary);
   }
 
   .wykres-tooltip {
@@ -1848,12 +1907,23 @@
     overflow: hidden;
   }
 
+  /* Słupek rankingu animujemy `transform`, nie `width`: animowanie szerokości
+     wymusza przeliczanie układu (detektor Impeccable: „layout-transition”). */
   .top-slup-wypelnienie {
     display: block;
     height: 100%;
+    width: 100%;
+    transform-origin: left center;
+    transform: scaleX(var(--wypelnienie, 0));
     border-radius: 0.3rem;
     background: var(--color-primary, #4c8bf5);
-    transition: width 200ms ease-out;
+    transition: transform 200ms ease-out;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .top-slup-wypelnienie {
+      transition: none;
+    }
   }
 
   .top-wartosc {

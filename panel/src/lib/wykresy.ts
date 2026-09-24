@@ -81,6 +81,39 @@ function etykietaChwili(data: Date, zakres: Zakres): string {
   return `${dwa(data.getUTCDate())}.${dwa(data.getUTCMonth() + 1)} ${godzina}`;
 }
 
+/**
+ * Etykiety osi X rozłożone wzdłuż karty — gęstość zależna od szerokości rysunku
+ * i zakresu, żeby przy 7 d nie stały dwie godziny, a przy 1 h nie zlały się w pas.
+ *
+ * Powód istnienia (zgłoszenie użytkownika): dwie etykiety na końcach nie mówią,
+ * KIEDY był szczyt. Gęstość liczymy z realnej szerokości karty: przy 605 px
+ * (13-calowy laptop) mieszczą się 4 etykiety po ~9 znaków; przy 800 px — 5.
+ *
+ * Zwraca pozycje jako udział 0–1 szerokości rysunku, więc warstwa DOM może je
+ * rozmieścić procentowo i nie zależeć od skali SVG.
+ */
+export function etykietyOsiX(
+  zakres: Zakres,
+  odSekundy: number,
+  doSekundy: number,
+  szerokoscPx: number,
+): { udzial: number; tekst: string }[] {
+  if (!(doSekundy > odSekundy) || !(szerokoscPx > 0)) return [];
+  // Szerokość jednej etykiety: „17.09 07:34” to ~62 px przy 10 px czcionki,
+  // „07:34” ~30 px. Do tego 24 px odstępu, żeby sąsiednie się nie dotykały.
+  const znakow = zakres.sekundy >= 24 * 3600 ? 11 : 5;
+  const szerokoscEtykiety = znakow * 6.2 + 24;
+  const maks = Math.max(2, Math.floor(szerokoscPx / szerokoscEtykiety));
+  const ile = Math.max(2, Math.min(6, maks));
+  const wynik: { udzial: number; tekst: string }[] = [];
+  for (let i = 0; i < ile; i += 1) {
+    const udzial = i / (ile - 1);
+    const sekundy = odSekundy + (doSekundy - odSekundy) * udzial;
+    wynik.push({ udzial, tekst: etykietaChwili(new Date(sekundy * 1000), zakres) });
+  }
+  return wynik;
+}
+
 function dwa(liczba: number): string {
   return String(liczba).padStart(2, '0');
 }
@@ -328,59 +361,88 @@ export function graniceWykresu(
   if (czyste.length === 0) return { min: 0, max: 1 };
   const surowyMin = Math.min(...czyste);
   const surowyMax = Math.max(...czyste);
-  let min = opcje.odZera ? 0 : surowyMin;
+  // `odZera` tylko wtedy, gdy dane NAPRAWDĘ siedzą przy zerze. Zmierzone na
+  // produkcji (23.09.2026): CPU całego VPS-a chodzi 24–36%, a kotwica w zerze
+  // ściskała linię do górnych 20% wysokości i dawała osie „0 / 13 / 39%”.
+  // Przy zerze zostaje więc sieć i I/O (tam zero jest naturalne).
+  const przyZerze = surowyMin <= 0.25 * Math.abs(surowyMax);
+  const odZera = Boolean(opcje.odZera) && przyZerze;
+  let min = odZera ? 0 : surowyMin;
   let max = surowyMax;
-  if (opcje.odZera) min = 0;
   if (max === min) {
     // Płaska seria: dla zera pokazujemy 0–1, dla wartości dodatniej ±10%.
     if (max === 0) return { min: 0, max: 1 };
     const rozstep = Math.abs(max) * 0.1;
-    min = opcje.odZera ? 0 : max - rozstep;
+    min = odZera ? 0 : max - rozstep;
     max = max + rozstep;
   } else {
     const rozstep = (max - min) * zapas;
     max += rozstep;
-    if (!opcje.odZera) min -= rozstep;
+    if (!odZera) min -= rozstep;
+    if (min < 0 && surowyMin >= 0) min = 0;
   }
   return { min, max };
 }
 
 /**
  * Wartości linii siatki (osie Y) — „ładne" liczby: 1, 2, 5 × 10ⁿ.
- * Zawsze malejąco (od góry wykresu), więc rysowanie idzie wprost po indeksie.
+ * Zawsze malejąco (od góry wykresu) i zawsze unikalne.
  *
- * Gdy „ładny" krok daje tylko jedną linię (zmierzone na mocku: RAM z limitem
- * 512 MiB, dane 40–52 MiB — jedyny ładny krok to 500 MiB), dzielimy zakres
- * równo. Inaczej górna i dolna etykieta osi pokazują tę samą liczbę, co wygląda
- * na błąd rysowania i myli przy czytaniu wykresu.
+ * Wymaganie użytkownika: 4–6 etykiet z „ładnymi" wartościami i jednostką, a nie
+ * trzy przypadkowe liczby. Dlatego po kroku „ładnym" sprawdzamy, ile ticków
+ * wyszło: gdy mniej niż 4 albo więcej niż 6, dzielimy zakres równo na 5 części
+ * (środek zawsze wypada w połowie wysokości, więc etykiety nie kłamią).
  */
-export function osieY(granice: Granice, ile = 4): number[] {
-  const kroki = ile < 2 ? 2 : Math.floor(ile);
+export function osieY(granice: Granice, ile = 5): number[] {
+  const docelowo = Math.min(6, Math.max(4, Math.floor(ile) || 5));
   const zakres = granice.max - granice.min;
   if (!(zakres > 0)) return [granice.max];
-  const krok = ladnyKrok(zakres / (kroki - 1));
-  const wynik: number[] = [];
-  const start = Math.ceil(granice.min / krok) * krok;
-  for (let v = start; v <= granice.max + krok / 1000 && wynik.length < kroki + 2; v += krok) {
-    wynik.push(Number(v.toFixed(6)));
+
+  // Szukamy wśród „ładnych" kroków (1, 2, 2,5, 5 × 10ⁿ) tego, który daje
+  // 4–6 linii. Powód: wcześniej krok liczyliśmy wprost z zakresu, więc dla
+  // wąskiego zakresu wychodził np. 0,04 (obciążenie) i etykiety nie były
+  // „ładne", a przy zakresie 24–26% dwie etykiety pokazywały tę samą liczbę.
+  const rzedy = [0.5, 1, 2, 2.5, 5, 10];
+  const podstawa = 10 ** Math.floor(Math.log10(zakres / (docelowo - 1)));
+  const kandydaci = [...new Set(rzedy.flatMap((r) => [r * podstawa, r * podstawa * 10]))].sort(
+    (a, b) => a - b,
+  );
+  let najlepszy: { ticki: number[]; odchyl: number } | null = null;
+  for (const krok of kandydaci) {
+    const start = Math.ceil(granice.min / krok) * krok;
+    const ticki: number[] = [];
+    for (let v = start; v <= granice.max + krok / 1000; v += krok) {
+      ticki.push(Number(v.toFixed(6)));
+      if (ticki.length > 6) break;
+    }
+    if (ticki.length < 4 || ticki.length > 6) continue;
+    const odchyl = Math.abs(ticki.length - 5);
+    if (!najlepszy || odchyl < najlepszy.odchyl) najlepszy = { ticki, odchyl };
   }
-  if (wynik.length < Math.min(3, kroki)) {
-    // Dwie linie to za mało: etykieta „środek" zlałaby się z dolną (zmierzone
-    // na RAM z limitem 512 MiB i na sieci — obie pokazywały tę samą wartość).
-    return Array.from({ length: kroki }, (_, indeks) =>
-      Number((granice.max - (zakres * indeks) / (kroki - 1)).toFixed(6)),
-    );
-  }
-  return wynik.reverse();
+  if (najlepszy) return najlepszy.ticki.reverse();
+
+  // Żaden ładny krok nie trafił w widełki 4–6: dzielimy zakres równo, ale
+  // zachowujemy 4–6 linii (środek zawsze wypada w połowie wysokości).
+  const linie = 5;
+  return Array.from({ length: linie }, (_, indeks) =>
+    Number((granice.max - (zakres * indeks) / (linie - 1)).toFixed(6)),
+  );
 }
 
-function ladnyKrok(surowy: number): number {
-  if (!(surowy > 0)) return 1;
-  const wykladnik = Math.floor(Math.log10(surowy));
-  const podstawa = surowy / 10 ** wykladnik;
-  const ladna = podstawa <= 1 ? 1 : podstawa <= 2 ? 2 : podstawa <= 5 ? 5 : 10;
-  return ladna * 10 ** wykladnik;
+/**
+ * Ile miejsc po przecinku pokazać na etykiecie osi Y, żeby sąsiednie linie nie
+ * miały tej samej liczby. Krok 0,5% wymaga jednego miejsca (25,5% vs 26%),
+ * krok 0,05 — dwóch.
+ */
+export function dokladnoscOsi(krok: number): number {
+  const bezwzgledny = Math.abs(krok);
+  if (!(bezwzgledny > 0)) return 0;
+  if (bezwzgledny >= 1) return 0;
+  if (bezwzgledny >= 0.1) return 1;
+  if (bezwzgledny >= 0.01) return 2;
+  return 3;
 }
+
 
 /** Punkty `<polyline>` dla serii: `x,y x,y …` (Y odwrócone — SVG rośnie w dół). */
 export function punktyWykresu(
@@ -686,7 +748,13 @@ export const WYKRES_SZEROKOSC = 800;
 export const WYKRES_WYSOKOSC = 240;
 export const WYKRES_MARGINES = 12;
 /** Liczba linii siatki = liczba etykiet osi Y. */
-export const WYKRES_LINIE = 4;
+/**
+ * Ile linii siatki (i etykiet) na osi Y. Wymaganie użytkownika: 4–6, więc
+ * pięć to środek widełek — `osieY` i tak zejdzie do 4, gdy „ładny" krok
+ * inaczej nie trafi w gęstość.
+ */
+export const WYKRES_LINIE = 5;
+
 
 /**
  * Indeks najbliższego punktu dla pozycji kursora. Rysowanie rozkłada punkty

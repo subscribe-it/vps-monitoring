@@ -204,28 +204,28 @@ import { ODSWIEZANIA } from '../lib/wykresy';
         aria-label="Wykres zużycia"
         data-role="wyk-svg"
       >
-        <line class="wykres-siatka" x1="0" y1="30" x2="800" y2="30"></line>
-        <line class="wykres-siatka" x1="0" y1="102" x2="800" y2="102"></line>
-        <line class="wykres-siatka" x1="0" y1="174" x2="800" y2="174"></line>
-        <line class="wykres-siatka" x1="0" y1="240" x2="800" y2="240"></line>
+        <!-- Siatka powstaje przy rysowaniu: liczba linii zależy od danych
+             (4–6), a etykieta stoi dokładnie na swojej linii. -->
+        <g class="wykres-siatki" data-role="wyk-siatki"></g>
         <polyline class="wykres-linia" data-role="wyk-linia" points=""></polyline>
         <polyline class="wykres-linia wykres-linia-druga" data-role="wyk-linia2" points=""></polyline>
         <polyline class="wykres-linia wykres-linia-limit" data-role="wyk-limit" points=""></polyline>
         <line class="wykres-kursor" data-role="wyk-kursor" x1="0" y1="0" x2="0" y2="240" style="display:none"></line>
-        <circle class="wykres-punkt" data-role="wyk-punkt" r="4" cx="0" cy="0" style="display:none"></circle>
-        <circle class="wykres-punkt wykres-punkt-druga" data-role="wyk-punkt2" r="4" cx="0" cy="0" style="display:none"></circle>
       </svg>
+      <!-- Kropki kursora to elementy DOM, nie <circle>: SVG rozciąga się
+           w poziomie (`preserveAspectRatio="none"`), więc okrąg stawał się
+           elipsą. -->
+      <span class="wykres-kropka" data-role="wyk-kropka" hidden></span>
+      <span class="wykres-kropka wykres-kropka-druga" data-role="wyk-kropka2" hidden></span>
       <div class="wykres-tooltip" data-role="wyk-tooltip" hidden>
         <span class="wykres-tooltip-czas num" data-role="wyk-tooltip-czas"></span>
         <div class="wykres-tooltip-wiersze" data-role="wyk-tooltip-wiersze"></div>
       </div>
-      <span class="wykres-os wykres-os-gora num" data-role="wyk-os-gora"></span>
-      <span class="wykres-os wykres-os-srodek num" data-role="wyk-os-srodek"></span>
-      <span class="wykres-os wykres-os-dol num" data-role="wyk-os-dol"></span>
-    </div>
-    <div class="wykres-czas subtle num">
-      <span data-role="wyk-czas-od"></span>
-      <span data-role="wyk-czas-do"></span>
+      <!-- Etykiety osi: Y stoi na liniach siatki, X rozkłada się procentowo
+           wzdłuż karty. Gęstość liczy `etykietyOsiX`, więc przy 7 d widać daty,
+           a nie dwie godziny na krańcach. -->
+      <div class="wykres-osie-y" data-role="wyk-osie-y" aria-hidden="true"></div>
+      <div class="wykres-osie-x" data-role="wyk-osie-x" aria-hidden="true"></div>
     </div>
   </figure>
 </template>

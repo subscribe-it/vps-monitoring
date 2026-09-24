@@ -25,7 +25,9 @@ import {
   czyOdswiezac,
   czyTrasaWykresow,
   doHaszaWykresow,
+  dokladnoscOsi,
   etykietyCzasu,
+  etykietyOsiX,
   etykietaPunktu,
   formatujBajty,
   formatujLiczbe,
@@ -188,36 +190,98 @@ ok(
 
 rowne(graniceWykresu([]), { min: 0, max: 1 }, 'granice: pusta seria → 0–1');
 rowne(graniceWykresu([0, 0, 0], { odZera: true }), { min: 0, max: 1 }, 'granice: płaskie zero → 0–1');
-rowne(graniceWykresu([5, 5, 5], { odZera: true }), { min: 0, max: 5.4 }, 'granice: płaska wartość z zapasem od zera');
+rowne(graniceWykresu([5, 5, 5], { odZera: true }), { min: 4.5, max: 5.5 }, 'granice: płaska wartość rozciągana w obie strony (kotwica w zerze tylko przy danych przy zerze)');
 rowne(graniceWykresu([10, 10]), { min: 9, max: 11 }, 'granice: płaska wartość bez zera rozciągana w obie strony');
-const granice = graniceWykresu([50, 100], { odZera: true });
-ok(granice.min === 0, 'granice: tryb „od zera" (CPU) trzyma dół osi w zerze');
+// Próg kotwicy: minimum ≤ 25% maksimum (patrz `graniceWykresu`).
+const granice = graniceWykresu([10, 100], { odZera: true });
+ok(granice.min === 0, 'granice: seria schodząca blisko zera zostaje kotwiczona w zerze');
+const graniceWysokieCpu = graniceWykresu([24, 30, 36], { odZera: true });
+ok(
+  graniceWysokieCpu.min > 0,
+  'granice: CPU 24-36% NIE jest kotwiczone w zerze (inaczej linia ściska się do góry wykresu)',
+);
 ok(granice.max > 100, 'granice: zapas nad maksimum, żeby linia nie kleiła się do krawędzi');
 const graniceOdDolu = graniceWykresu([50, 100]);
 ok(graniceOdDolu.min < 50 && graniceOdDolu.min > 0, 'granice: RAM/sieć bez „od zera" schodzą pod minimum');
 
-const ticki = osieY({ min: 0, max: 100 }, 4);
-rowne(ticki, [100, 50, 0], 'osie: „ładne" wartości i kolejność od góry');
+const ticki = osieY({ min: 0, max: 100 }, 5);
+rowne(ticki, [100, 75, 50, 25, 0], 'osie: „ładne" wartości i kolejność od góry');
 ok(
   ticki.every((v, i) => i === 0 || v < (ticki[i - 1] as number)),
   'osie: malejąco (rysowanie idzie wprost po indeksie)',
 );
-rowne(osieY({ min: 0, max: 0 }, 3), [0], 'osie: zerowy zakres nie dzieli przez zero');
+// Wymaganie użytkownika: 4–6 linii i etykiet, a nie trzy przypadkowe liczby.
+ok(
+  ticki.length >= 4 && ticki.length <= 6,
+  'osie: gęstość 4–6 linii na każdym zakresie',
+);
+rowne(osieY({ min: 0, max: 0 }, 5), [0], 'osie: zerowy zakres nie dzieli przez zero');
 // Realny przypadek z mocka: RAM 40–52 MiB przy limicie 512 MiB — „ładny" krok
-// dawał jedną linię, więc góra i dół osi pokazywały tę samą liczbę.
-const tickiRam = osieY({ min: 38 * 1024 * 1024, max: 546 * 1024 * 1024 }, 3);
-rowne(tickiRam.length, 3, 'osie: przy zbyt małej liczbie „ładnych" ticków dzielimy zakres równo');
-rowne(osieY({ min: 0, max: 3200 }, 4).length, 4, 'osie: sieć o małym zakresie dostaje pełny zestaw linii');
+// dawał za mało linii, więc równy podział musi dać pełne 5.
+const tickiRam = osieY({ min: 38 * 1024 * 1024, max: 546 * 1024 * 1024 }, 5);
+rowne(tickiRam.length, 5, 'osie: przy zbyt małej liczbie „ładnych" ticków dzielimy zakres równo');
 rowne(
-  new Set(osieY({ min: 38 * 1024 * 1024, max: 546 * 1024 * 1024 }, 4)).size,
-  4,
-  'osie: cztery różne wartości (środek nie zlewa się z dołem)',
+  new Set(osieY({ min: 0, max: 3200 }, 5)).size,
+  osieY({ min: 0, max: 3200 }, 5).length,
+  'osie: wartości są unikalne (żadna linia nie leży na drugiej)',
+);
+rowne(
+  new Set(osieY({ min: 38 * 1024 * 1024, max: 546 * 1024 * 1024 }, 5)).size,
+  5,
+  'osie: pięć różnych wartości (środek nie zlewa się z dołem)',
 );
 ok(tickiRam[0] !== tickiRam[tickiRam.length - 1], 'osie: góra i dół osi to różne wartości');
 ok(
   tickiRam.every((v, i) => i === 0 || v < (tickiRam[i - 1] as number)),
   'osie: fallback też jest malejąco',
 );
+// Kotwica w zerze tylko wtedy, gdy dane naprawdę siedzą przy zerze — inaczej
+// linia ściska się do góry wykresu (zgłoszenie: „wykresy się rozjeżdżają”).
+const cpuGranice = graniceWykresu([24, 30, 36], { odZera: true });
+ok(cpuGranice.min > 0, 'granice: CPU 24–36% nie jest kotwiczone w zerze (zero tylko przy danych przy zerze)');
+const siecGranice = graniceWykresu([0, 120, 900], { odZera: true });
+rowne(siecGranice.min, 0, 'granice: sieć z wartościami przy zerze zostaje na zerze');
+
+/* ---------------- etykiety osi czasu ---------------- */
+
+const os1h = etykietyOsiX(zakresZId('1h'), 1_700_000_000, 1_700_003_600, 605);
+ok(os1h.length >= 2 && os1h.length <= 6, 'osie X: 2–6 etykiet zależnie od szerokości');
+ok(
+  os1h.every((e, i) => i === 0 || e.udzial > (os1h[i - 1] as { udzial: number }).udzial),
+  'osie X: rosnąco po szerokości',
+);
+rowne(os1h[0]?.udzial, 0, 'osie X: pierwsza etykieta przy lewej krawędzi');
+rowne(os1h[os1h.length - 1]?.udzial, 1, 'osie X: ostatnia etykieta przy prawej krawędzi');
+ok(
+  etykietyOsiX(zakresZId('7d'), 1_700_000_000, 1_700_600_000, 605)[0]!.tekst.includes('.'),
+  'osie X: przy 7 d etykieta pokazuje datę, nie samą godzinę',
+);
+ok(
+  !etykietyOsiX(zakresZId('1h'), 1_700_000_000, 1_700_003_600, 605)[0]!.tekst.includes('.'),
+  'osie X: przy 1 h etykieta to sama godzina',
+);
+ok(
+  etykietyOsiX(zakresZId('1h'), 1_700_000_000, 1_700_003_600, 1200).length >=
+    etykietyOsiX(zakresZId('1h'), 1_700_000_000, 1_700_003_600, 500).length,
+  'osie X: szersza karta mieści co najmniej tyle samo etykiet',
+);
+rowne(etykietyOsiX(zakresZId('1h'), 0, 0, 605).length, 0, 'osie X: brak danych → brak etykiet');
+
+
+/* ---------------- dokładność etykiet osi Y ---------------- */
+
+rowne(dokladnoscOsi(0.5), 1, 'dokładność osi: krok 0,5 wymaga jednego miejsca (25,5% vs 26%)');
+rowne(dokladnoscOsi(0.05), 2, 'dokładność osi: krok 0,05 wymaga dwóch miejsc');
+rowne(dokladnoscOsi(5), 0, 'dokładność osi: krok całkowity bez miejsc po przecinku');
+rowne(dokladnoscOsi(0), 0, 'dokładność osi: zerowy krok nie wywala formatowania');
+// Krok „ładny" dobrany do widełek 4–6 linii (zgłoszenie: osie bez sensu).
+const tickiCpu = osieY({ min: 22.7, max: 27.3 }, 5);
+ok(tickiCpu.length >= 4 && tickiCpu.length <= 6, 'osie: wąski zakres CPU nadal ma 4–6 linii');
+const krokCpu = Math.abs((tickiCpu[0] as number) - (tickiCpu[1] as number));
+ok([0.5, 1, 2, 2.5, 5].some((r) => Math.abs(krokCpu / r - Math.round(krokCpu / r)) < 1e-9),
+   'osie: krok jest „ładny" (1, 2, 2,5, 5 × 10ⁿ), a nie 0,04');
+const tekstyCpu = tickiCpu.map((v) => formatujProcent(v, dokladnoscOsi(krokCpu)));
+rowne(new Set(tekstyCpu).size, tekstyCpu.length, 'osie: etykiety przy wąskim zakresie są unikalne');
 
 /* ---------------- punkty linii ---------------- */
 
@@ -482,7 +546,7 @@ rowne(
 
 rowne(WYKRES_SZEROKOSC, 800, 'geometria: karta wykresu ma maks. 800 px szerokości');
 ok(WYKRES_WYSOKOSC >= 220 && WYKRES_WYSOKOSC <= 260, 'geometria: wysokość wykresu w widełkach 220–260 px');
-rowne(WYKRES_LINIE, 4, 'geometria: cztery linie siatki = cztery etykiety osi Y');
+rowne(WYKRES_LINIE, 5, 'geometria: pięć linii siatki = pięć etykiet osi Y (widełki 4–6)');
 rowne(WYKRES_MARGINES, 12, 'geometria: margines rysunku');
 rowne(indeksNajblizszy(0, 800, 10), 0, 'tooltip: lewa krawędź → pierwszy punkt');
 rowne(indeksNajblizszy(800, 800, 10), 9, 'tooltip: prawa krawędź → ostatni punkt');

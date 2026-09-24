@@ -181,14 +181,29 @@ w 24 h".
   (node-exporter)`, `Wszystkie usługi (CPU i RAM)` oraz każda usługa jako
   `stack / usługa`. Domyślnie **cały VPS**. Wybór siedzi w haszu, więc link
   „ta usługa w 24 h, co 5 s" działa i przeżywa odświeżenie.
-- **Maksymalnie dwa wykresy w wierszu**, karta do **800 px** szerokości
-  (`WYKRES_SZEROKOSC`), rysunek **240 px** wysokości (na ekranie ≤700 px —
-  220 px). Na 1980 px karty mają dokładnie 800 px i układają się 2 / 2 / 1.
+- **Skalowanie liczby kolumn** (punkt odniesienia: 13-calowy laptop,
+  1280×800): **2 karty w wierszu** do 1800 px, **3 karty** od 1800 px,
+  **4 karty** od 2400 px. Karty nie maleją poniżej ~520 px, więc „więcej
+  kolumn” nigdy nie znaczy „mniejszy wykres”; rysunek ma **240 px** wysokości
+  (≤700 px — 220 px), a szerokość wynika z siatki (zmierzone: 605,9 px przy
+  1280, 608,6 px przy 1920 w trzech kolumnach).
 - **Nad każdym wykresem tytuł**: `CPU — cały VPS`, `RAM — grafana`,
   `Sieć (rx / tx) — na6_pl_prod_wordpress`, `Dysk (odczyt / zapis) — …`.
-- **Sekcja = podmiot**: nagłówek z nazwą, stackiem, stanem i replikami oraz
-  wyraźny separator (lewa krawędź + własne tło), żeby nie było wątpliwości, gdzie
-  kończy się jedna usługa.
+- **Sekcja = podmiot**: nagłówek z nazwą, stackiem, stanem i replikami,
+  1-px akcent pod nagłówkiem, własne tło i odstęp między sekcjami. Świadomie
+  **bez grubej kolorowej krawędzi bocznej** — to rozpoznawalny tell
+  generowanego UI (detektor Impeccable zgłaszał „side-tab”).
+- **Osie**: 4–6 linii siatki z „ładnymi” wartościami (1, 2, 2,5, 5 × 10ⁿ)
+  liczą się w **jednostce wyświetlanej** (`skala`: GiB dla RAM/dysku, MiB/s dla
+  sieci), więc RAM pokazuje 16/18/20/22/24 GiB, a nie przypadkowe 17/19/20/22.
+  Etykieta stoi dokładnie na swojej linii (`top` w %), a dokładność dobiera
+  `dokladnoscOsi` (krok 0,5% → jedno miejsce po przecinku), żeby dwie linie nie
+  miały tej samej liczby. Oś X ma 2–6 etykiet zależnie od szerokości karty i
+  zakresu (7 d → `17.09 07:45`, 1 h → `07:45`), bez nachodzenia i bez
+  wychodzenia poza rysunek.
+- **Rytm kontrolek**: przyciski, przełącznik zakresu, selektor i podpisy mają
+  jedną wysokość (2 rem) i wspólną linię bazową — zmierzone rozrzuty środków:
+  0,1 px w nagłówku i 0 px w pasku sterowania (przed poprawką 9,3 px i 30,8 px).
 - **Tooltip**: najechanie na wykres (albo `Tab` + strzałki) pokazuje pionową
   linię, kropkę na każdej serii oraz czas (UTC, przy 7 d z datą) i wartości
   z jednostkami; przy wykresach dwuseriowych widać nazwy (`rx (odbiór)`,

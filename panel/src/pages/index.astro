@@ -155,6 +155,8 @@ import LogiView from '../components/LogiView.astro';
     czyTrasaWykresow,
     doHaszaWykresow,
     etykietyCzasu,
+    dokladnoscOsi,
+    etykietyOsiX,
     etykietaPunktu,
     formatujBajty,
     formatujLiczbe,
@@ -1832,7 +1834,13 @@ import LogiView from '../components/LogiView.astro';
     /** Wszystko, czego potrzebuje tooltip — trzymane per figura w DOM. */
     interface WykresRysowany {
       tytul: string;
-      jednostka: (wartosc: number | null) => string;
+      jednostka: (wartosc: number | null, miejsca?: number) => string;
+      /**
+       * Ile jednostek surowych to jedna jednostka wyświetlana (GiB = 2³⁰,
+       * MiB/s = 2²⁰, % = 1). Dzięki temu „ładny" krok liczymy w jednostkach,
+       * które widać na osi: RAM dostaje 17/19/21/23 GiB, a nie 17/19/20/22 GiB.
+       */
+      skala?: number;
       serie: SeriaRysowana[];
       granice: Granice;
       limit: number[] | null;
@@ -1847,7 +1855,13 @@ import LogiView from '../components/LogiView.astro';
       serie: Array<{ rola: 'wyk-linia' | 'wyk-linia2'; nazwa: string; wartosci: number[]; czasy: number[] }>;
       limit: number[] | null;
       granice: Granice;
-      jednostka: (wartosc: number | null) => string;
+      jednostka: (wartosc: number | null, miejsca?: number) => string;
+      /**
+       * Ile jednostek surowych to jedna jednostka wyświetlana (GiB = 2³⁰,
+       * MiB/s = 2²⁰, % = 1). Dzięki temu „ładny" krok liczymy w jednostkach,
+       * które widać na osi: RAM dostaje 17/19/21/23 GiB, a nie 17/19/20/22 GiB.
+       */
+      skala?: number;
       aria: string;
     }
 
@@ -1981,7 +1995,7 @@ import LogiView from '../components/LogiView.astro';
           serie: [{ rola: 'wyk-linia', nazwa: 'CPU', ...cpu }],
           limit: null,
           granice: graniceWykresu(cpu.wartosci, { odZera: true }),
-          jednostka: (v) => formatujProcent(v, 0),
+          jednostka: (v, m) => formatujProcent(v, m ?? 0),
           aria: `Zużycie CPU całego VPS-a: teraz ${formatujProcent(stCpu.teraz, 1)}, maksimum ${formatujProcent(stCpu.maks, 1)}`,
         },
         {
@@ -1992,7 +2006,8 @@ import LogiView from '../components/LogiView.astro';
           serie: [{ rola: 'wyk-linia', nazwa: 'RAM użyta', ...ram }],
           limit: ramTotal === null ? null : [ramTotal, ramTotal],
           granice: graniceWykresu([...ram.wartosci, ...(ramTotal === null ? [] : [ramTotal])]),
-          jednostka: (v) => formatujBajty(v, 0),
+          jednostka: (v, m) => formatujBajty(v, m ?? 0),
+          skala: 1024 ** 3,
           aria: `Pamięć VPS-a: teraz ${formatujBajty(stRam.teraz)}, maksimum ${formatujBajty(stRam.maks)}`,
         },
         {
@@ -2005,7 +2020,8 @@ import LogiView from '../components/LogiView.astro';
           ],
           limit: null,
           granice: graniceWykresu([...rx.wartosci, ...tx.wartosci], { odZera: true }),
-          jednostka: (v) => formatujPrzeplywnosc(v, 0),
+          jednostka: (v, m) => formatujPrzeplywnosc(v, m ?? 0),
+          skala: 1024 ** 2,
           aria: `Ruch sieciowy VPS-a: odbiór ${formatujPrzeplywnosc(stRx.teraz)}, wysyłka ${formatujPrzeplywnosc(stTx.teraz)}`,
         },
         {
@@ -2016,7 +2032,8 @@ import LogiView from '../components/LogiView.astro';
           serie: [{ rola: 'wyk-linia', nazwa: 'zajęte', ...fs }],
           limit: fsTotal === null ? null : [fsTotal, fsTotal],
           granice: graniceWykresu([...fs.wartosci, ...(fsTotal === null ? [] : [fsTotal])]),
-          jednostka: (v) => formatujBajty(v, 0),
+          jednostka: (v, m) => formatujBajty(v, m ?? 0),
+          skala: 1024 ** 3,
           aria: `Zajęte miejsce na partycji głównej: teraz ${formatujBajty(stFs.teraz)}`,
         },
         {
@@ -2026,7 +2043,7 @@ import LogiView from '../components/LogiView.astro';
           serie: [{ rola: 'wyk-linia', nazwa: 'load1', ...load }],
           limit: rdzenie === null ? null : [rdzenie, rdzenie],
           granice: graniceWykresu([...load.wartosci, ...(rdzenie === null ? [] : [rdzenie])], { odZera: true }),
-          jednostka: (v) => formatujLiczbe(v),
+          jednostka: (v, m) => formatujLiczbe(v, m ?? 2),
           aria: `Obciążenie VPS-a: teraz ${formatujLiczbe(stLoad.teraz)}, maksimum ${formatujLiczbe(stLoad.maks)}`,
         },
       ];
@@ -2073,7 +2090,7 @@ import LogiView from '../components/LogiView.astro';
             [...cpu.wartosci, ...(limitCpuProc === null ? [] : [limitCpuProc])],
             { odZera: true },
           ),
-          jednostka: (v) => formatujProcent(v, 1),
+          jednostka: (v, m) => formatujProcent(v, m ?? 1),
           aria: `Zużycie CPU usługi ${usluga.name}: teraz ${formatujProcent(terazCpu, 1)}, maksimum ${formatujProcent(stCpu.maks, 1)}`,
         },
         {
@@ -2083,7 +2100,8 @@ import LogiView from '../components/LogiView.astro';
           serie: [{ rola: 'wyk-linia', nazwa: 'RAM', ...ram }],
           limit: limit === null ? null : [limit, limit],
           granice: graniceWykresu([...ram.wartosci, ...(limit === null ? [] : [limit])]),
-          jednostka: (v) => formatujBajty(v, 0),
+          jednostka: (v, m) => formatujBajty(v, m ?? 0),
+          skala: 1024 ** 3,
           aria: `Zużycie pamięci usługi ${usluga.name}: teraz ${formatujBajty(terazRam)}, limit ${limit === null ? 'nieustawiony' : formatujBajty(limit)}`,
         },
       ];
@@ -2109,7 +2127,8 @@ import LogiView from '../components/LogiView.astro';
           ],
           limit: null,
           granice: graniceWykresu([...rx.wartosci, ...tx.wartosci], { odZera: true }),
-          jednostka: (v) => formatujPrzeplywnosc(v, 0),
+          jednostka: (v, m) => formatujPrzeplywnosc(v, m ?? 0),
+          skala: 1024 ** 2,
           aria: `Ruch sieciowy usługi ${usluga.name}: odbiór ${formatujPrzeplywnosc(stRx.teraz)}, wysyłka ${formatujPrzeplywnosc(stTx.teraz)}`,
         },
         {
@@ -2122,7 +2141,8 @@ import LogiView from '../components/LogiView.astro';
           ],
           limit: null,
           granice: graniceWykresu([...ioR.wartosci, ...ioW.wartosci], { odZera: true }),
-          jednostka: (v) => formatujPrzeplywnosc(v, 0),
+          jednostka: (v, m) => formatujPrzeplywnosc(v, m ?? 0),
+          skala: 1024 ** 2,
           aria: `Wejście i wyjście dysku usługi ${usluga.name}: odczyt ${formatujPrzeplywnosc(stIoR.teraz)}, zapis ${formatujPrzeplywnosc(stIoW.teraz)}`,
         },
       );
@@ -2173,48 +2193,57 @@ import LogiView from '../components/LogiView.astro';
       const szerokosc = WYKRES_SZEROKOSC;
       const wysokosc = WYKRES_WYSOKOSC;
       const margines = WYKRES_MARGINES;
-      const ticki = osieY(opis.granice, WYKRES_LINIE);
+      const skala = opis.skala && opis.skala > 0 ? opis.skala : 1;
+      const ticki = osieY(
+        { min: opis.granice.min / skala, max: opis.granice.max / skala },
+        WYKRES_LINIE,
+      ).map((tick) => tick * skala);
 
-      const siatki = qa<SVGLineElement>(figura, '.wykres-siatka');
-      siatki.forEach((linia, indeks) => {
-        const tick = ticki[indeks];
-        if (tick === undefined) {
-          linia.style.display = 'none';
-          return;
-        }
-        linia.style.display = '';
-        const y = wspolrzednaY(tick, opis.granice, wysokosc, margines);
-        linia.setAttribute('x1', '0');
-        linia.setAttribute('x2', String(szerokosc));
-        linia.setAttribute('y1', y.toFixed(2));
-        linia.setAttribute('y2', y.toFixed(2));
-      });
+      const siatki = q<SVGGElement>(figura, '[data-role="wyk-siatki"]');
+      if (siatki) {
+        const linie = ticki.map((tick) => {
+          const y = wspolrzednaY(tick, opis.granice, wysokosc, margines);
+          const linia = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+          linia.setAttribute('class', 'wykres-siatka');
+          linia.setAttribute('x1', '0');
+          linia.setAttribute('x2', String(szerokosc));
+          linia.setAttribute('y1', y.toFixed(2));
+          linia.setAttribute('y2', y.toFixed(2));
+          return linia;
+        });
+        siatki.replaceChildren(...linie);
+      }
 
       for (const seria of opis.serie) {
         ustawLinie(figura, seria.rola, seria.wartosci, opis.granice, szerokosc, wysokosc, margines);
       }
       ustawLinie(figura, 'wyk-limit', opis.limit ?? [], opis.granice, szerokosc, wysokosc, margines);
 
-      const gora = ticki[0] ?? opis.granice.max;
-      const dol = ticki[ticki.length - 1] ?? opis.granice.min;
-      setText(figura, '[data-role="wyk-os-gora"]', opis.jednostka(gora));
-      setText(figura, '[data-role="wyk-os-dol"]', opis.jednostka(dol));
-      const srodek = ticki[Math.floor(ticki.length / 2)];
-      setText(figura, '[data-role="wyk-os-srodek"]', opis.jednostka(srodek ?? null));
+      // Etykiety Y stoją DOKŁADNIE na swoich liniach (w procentach wysokości),
+      // więc liczba na wykresie i liczba na osi nie mogą się rozjechać.
+      const osieYElement = q<HTMLElement>(figura, '[data-role="wyk-osie-y"]');
+      if (osieYElement) {
+        const krok =
+          ticki.length > 1 ? Math.abs((ticki[0] as number) - (ticki[1] as number)) / skala : 0;
+        const miejsca = dokladnoscOsi(krok);
+        const etykiety = ticki.map((tick) => {
+          const y = wspolrzednaY(tick, opis.granice, wysokosc, margines);
+          const pole = document.createElement('span');
+          pole.className = 'wykres-os-y num';
+          pole.style.top = `${((y / wysokosc) * 100).toFixed(3)}%`;
+          pole.textContent = opis.jednostka(tick, miejsca);
+          return pole;
+        });
+        osieYElement.replaceChildren(...etykiety);
+      }
 
       setText(figura, '[data-role="wyk-tytul"]', opis.tytul);
       setText(figura, '[data-role="wyk-liczby"]', opis.liczby);
       if (opis.statystyki !== undefined) {
         setText(figura, '[data-role="wyk-statystyki"]', opis.statystyki);
       }
-      const czas = etykietyCzasu(zakres, Math.floor(Date.now() / 1000));
-      setText(figura, '[data-role="wyk-czas-od"]', `${czas.od} UTC`);
-      setText(figura, '[data-role="wyk-czas-do"]', `${czas.do} UTC`);
-      const svg = q<SVGElement>(figura, '[data-role="wyk-svg"]');
-      if (svg) svg.setAttribute('aria-label', opis.aria);
+      rysujOsX(figura, opis, zakres);
 
-      // Tooltip: dane trzymamy per figura, a indeks kasujemy — po odświeżeniu
-      // danych stary punkt może już nie istnieć.
       daneWykresow.set(figura, {
         tytul: opis.tytul,
         jednostka: opis.jednostka,
@@ -2228,7 +2257,42 @@ import LogiView from '../components/LogiView.astro';
         zakres,
         podmiot,
       });
+      const svg = q<SVGElement>(figura, '[data-role="wyk-svg"]');
+      if (svg) svg.setAttribute('aria-label', opis.aria);
       ukryjTooltip(figura);
+    }
+
+    /**
+     * Etykiety osi czasu. Liczymy je z realnej szerokości karty (nie z viewBoxu),
+     * bo na 13-calowym laptopie karta ma ~600 px i zmieści 4 etykiety, a na
+     * szerokim ekranie 5 — bez nachodzenia i bez wychodzenia z karty.
+     */
+    function rysujOsX(figura: HTMLElement, opis: OpisWykresu, zakres: Zakres): void {
+      const pole = q<HTMLElement>(figura, '[data-role="wyk-osie-x"]');
+      const plot = q<HTMLElement>(figura, '[data-role="wyk-plot"]');
+      if (!pole) return;
+      const serie = opis.serie.filter((seria) => seria.czasy.length > 0);
+      const czasy = serie.flatMap((seria) => seria.czasy).filter(czyLiczba);
+      if (czasy.length === 0) {
+        pole.replaceChildren();
+        return;
+      }
+      const od = Math.min(...czasy);
+      const doTeraz = Math.max(...czasy);
+      const szerokoscPx = plot?.clientWidth || WYKRES_SZEROKOSC;
+      const etykiety = etykietyOsiX(zakres, od, doTeraz, szerokoscPx);
+      const elementy = etykiety.map((etykieta) => {
+        const span = document.createElement('span');
+        span.className = 'wykres-os-x num';
+        span.style.left = `${(etykieta.udzial * 100).toFixed(3)}%`;
+        // Pierwsza etykieta wyrównana do lewej, ostatnia do prawej — inaczej
+        // wystają poza kartę (zmierzone: „24.09 07:34” uciekało za krawędź).
+        if (etykieta.udzial === 0) span.dataset.krawedz = 'start';
+        else if (etykieta.udzial === 1) span.dataset.krawedz = 'koniec';
+        span.textContent = etykieta.tekst;
+        return span;
+      });
+      pole.replaceChildren(...elementy);
     }
 
     /* ---------------- tooltip: mysz i klawiatura ---------------- */
@@ -2237,9 +2301,11 @@ import LogiView from '../components/LogiView.astro';
       indeksyTooltipow.delete(figura);
       const tooltip = q<HTMLElement>(figura, '[data-role="wyk-tooltip"]');
       if (tooltip) tooltip.hidden = true;
-      for (const rola of ['wyk-kursor', 'wyk-punkt', 'wyk-punkt2']) {
-        const element = q<SVGElement>(figura, `[data-role="${rola}"]`);
-        if (element) element.style.display = 'none';
+      const kursor = q<SVGElement>(figura, '[data-role="wyk-kursor"]');
+      if (kursor) kursor.style.display = 'none';
+      for (const rola of ['wyk-kropka', 'wyk-kropka2']) {
+        const kropka = q<HTMLElement>(figura, `[data-role="${rola}"]`);
+        if (kropka) kropka.hidden = true;
       }
     }
 
@@ -2267,25 +2333,30 @@ import LogiView from '../components/LogiView.astro';
       }
 
       // Kropki na każdej linii — dzięki temu widać, którą serię czytamy.
+      // Pozycja w pikselach CSS, bo SVG rozciąga się w poziomie (kropka rysowana
+      // w SVG stawała się elipsą).
+      const plotKropek = q<HTMLElement>(figura, '[data-role="wyk-plot"]');
+      const szerokoscKropek = plotKropek?.clientWidth || szerokosc;
+      const wysokoscKropek = plotKropek?.clientHeight || wysokosc;
       let indeksKropki = 0;
       for (const rysowana of dane.serie) {
-        const element = q<SVGCircleElement>(
+        const element = q<HTMLElement>(
           figura,
-          `[data-role="${indeksKropki === 0 ? 'wyk-punkt' : 'wyk-punkt2'}"]`,
+          `[data-role="${indeksKropki === 0 ? 'wyk-kropka' : 'wyk-kropka2'}"]`,
         );
         indeksKropki += 1;
         if (!element) continue;
         const wartosc = rysowana.wartosci[pozycja];
         if (rysowana.wartosci.length === 0 || !czyLiczba(wartosc)) {
-          element.style.display = 'none';
+          element.hidden = true;
           continue;
         }
-        element.style.display = '';
-        element.setAttribute('cx', x.toFixed(2));
-        element.setAttribute(
-          'cy',
-          wspolrzednaY(wartosc, dane.granice, wysokosc, margines).toFixed(2),
-        );
+        element.hidden = false;
+        element.style.left = `${((x / szerokosc) * szerokoscKropek).toFixed(1)}px`;
+        element.style.top = `${(
+          (wspolrzednaY(wartosc, dane.granice, wysokosc, margines) / wysokosc) *
+          wysokoscKropek
+        ).toFixed(1)}px`;
       }
 
       const pierwszaSeria = serie[0];
@@ -2987,7 +3058,10 @@ import LogiView from '../components/LogiView.astro';
           nazwa.title = `Szczegóły: ${pozycja.klucz}`;
         }
         const slupek = q<HTMLElement>(wiersz, '[data-role="top-slup"]');
-        if (slupek) slupek.style.width = `${szerokoscSlupka(pozycja.wartosc, maks)}%`;
+        // Udział 0–1 w zmiennej CSS: animujemy `transform`, nie szerokość.
+        if (slupek) {
+          slupek.style.setProperty('--wypelnienie', String(szerokoscSlupka(pozycja.wartosc, maks) / 100));
+        }
         setText(wiersz, '[data-role="top-wartosc"]', formatujWartoscTop(metrykaTop, pozycja.wartosc));
         wiersze.push(wiersz);
       }
