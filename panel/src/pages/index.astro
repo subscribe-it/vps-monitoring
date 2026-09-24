@@ -145,21 +145,37 @@ import LogiView from '../components/LogiView.astro';
   } from '../lib/filtry';
   import { spriteHref } from '../lib/icons';
   import {
+    PODMIOT_WSZYSTKIE,
+    WYKRES_LINIE,
+    WYKRES_MARGINES,
+    WYKRES_SZEROKOSC,
+    WYKRES_WYSOKOSC,
     czyLiczba,
+    czyOdswiezac,
     czyTrasaWykresow,
     doHaszaWykresow,
     etykietyCzasu,
+    etykietaPunktu,
     formatujBajty,
+    formatujLiczbe,
     formatujProcent,
     formatujPrzeplywnosc,
     graniceWykresu,
+    indeksNajblizszy,
     kluczSerii,
     limitCpuProcent,
+    odswiezanieZId,
     opisCpu,
     opisDysku,
     opisRam,
     opisSieci,
     osieY,
+    podpisOdswiezania,
+    podmiotEtykieta,
+    tytulWykresu,
+    wierszeTooltipa,
+    zapytaniaVps,
+    type WierszTooltipa,
     podpisZakresu,
     punktyWykresu,
     statystyki,
@@ -181,6 +197,7 @@ import LogiView from '../components/LogiView.astro';
     zapytanieTop,
     type Granice,
     type MetrykaTop,
+    type OdswiezId,
     type PozycjaTop,
     type Zakres,
     type ZakresId,
@@ -1082,8 +1099,10 @@ import LogiView from '../components/LogiView.astro';
     }
     interface RouteWykresy {
       kind: 'wykresy';
-      usluga: string | null;
+      /** `null` = cały VPS, `wszystkie` = lista usług, inaczej `stack/usługa`. */
+      podmiot: string | null;
       zakres: ZakresId;
+      odswiez: OdswiezId;
     }
     interface RouteLogi {
       kind: 'logi';
@@ -1100,7 +1119,12 @@ import LogiView from '../components/LogiView.astro';
       }
       if (czyTrasaWykresow(window.location.hash)) {
         const trasa = zHaszaWykresy(window.location.hash);
-        return { kind: 'wykresy', usluga: trasa.usluga, zakres: trasa.zakres };
+        return {
+          kind: 'wykresy',
+          podmiot: trasa.podmiot,
+          zakres: trasa.zakres,
+          odswiez: trasa.odswiez,
+        };
       }
       const match = /^#\/tool\/(.+)$/.exec(window.location.hash);
       const id = match?.[1];
@@ -1138,6 +1162,7 @@ import LogiView from '../components/LogiView.astro';
 
     function showStatus(): void {
       app.dataset.view = 'status';
+      zatrzymajTimerWykresow();
       setStatusViewVisible(true);
       setWykresyViewVisible(false);
       setLogiViewVisible(false);
@@ -1150,6 +1175,7 @@ import LogiView from '../components/LogiView.astro';
     function showTool(id: string): void {
       const wrap = q<HTMLElement>(app, '[data-role="frame-wrap"]');
       app.dataset.view = 'tool';
+      zatrzymajTimerWykresow();
       setStatusViewVisible(false);
       setWykresyViewVisible(false);
       setLogiViewVisible(false);
@@ -1235,6 +1261,7 @@ import LogiView from '../components/LogiView.astro';
      */
     function showLogi(route: RouteLogi): void {
       app.dataset.view = 'logi';
+      zatrzymajTimerWykresow();
       setStatusViewVisible(false);
       setWykresyViewVisible(false);
       setLogiViewVisible(true);
@@ -1283,7 +1310,6 @@ import LogiView from '../components/LogiView.astro';
       setStatusViewVisible(false);
       setWykresyViewVisible(true);
       setLogiViewVisible(false);
-      setLogiViewVisible(false);
       const wrap = q<HTMLElement>(app, '[data-role="frame-wrap"]');
       if (wrap) wrap.hidden = true;
       highlightActiveTool(null);
@@ -1299,18 +1325,26 @@ import LogiView from '../components/LogiView.astro';
       }
 
       const zakres = zakresZId(route.zakres);
+      const odswiezanie = odswiezanieZId(route.odswiez);
+      const selectOdswiez = q<HTMLSelectElement>(app, '[data-role="wykresy-odswiez"]');
+      if (selectOdswiez) selectOdswiez.value = odswiezanie.id;
+
+      // Ranking „Top 10" ma sens przy przeglądaniu zbioru; przy jednej usłudze
+      // tylko rozprasza (ta usługa i tak jest na wykresach).
+      const top = q<HTMLElement>(app, '[data-role="wykresy-top"]');
+      if (top) top.hidden = Boolean(route.podmiot) && route.podmiot !== PODMIOT_WSZYSTKIE;
+
+      const etykieta = podmiotEtykieta(route.podmiot);
       const naglowek = q<HTMLElement>(app, '[data-role="wykresy-naglowek"]');
       const podpis = q<HTMLElement>(app, '[data-role="wykresy-podpis"]');
-      if (route.usluga) {
-        if (naglowek) naglowek.textContent = route.usluga;
-        if (podpis) podpis.textContent = `Szczegóły usługi · ${podpisZakresu(zakres)}`;
-        document.title = `${route.usluga} — wykresy panelu monitoringu`;
-      } else {
-        if (naglowek) naglowek.textContent = 'Wykresy';
-        if (podpis) podpis.textContent = `Zużycie per usługa · ${podpisZakresu(zakres)}`;
-        document.title = 'Wykresy — panel monitoringu';
-      }
+      if (naglowek) naglowek.textContent = `Wykresy · ${etykieta}`;
+      if (podpis) podpis.textContent = `${podpisZakresu(zakres)} · ${podpisOdswiezania(odswiezanie)}`;
+      document.title = route.podmiot
+        ? `${etykieta} — wykresy panelu monitoringu`
+        : 'Wykresy — panel monitoringu';
 
+      wypelnijPodmioty(route);
+      ustawTimerWykresow(odswiezanie.id);
       void renderWykresy(route);
     }
 
@@ -1775,240 +1809,324 @@ import LogiView from '../components/LogiView.astro';
     /* ---------------- widok wykresów (własny, bez ramki Grafany) ---------------- */
 
     /**
-     * Cache serii per zakres. Wykresy mają własny cykl: przy 50 usługach
-     * i trzech wykresach na usługę zapytanie „per usługa" to ~150 żądań, więc
-     * pytamy RAZ na metrykę (`by (stack, service)`), a wynik trzymamy 60 s.
+     * Jedno pobranie = komplet serii dla całego widoku: siedem metryk usług
+     * (`sum by (stack, service)`) i dziewięć metryk VPS-a. Zapytanie per usługa
+     * oznaczałoby ~200 żądań na wejście, a przy odświeżaniu co 10 s — lawinę.
      */
-    const serieCache = new Map<ZakresId, { kiedy: number; dane: Map<string, Map<string, number[]>> }>();
-    /** Sygnatura tego, co narysowane — przebudowa DOM tylko przy realnej zmianie. */
-    let sygnaturaWykresow = '';
-
-    async function pobierzSerie(zakres: Zakres): Promise<Map<string, Map<string, number[]>> | null> {
-      const zapisane = serieCache.get(zakres.id);
-      if (zapisane && Date.now() - zapisane.kiedy < 60_000) return zapisane.dane;
-
-      const teraz = Math.floor(Date.now() / 1000);
-      const wynik = new Map<string, Map<string, number[]>>();
-      try {
-        await Promise.all(
-          zapytaniaZbiorcze().map(async (zapytanie) => {
-            const odpowiedz = await fetchWithTimeout(
-              zbudujUrlQueryRange(zapytanie.expr, zakres, teraz),
-            );
-            if (!odpowiedz.ok) throw new Error(`HTTP ${odpowiedz.status}`);
-            const dane = (await odpowiedz.json()) as {
-              data?: {
-                result?: Array<{
-                  metric?: Record<string, string>;
-                  values?: Array<[number, string]>;
-                }>;
-              };
-            };
-            const mapa = new Map<string, number[]>();
-            for (const seria of dane.data?.result ?? []) {
-              const stack = seria.metric?.stack ?? '';
-              const usluga = seria.metric?.service ?? '';
-              if (!stack || !usluga) continue;
-              mapa.set(
-                kluczSerii(stack, usluga),
-                (seria.values ?? [])
-                  .map(([, wartosc]) => Number(wartosc))
-                  .filter((v) => Number.isFinite(v)),
-              );
-            }
-            wynik.set(zapytanie.id, mapa);
-          }),
-        );
-      } catch {
-        // Brak Prometheusa nie może psuć panelu — mówimy to wprost pod nagłówkiem.
-        return null;
-      }
-      serieCache.set(zakres.id, { kiedy: Date.now(), dane: wynik });
-      return wynik;
+    interface ZbiorSerii {
+      kiedy: number;
+      /** id metryki → klucz `stack/usługa` → wartości. */
+      uslugi: Map<string, Map<string, number[]>>;
+      /** id metryki → klucz → znaczniki czasu (tooltip musi znać czas punktu). */
+      czasyUslug: Map<string, Map<string, number[]>>;
+      /** id metryki VPS-a → jedna seria (node-exporter ma jeden host). */
+      vps: Map<string, { wartosci: number[]; czasy: number[] }>;
     }
 
-    type SerieZbioru = Map<string, Map<string, number[]>> | null;
-
-    function seriaZ(dane: SerieZbioru, id: string, stack: string, usluga: string): number[] {
-      return dane?.get(id)?.get(kluczSerii(stack, usluga)) ?? [];
+    interface SeriaRysowana {
+      nazwa: string;
+      wartosci: number[];
+      czasy: number[];
     }
 
-    interface MetrykiUslugi {
-      cpu: number[];
-      ram: number[];
-      /** Limit RAM w bajtach (API → fallback na metrykę Prometheusa). */
-      limit: number | null;
-      /** Limit CPU w rdzeniach z API (`cpu_limit_cores`); `null` = brak limitu. */
-      limitCpu: number | null;
-      rx: number[];
-      tx: number[];
-      /** I/O dysku — odczyt i zapis w B/s (rate z liczników blokowych). */
-      ioR: number[];
-      ioW: number[];
+    /** Wszystko, czego potrzebuje tooltip — trzymane per figura w DOM. */
+    interface WykresRysowany {
+      tytul: string;
+      jednostka: (wartosc: number | null) => string;
+      serie: SeriaRysowana[];
+      granice: Granice;
+      limit: number[] | null;
+      zakres: Zakres;
+      podmiot: string | null;
     }
 
-    /**
-     * Serie czasowe + limity jednej usługi.
-     *
-     * Kolejność źródeł limitu RAM jest świadoma: najpierw `/status/api.json`
-     * (`mem_limit_bytes` ze spec usługi Swarm — to samo, czym Swarm zabija
-     * kontener), a dopiero gdy API go nie zna, bierzemy metrykę
-     * `swarm_container_memory_limit_bytes` (pochodzi z `docker stats`).
-     * Limit CPU bierzemy wyłącznie z API — metryki go nie mają.
-     */
-    function metrykiUslugi(dane: SerieZbioru, stack: string, usluga: Service): MetrykiUslugi {
-      const limitSerii = seriaZ(dane, 'limit', stack, usluga.name);
-      const limitZMetrki = limitSerii.length > 0 ? (limitSerii[limitSerii.length - 1] as number) : null;
-      const limitZApi = usluga.mem_limit_bytes;
-      const limit = czyLiczba(limitZApi) && limitZApi > 0
-        ? limitZApi
-        : (limitZMetrki !== null && limitZMetrki > 0 ? limitZMetrki : null);
-      return {
-        cpu: seriaZ(dane, 'cpu', stack, usluga.name),
-        ram: seriaZ(dane, 'ram', stack, usluga.name),
-        limit,
-        limitCpu: usluga.cpu_limit_cores ?? null,
-        rx: seriaZ(dane, 'rx', stack, usluga.name),
-        tx: seriaZ(dane, 'tx', stack, usluga.name),
-        ioR: seriaZ(dane, 'io_r', stack, usluga.name),
-        ioW: seriaZ(dane, 'io_w', stack, usluga.name),
-      };
-    }
-
-    interface OpisFigury {
+    interface OpisWykresu {
       tytul: string;
       liczby: string;
       statystyki?: string;
-      serie: Array<{ rola: 'wyk-linia' | 'wyk-linia2'; wartosci: number[] }>;
+      serie: Array<{ rola: 'wyk-linia' | 'wyk-linia2'; nazwa: string; wartosci: number[]; czasy: number[] }>;
       limit: number[] | null;
       granice: Granice;
       jednostka: (wartosc: number | null) => string;
       aria: string;
     }
 
+    interface PromZakres {
+      data?: {
+        result?: Array<{ metric?: Record<string, string>; values?: Array<[number, string]> }>;
+      };
+    }
+
+    const serieCache = new Map<ZakresId, ZbiorSerii>();
+    /** Sygnatura tego, co narysowane — przebudowa DOM tylko przy realnej zmianie. */
+    let sygnaturaWykresow = '';
+    /** Cache „na wejściu" może być długi; przy cyklu 5–10 s musi być krótszy niż interwał. */
+    const TTL_CACHE_MS = 60_000;
+    const TTL_SWIEZE_MS = 2_000;
+    /** Dane narysowanych figur i bieżący indeks tooltipa (klawiatura, odświeżanie). */
+    const daneWykresow = new Map<HTMLElement, WykresRysowany>();
+    const indeksyTooltipow = new Map<HTMLElement, number>();
+    let timerWykresow: number | null = null;
+
+    async function pobierzZbior(zakres: Zakres, swieze = false): Promise<ZbiorSerii | null> {
+      const zapisane = serieCache.get(zakres.id);
+      const ttl = swieze ? TTL_SWIEZE_MS : TTL_CACHE_MS;
+      if (zapisane && Date.now() - zapisane.kiedy < ttl) return zapisane;
+
+      const teraz = Math.floor(Date.now() / 1000);
+      const zbior: ZbiorSerii = {
+        kiedy: Date.now(),
+        uslugi: new Map(),
+        czasyUslug: new Map(),
+        vps: new Map(),
+      };
+      try {
+        await Promise.all([
+          ...zapytaniaZbiorcze().map(async (zapytanie) => {
+            const odpowiedz = await fetchWithTimeout(
+              zbudujUrlQueryRange(zapytanie.expr, zakres, teraz),
+            );
+            if (!odpowiedz.ok) throw new Error(`HTTP ${odpowiedz.status}`);
+            const dane = (await odpowiedz.json()) as PromZakres;
+            const mapa = new Map<string, number[]>();
+            const mapaCzasow = new Map<string, number[]>();
+            for (const seria of dane.data?.result ?? []) {
+              const stack = seria.metric?.stack ?? '';
+              const usluga = seria.metric?.service ?? '';
+              if (!stack || !usluga) continue;
+              const punkty = (seria.values ?? []).filter((punkt) =>
+                Number.isFinite(Number(punkt[1])),
+              );
+              const klucz = kluczSerii(stack, usluga);
+              mapa.set(klucz, punkty.map(([, wartosc]) => Number(wartosc)));
+              mapaCzasow.set(klucz, punkty.map(([chwila]) => Number(chwila)));
+            }
+            zbior.uslugi.set(zapytanie.id, mapa);
+            zbior.czasyUslug.set(zapytanie.id, mapaCzasow);
+          }),
+          ...zapytaniaVps().map(async (zapytanie) => {
+            const odpowiedz = await fetchWithTimeout(
+              zbudujUrlQueryRange(zapytanie.expr, zakres, teraz),
+            );
+            if (!odpowiedz.ok) throw new Error(`HTTP ${odpowiedz.status}`);
+            const dane = (await odpowiedz.json()) as PromZakres;
+            const punkty = (dane.data?.result?.[0]?.values ?? []).filter((punkt) =>
+              Number.isFinite(Number(punkt[1])),
+            );
+            zbior.vps.set(zapytanie.id, {
+              wartosci: punkty.map(([, wartosc]) => Number(wartosc)),
+              czasy: punkty.map(([chwila]) => Number(chwila)),
+            });
+          }),
+        ]);
+      } catch {
+        // Brak Prometheusa nie może psuć panelu — mówimy to wprost pod nagłówkiem.
+        return null;
+      }
+      serieCache.set(zakres.id, zbior);
+      return zbior;
+    }
+
+    /** Seria usługi (wartości + czasy) albo pusta, gdy Prometheus jej nie oddał. */
+    function seriaZ(
+      zbior: ZbiorSerii | null,
+      id: string,
+      stack: string,
+      usluga: string,
+    ): { wartosci: number[]; czasy: number[] } {
+      const klucz = kluczSerii(stack, usluga);
+      return {
+        wartosci: zbior?.uslugi.get(id)?.get(klucz) ?? [],
+        czasy: zbior?.czasyUslug.get(id)?.get(klucz) ?? [],
+      };
+    }
+
+    function seriaVps(zbior: ZbiorSerii | null, id: string): { wartosci: number[]; czasy: number[] } {
+      return zbior?.vps.get(id) ?? { wartosci: [], czasy: [] };
+    }
+
+    /** Ostatnia wartość serii jako liczba (albo `null`, gdy seria pusta). */
+    function ostatniaWartosc(seria: { wartosci: number[] }): number | null {
+      const ostatnia = seria.wartosci[seria.wartosci.length - 1];
+      return czyLiczba(ostatnia) ? ostatnia : null;
+    }
+
     /**
-     * Cztery figury dla jednej usługi: CPU, RAM (z linią limitu), sieć (rx/tx),
-     * dysk (odczyt/zapis).
-     *
-     * Liczby „teraz" bierzemy z API (świeższe niż ostatni punkt serii), a limity
-     * i przebiegi z Prometheusa; limity CPU i RAM bierzemy z API (panel pokazuje
-     * „teraz vs limit"), a gdy limitu nie ma — mówimy to wprost, zamiast liczyć
-     * procent z niczego.
+     * Wykresy CAŁEGO VPS-a: CPU, RAM (z linią całości), sieć rx/tx, dysk
+     * (z linią pojemności) i obciążenie (z linią liczby rdzeni).
      */
-    function opisFigur(metryki: MetrykiUslugi, usluga: Service): OpisFigury[] {
-      const stCpu = statystyki(metryki.cpu);
-      const stRam = statystyki(metryki.ram);
-      const stRx = statystyki(metryki.rx);
-      const stTx = statystyki(metryki.tx);
-      const stIoR = statystyki(metryki.ioR);
-      const stIoW = statystyki(metryki.ioW);
-      const terazCpu = usluga.cpu_percent ?? stCpu.teraz;
-      const terazRam = usluga.mem_bytes ?? stRam.teraz;
-      const limitCpuProc = limitCpuProcent(metryki.limitCpu);
-      const graniceCpu = graniceWykresu(
-        [...metryki.cpu, ...(limitCpuProc === null ? [] : [limitCpuProc])],
-        { odZera: true },
-      );
-      const graniceRam = graniceWykresu([
-        ...metryki.ram,
-        ...(metryki.limit === null ? [] : [metryki.limit]),
-      ]);
-      const graniceSiec = graniceWykresu([...metryki.rx, ...metryki.tx], { odZera: true });
-      const graniceDysk = graniceWykresu([...metryki.ioR, ...metryki.ioW], { odZera: true });
+    function opisWykresowVps(zbior: ZbiorSerii | null, zakres: Zakres): OpisWykresu[] {
+      const cpu = seriaVps(zbior, 'vps_cpu');
+      const ram = seriaVps(zbior, 'vps_ram');
+      const rx = seriaVps(zbior, 'vps_rx');
+      const tx = seriaVps(zbior, 'vps_tx');
+      const fs = seriaVps(zbior, 'vps_fs');
+      const load = seriaVps(zbior, 'vps_load');
+      const ramTotal = ostatniaWartosc(seriaVps(zbior, 'vps_ram_total'));
+      const fsTotal = ostatniaWartosc(seriaVps(zbior, 'vps_fs_total'));
+      const rdzenie = ostatniaWartosc(seriaVps(zbior, 'vps_rdzenie'));
+      const podmiot = null;
+      const stCpu = statystyki(cpu.wartosci);
+      const stRam = statystyki(ram.wartosci);
+      const stRx = statystyki(rx.wartosci);
+      const stTx = statystyki(tx.wartosci);
+      const stFs = statystyki(fs.wartosci);
+      const stLoad = statystyki(load.wartosci);
 
       return [
         {
-          tytul: 'CPU',
-          liczby: opisCpu(terazCpu, metryki.limitCpu, stCpu.maks),
-          statystyki: statystykiCpu(stCpu, metryki.limitCpu, terazCpu),
-          serie: [{ rola: 'wyk-linia', wartosci: metryki.cpu }],
-          limit: limitCpuProc === null ? null : [limitCpuProc, limitCpuProc],
-          granice: graniceCpu,
-          jednostka: (v) => formatujProcent(v, 1),
-          aria: `Zużycie CPU usługi ${usluga.name}`,
+          tytul: tytulWykresu('CPU', podmiot),
+          liczby: `${formatujProcent(stCpu.teraz, 1)} · maks. ${formatujProcent(stCpu.maks, 1)}`,
+          statystyki: `średnia ${formatujProcent(stCpu.srednia, 1)} · ${podpisZakresu(zakres)}`,
+          serie: [{ rola: 'wyk-linia', nazwa: 'CPU', ...cpu }],
+          limit: null,
+          granice: graniceWykresu(cpu.wartosci, { odZera: true }),
+          jednostka: (v) => formatujProcent(v, 0),
+          aria: `Zużycie CPU całego VPS-a: teraz ${formatujProcent(stCpu.teraz, 1)}, maksimum ${formatujProcent(stCpu.maks, 1)}`,
         },
         {
-          tytul: 'RAM',
-          liczby: opisRam(terazRam, metryki.limit, stRam.maks),
-          statystyki: statystykiRam(stRam, metryki.limit, terazRam),
-          serie: [{ rola: 'wyk-linia', wartosci: metryki.ram }],
-          limit: metryki.limit === null ? null : [metryki.limit, metryki.limit],
-          granice: graniceRam,
+          tytul: tytulWykresu('RAM', podmiot),
+          liczby: `${formatujBajty(stRam.teraz)}${ramTotal === null ? '' : ` / ${formatujBajty(ramTotal)}`}`
+            + `${ramTotal && czyLiczba(stRam.teraz) ? ` · ${formatujProcent((stRam.teraz / ramTotal) * 100, 1)}` : ''}`,
+          statystyki: `maks. ${formatujBajty(stRam.maks)} · średnia ${formatujBajty(stRam.srednia)}`,
+          serie: [{ rola: 'wyk-linia', nazwa: 'RAM użyta', ...ram }],
+          limit: ramTotal === null ? null : [ramTotal, ramTotal],
+          granice: graniceWykresu([...ram.wartosci, ...(ramTotal === null ? [] : [ramTotal])]),
           jednostka: (v) => formatujBajty(v, 0),
-          aria: `Zużycie pamięci usługi ${usluga.name}`,
+          aria: `Pamięć VPS-a: teraz ${formatujBajty(stRam.teraz)}, maksimum ${formatujBajty(stRam.maks)}`,
         },
         {
-          tytul: 'Sieć (rx / tx)',
-          liczby: opisSieci(stRx.teraz, stTx.teraz, stRx.maks),
-          statystyki: statystykiSieci(stRx, stTx),
+          tytul: tytulWykresu('Sieć (rx / tx)', podmiot),
+          liczby: `rx ${formatujPrzeplywnosc(stRx.teraz)} · tx ${formatujPrzeplywnosc(stTx.teraz)}`,
+          statystyki: `maks. rx ${formatujPrzeplywnosc(stRx.maks)} · maks. tx ${formatujPrzeplywnosc(stTx.maks)}`,
           serie: [
-            { rola: 'wyk-linia', wartosci: metryki.rx },
-            { rola: 'wyk-linia2', wartosci: metryki.tx },
+            { rola: 'wyk-linia', nazwa: 'rx (odbiór)', ...rx },
+            { rola: 'wyk-linia2', nazwa: 'tx (wysyłka)', ...tx },
           ],
           limit: null,
-          granice: graniceSiec,
+          granice: graniceWykresu([...rx.wartosci, ...tx.wartosci], { odZera: true }),
           jednostka: (v) => formatujPrzeplywnosc(v, 0),
-          aria: `Ruch sieciowy usługi ${usluga.name}`,
+          aria: `Ruch sieciowy VPS-a: odbiór ${formatujPrzeplywnosc(stRx.teraz)}, wysyłka ${formatujPrzeplywnosc(stTx.teraz)}`,
         },
         {
-          tytul: 'Dysk (odczyt / zapis)',
-          liczby: opisDysku(stIoR.teraz, stIoW.teraz, stIoR.maks),
-          statystyki: statystykiDysku(stIoR, stIoW),
-          serie: [
-            { rola: 'wyk-linia', wartosci: metryki.ioR },
-            { rola: 'wyk-linia2', wartosci: metryki.ioW },
-          ],
-          limit: null,
-          granice: graniceDysk,
-          jednostka: (v) => formatujPrzeplywnosc(v, 0),
-          aria: `Wejście i wyjście dysku usługi ${usluga.name}`,
+          tytul: tytulWykresu('Dysk (zajęte)', podmiot),
+          liczby: `${formatujBajty(stFs.teraz)}${fsTotal === null ? '' : ` / ${formatujBajty(fsTotal)}`}`
+            + `${fsTotal && czyLiczba(stFs.teraz) ? ` · ${formatujProcent((stFs.teraz / fsTotal) * 100, 1)}` : ''}`,
+          statystyki: `maks. ${formatujBajty(stFs.maks)} · partycja /`,
+          serie: [{ rola: 'wyk-linia', nazwa: 'zajęte', ...fs }],
+          limit: fsTotal === null ? null : [fsTotal, fsTotal],
+          granice: graniceWykresu([...fs.wartosci, ...(fsTotal === null ? [] : [fsTotal])]),
+          jednostka: (v) => formatujBajty(v, 0),
+          aria: `Zajęte miejsce na partycji głównej: teraz ${formatujBajty(stFs.teraz)}`,
+        },
+        {
+          tytul: tytulWykresu('Obciążenie (load1)', podmiot),
+          liczby: `${formatujLiczbe(stLoad.teraz)}${rdzenie === null ? '' : ` / ${formatujLiczbe(rdzenie, 0)} rdzeni`}`,
+          statystyki: `maks. ${formatujLiczbe(stLoad.maks)} · średnia ${formatujLiczbe(stLoad.srednia)}`,
+          serie: [{ rola: 'wyk-linia', nazwa: 'load1', ...load }],
+          limit: rdzenie === null ? null : [rdzenie, rdzenie],
+          granice: graniceWykresu([...load.wartosci, ...(rdzenie === null ? [] : [rdzenie])], { odZera: true }),
+          jednostka: (v) => formatujLiczbe(v),
+          aria: `Obciążenie VPS-a: teraz ${formatujLiczbe(stLoad.teraz)}, maksimum ${formatujLiczbe(stLoad.maks)}`,
         },
       ];
     }
 
-    /** Rysowanie w istniejącym DOM (jedno miejsce dla listy i szczegółów). */
-    function rysujFigure(figura: HTMLElement, opis: OpisFigury, duza: boolean): void {
-      const szerokosc = duza ? 900 : 320;
-      const wysokosc = duza ? 200 : 84;
-      const margines = duza ? 10 : 4;
-      const ticki = osieY(opis.granice, duza ? 4 : 3);
+    /**
+     * Wykresy jednej usługi. `skrocony` (tryb „wszystkie usługi") rysuje tylko
+     * CPU i RAM — inaczej lista 47 usług razy cztery wykresy odświeżana co 10 s
+     * byłaby ciężka i nieczytelna.
+     */
+    function opisWykresowUslugi(
+      usluga: Service,
+      stack: string,
+      zbior: ZbiorSerii | null,
+      zakres: Zakres,
+      skrocony = false,
+    ): OpisWykresu[] {
+      const podpisZakresuTekst = podpisZakresu(zakres);
+      const cpu = seriaZ(zbior, 'cpu', stack, usluga.name);
+      const ram = seriaZ(zbior, 'ram', stack, usluga.name);
+      const limitSerii = seriaZ(zbior, 'limit', stack, usluga.name);
+      const limitZMetrki = ostatniaWartosc(limitSerii);
+      const limitZApi = usluga.mem_limit_bytes;
+      const limit = czyLiczba(limitZApi) && limitZApi > 0
+        ? limitZApi
+        : (limitZMetrki !== null && limitZMetrki > 0 ? limitZMetrki : null);
+      const limitCpu = usluga.cpu_limit_cores ?? null;
+      const limitCpuProc = limitCpuProcent(limitCpu);
+      const podmiot = kluczSerii(stack, usluga.name);
 
-      const siatki = qa<SVGLineElement>(figura, '.wykres-siatka');
-      siatki.forEach((linia, indeks) => {
-        const tick = ticki[indeks];
-        if (tick === undefined) {
-          linia.style.display = 'none';
-          return;
-        }
-        linia.style.display = '';
-        const y = wspolrzednaY(tick, opis.granice, wysokosc, margines);
-        linia.setAttribute('x1', '0');
-        linia.setAttribute('x2', String(szerokosc));
-        linia.setAttribute('y1', y.toFixed(2));
-        linia.setAttribute('y2', y.toFixed(2));
-      });
+      const stCpu = statystyki(cpu.wartosci);
+      const stRam = statystyki(ram.wartosci);
+      const terazCpu = usluga.cpu_percent ?? stCpu.teraz;
+      const terazRam = usluga.mem_bytes ?? stRam.teraz;
 
-      for (const seria of opis.serie) {
-        ustawLinie(figura, seria.rola, seria.wartosci, opis.granice, szerokosc, wysokosc, margines);
-      }
-      ustawLinie(figura, 'wyk-limit', opis.limit ?? [], opis.granice, szerokosc, wysokosc, margines);
+      const wykresy: OpisWykresu[] = [
+        {
+          tytul: tytulWykresu('CPU', podmiot),
+          liczby: opisCpu(terazCpu, limitCpu, stCpu.maks),
+          statystyki: `${statystykiCpu(stCpu, limitCpu, terazCpu)} · ${podpisZakresuTekst}`,
+          serie: [{ rola: 'wyk-linia', nazwa: 'CPU', ...cpu }],
+          limit: limitCpuProc === null ? null : [limitCpuProc, limitCpuProc],
+          granice: graniceWykresu(
+            [...cpu.wartosci, ...(limitCpuProc === null ? [] : [limitCpuProc])],
+            { odZera: true },
+          ),
+          jednostka: (v) => formatujProcent(v, 1),
+          aria: `Zużycie CPU usługi ${usluga.name}: teraz ${formatujProcent(terazCpu, 1)}, maksimum ${formatujProcent(stCpu.maks, 1)}`,
+        },
+        {
+          tytul: tytulWykresu('RAM', podmiot),
+          liczby: opisRam(terazRam, limit, stRam.maks),
+          statystyki: `${statystykiRam(stRam, limit, terazRam)} · ${podpisZakresuTekst}`,
+          serie: [{ rola: 'wyk-linia', nazwa: 'RAM', ...ram }],
+          limit: limit === null ? null : [limit, limit],
+          granice: graniceWykresu([...ram.wartosci, ...(limit === null ? [] : [limit])]),
+          jednostka: (v) => formatujBajty(v, 0),
+          aria: `Zużycie pamięci usługi ${usluga.name}: teraz ${formatujBajty(terazRam)}, limit ${limit === null ? 'nieustawiony' : formatujBajty(limit)}`,
+        },
+      ];
+      if (skrocony) return wykresy;
 
-      const gora = ticki[0] ?? opis.granice.max;
-      const dol = ticki[ticki.length - 1] ?? opis.granice.min;
-      setText(figura, '[data-role="wyk-os-gora"]', opis.jednostka(gora));
-      setText(figura, '[data-role="wyk-os-dol"]', opis.jednostka(dol));
-      if (duza) {
-        const srodek = ticki[Math.floor(ticki.length / 2)];
-        setText(figura, '[data-role="wyk-os-srodek"]', opis.jednostka(srodek ?? null));
-      }
+      const rx = seriaZ(zbior, 'rx', stack, usluga.name);
+      const tx = seriaZ(zbior, 'tx', stack, usluga.name);
+      const ioR = seriaZ(zbior, 'io_r', stack, usluga.name);
+      const ioW = seriaZ(zbior, 'io_w', stack, usluga.name);
+      const stRx = statystyki(rx.wartosci);
+      const stTx = statystyki(tx.wartosci);
+      const stIoR = statystyki(ioR.wartosci);
+      const stIoW = statystyki(ioW.wartosci);
 
-      setText(figura, '[data-role="wyk-tytul"]', opis.tytul);
-      setText(figura, '[data-role="wyk-liczby"]', opis.liczby);
-      if (opis.statystyki !== undefined) {
-        setText(figura, '[data-role="wyk-statystyki"]', opis.statystyki);
-      }
-      const svg = q<SVGElement>(figura, '[data-role="wyk-svg"]');
-      if (svg) svg.setAttribute('aria-label', opis.aria);
+      wykresy.push(
+        {
+          tytul: tytulWykresu('Sieć (rx / tx)', podmiot),
+          liczby: opisSieci(stRx.teraz, stTx.teraz, stRx.maks),
+          statystyki: statystykiSieci(stRx, stTx),
+          serie: [
+            { rola: 'wyk-linia', nazwa: 'rx (odbiór)', ...rx },
+            { rola: 'wyk-linia2', nazwa: 'tx (wysyłka)', ...tx },
+          ],
+          limit: null,
+          granice: graniceWykresu([...rx.wartosci, ...tx.wartosci], { odZera: true }),
+          jednostka: (v) => formatujPrzeplywnosc(v, 0),
+          aria: `Ruch sieciowy usługi ${usluga.name}: odbiór ${formatujPrzeplywnosc(stRx.teraz)}, wysyłka ${formatujPrzeplywnosc(stTx.teraz)}`,
+        },
+        {
+          tytul: tytulWykresu('Dysk (odczyt / zapis)', podmiot),
+          liczby: opisDysku(stIoR.teraz, stIoW.teraz, stIoR.maks),
+          statystyki: statystykiDysku(stIoR, stIoW),
+          serie: [
+            { rola: 'wyk-linia', nazwa: 'odczyt', ...ioR },
+            { rola: 'wyk-linia2', nazwa: 'zapis', ...ioW },
+          ],
+          limit: null,
+          granice: graniceWykresu([...ioR.wartosci, ...ioW.wartosci], { odZera: true }),
+          jednostka: (v) => formatujPrzeplywnosc(v, 0),
+          aria: `Wejście i wyjście dysku usługi ${usluga.name}: odczyt ${formatujPrzeplywnosc(stIoR.teraz)}, zapis ${formatujPrzeplywnosc(stIoW.teraz)}`,
+        },
+      );
+      return wykresy;
     }
 
     function wspolrzednaY(
@@ -2047,24 +2165,449 @@ import LogiView from '../components/LogiView.astro';
     }
 
     /**
-     * Przebudowa widoku wykresów. Wołane przy każdej zmianie trasy i przy
-     * odświeżeniu danych, ale DOM rusza się tylko wtedy, gdy zmienił się
-     * zakres, usługa albo zbiór usług — inaczej przewijanie skakałoby co 30 s.
+     * Rysowanie w istniejącym DOM (jedno miejsce dla wszystkich trybów).
+     * Aktualizuje wyłącznie atrybuty i tekst, więc odświeżanie co 5–10 s nie
+     * przebudowuje listy i nie przewraca przewijania.
+     */
+    function rysujWykres(figura: HTMLElement, opis: OpisWykresu, zakres: Zakres, podmiot: string | null): void {
+      const szerokosc = WYKRES_SZEROKOSC;
+      const wysokosc = WYKRES_WYSOKOSC;
+      const margines = WYKRES_MARGINES;
+      const ticki = osieY(opis.granice, WYKRES_LINIE);
+
+      const siatki = qa<SVGLineElement>(figura, '.wykres-siatka');
+      siatki.forEach((linia, indeks) => {
+        const tick = ticki[indeks];
+        if (tick === undefined) {
+          linia.style.display = 'none';
+          return;
+        }
+        linia.style.display = '';
+        const y = wspolrzednaY(tick, opis.granice, wysokosc, margines);
+        linia.setAttribute('x1', '0');
+        linia.setAttribute('x2', String(szerokosc));
+        linia.setAttribute('y1', y.toFixed(2));
+        linia.setAttribute('y2', y.toFixed(2));
+      });
+
+      for (const seria of opis.serie) {
+        ustawLinie(figura, seria.rola, seria.wartosci, opis.granice, szerokosc, wysokosc, margines);
+      }
+      ustawLinie(figura, 'wyk-limit', opis.limit ?? [], opis.granice, szerokosc, wysokosc, margines);
+
+      const gora = ticki[0] ?? opis.granice.max;
+      const dol = ticki[ticki.length - 1] ?? opis.granice.min;
+      setText(figura, '[data-role="wyk-os-gora"]', opis.jednostka(gora));
+      setText(figura, '[data-role="wyk-os-dol"]', opis.jednostka(dol));
+      const srodek = ticki[Math.floor(ticki.length / 2)];
+      setText(figura, '[data-role="wyk-os-srodek"]', opis.jednostka(srodek ?? null));
+
+      setText(figura, '[data-role="wyk-tytul"]', opis.tytul);
+      setText(figura, '[data-role="wyk-liczby"]', opis.liczby);
+      if (opis.statystyki !== undefined) {
+        setText(figura, '[data-role="wyk-statystyki"]', opis.statystyki);
+      }
+      const czas = etykietyCzasu(zakres, Math.floor(Date.now() / 1000));
+      setText(figura, '[data-role="wyk-czas-od"]', `${czas.od} UTC`);
+      setText(figura, '[data-role="wyk-czas-do"]', `${czas.do} UTC`);
+      const svg = q<SVGElement>(figura, '[data-role="wyk-svg"]');
+      if (svg) svg.setAttribute('aria-label', opis.aria);
+
+      // Tooltip: dane trzymamy per figura, a indeks kasujemy — po odświeżeniu
+      // danych stary punkt może już nie istnieć.
+      daneWykresow.set(figura, {
+        tytul: opis.tytul,
+        jednostka: opis.jednostka,
+        serie: opis.serie.map((seria) => ({
+          nazwa: seria.nazwa,
+          wartosci: seria.wartosci,
+          czasy: seria.czasy,
+        })),
+        granice: opis.granice,
+        limit: opis.limit,
+        zakres,
+        podmiot,
+      });
+      ukryjTooltip(figura);
+    }
+
+    /* ---------------- tooltip: mysz i klawiatura ---------------- */
+
+    function ukryjTooltip(figura: HTMLElement): void {
+      indeksyTooltipow.delete(figura);
+      const tooltip = q<HTMLElement>(figura, '[data-role="wyk-tooltip"]');
+      if (tooltip) tooltip.hidden = true;
+      for (const rola of ['wyk-kursor', 'wyk-punkt', 'wyk-punkt2']) {
+        const element = q<SVGElement>(figura, `[data-role="${rola}"]`);
+        if (element) element.style.display = 'none';
+      }
+    }
+
+    function pokazTooltip(figura: HTMLElement, indeks: number): void {
+      const dane = daneWykresow.get(figura);
+      if (!dane) return;
+      const serie = dane.serie.filter((s) => s.wartosci.length > 0);
+      const ile = Math.max(...serie.map((s) => s.wartosci.length), 0);
+      if (ile === 0) return;
+      const pozycja = Math.min(Math.max(0, indeks), ile - 1);
+      indeksyTooltipow.set(figura, pozycja);
+
+      const szerokosc = WYKRES_SZEROKOSC;
+      const wysokosc = WYKRES_WYSOKOSC;
+      const margines = WYKRES_MARGINES;
+      const x = ile === 1 ? 0 : (pozycja * szerokosc) / (ile - 1);
+
+      const kursor = q<SVGLineElement>(figura, '[data-role="wyk-kursor"]');
+      if (kursor) {
+        kursor.style.display = '';
+        kursor.setAttribute('x1', x.toFixed(2));
+        kursor.setAttribute('x2', x.toFixed(2));
+        kursor.setAttribute('y1', '0');
+        kursor.setAttribute('y2', String(wysokosc));
+      }
+
+      // Kropki na każdej linii — dzięki temu widać, którą serię czytamy.
+      let indeksKropki = 0;
+      for (const rysowana of dane.serie) {
+        const element = q<SVGCircleElement>(
+          figura,
+          `[data-role="${indeksKropki === 0 ? 'wyk-punkt' : 'wyk-punkt2'}"]`,
+        );
+        indeksKropki += 1;
+        if (!element) continue;
+        const wartosc = rysowana.wartosci[pozycja];
+        if (rysowana.wartosci.length === 0 || !czyLiczba(wartosc)) {
+          element.style.display = 'none';
+          continue;
+        }
+        element.style.display = '';
+        element.setAttribute('cx', x.toFixed(2));
+        element.setAttribute(
+          'cy',
+          wspolrzednaY(wartosc, dane.granice, wysokosc, margines).toFixed(2),
+        );
+      }
+
+      const pierwszaSeria = serie[0];
+      const czasy = pierwszaSeria?.czasy ?? [];
+      const chwila = czasy[pozycja];
+      setText(
+        figura,
+        '[data-role="wyk-tooltip-czas"]',
+        czyLiczba(chwila) ? etykietaPunktu(chwila, dane.zakres) : '',
+      );
+
+      const wiersze = wierszeTooltipa(
+        dane.serie.map((s) => ({ nazwa: s.nazwa, wartosci: s.wartosci })),
+        pozycja,
+        dane.jednostka,
+      );
+      const holder = q<HTMLElement>(figura, '[data-role="wyk-tooltip-wiersze"]');
+      if (holder) {
+        const elementy = wiersze.map((wiersz: WierszTooltipa) => {
+          const linia = document.createElement('span');
+          linia.className = 'wykres-tooltip-wiersz';
+          const nazwa = document.createElement('span');
+          nazwa.className = 'wykres-tooltip-nazwa';
+          nazwa.textContent = wiersz.nazwa;
+          const wartosc = document.createElement('span');
+          wartosc.className = 'num';
+          wartosc.textContent = wiersz.tekst;
+          linia.append(nazwa, wartosc);
+          return linia;
+        });
+        holder.replaceChildren(...elementy);
+      }
+
+      const tooltip = q<HTMLElement>(figura, '[data-role="wyk-tooltip"]');
+      const plot = q<HTMLElement>(figura, '[data-role="wyk-plot"]');
+      if (tooltip && plot) {
+        tooltip.hidden = false;
+        // Pozycja w pikselach CSS: wykres skaluje się do szerokości karty,
+        // więc przeliczamy udział punktu na rzeczywistą szerokość.
+        const udzial = x / szerokosc;
+        const szerokoscPx = plot.clientWidth;
+        tooltip.style.left = `${Math.min(Math.max(0, udzial * szerokoscPx), szerokoscPx)}px`;
+      }
+    }
+
+    /** Najbliższy punkt dla pozycji kursora (spójnie z rysowaniem linii). */
+    function pokazTooltipZPozycji(figura: HTMLElement, klientX: number): void {
+      const plot = q<HTMLElement>(figura, '[data-role="wyk-plot"]');
+      const dane = daneWykresow.get(figura);
+      if (!plot || !dane) return;
+      const ile = Math.max(...dane.serie.map((s) => s.wartosci.length), 0);
+      const prostokat = plot.getBoundingClientRect();
+      if (prostokat.width <= 0) return;
+      const udzial = (klientX - prostokat.left) / prostokat.width;
+      const indeks = indeksNajblizszy(udzial * WYKRES_SZEROKOSC, WYKRES_SZEROKOSC, ile);
+      if (indeks === null) return;
+      pokazTooltip(figura, indeks);
+    }
+
+    function figuraZ(event: Event): HTMLElement | null {
+      const cel = event.target;
+      if (!(cel instanceof Element)) return null;
+      return cel.closest<HTMLElement>('[data-role="wyk-figura"]');
+    }
+
+    function podlaczTooltipy(kontener: HTMLElement): void {
+      let ostatniaFigura: HTMLElement | null = null;
+      kontener.addEventListener('pointermove', (event) => {
+        const figura = figuraZ(event);
+        if (figura !== ostatniaFigura) {
+          if (ostatniaFigura) ukryjTooltip(ostatniaFigura);
+          ostatniaFigura = figura;
+        }
+        if (figura) pokazTooltipZPozycji(figura, event.clientX);
+      });
+      kontener.addEventListener('pointerleave', () => {
+        if (ostatniaFigura) ukryjTooltip(ostatniaFigura);
+        ostatniaFigura = null;
+      });
+      // Klawiatura: Tab wchodzi na wykres, strzałki przesuwają punkt, Esc zamyka.
+      kontener.addEventListener('keydown', (event) => {
+        const figura = figuraZ(event);
+        if (!figura) return;
+        if (event.key === 'Escape') {
+          ukryjTooltip(figura);
+          return;
+        }
+        if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+        event.preventDefault();
+        const dane = daneWykresow.get(figura);
+        if (!dane) return;
+        const ile = Math.max(...dane.serie.map((s) => s.wartosci.length), 0);
+        if (ile === 0) return;
+        const obecny = indeksyTooltipow.get(figura) ?? ile - 1;
+        const nastepny = Math.min(ile - 1, Math.max(0, obecny + (event.key === 'ArrowRight' ? 1 : -1)));
+        pokazTooltip(figura, nastepny);
+      });
+    }
+
+    /* ---------------- budowa i odświeżanie widoku ---------------- */
+
+    function pokazKomunikatWykresow(tekst: string | null): void {
+      const komunikat = q<HTMLElement>(app, '[data-role="wykresy-komunikat"]');
+      if (!komunikat) return;
+      komunikat.hidden = tekst === null;
+      komunikat.textContent = tekst ?? '';
+    }
+
+    function sekcjaWykresow(
+      tytul: string,
+      podpis: string,
+      klucz: string,
+      tryb: 'vps' | 'usluga' | 'lista',
+      para?: { stack: Stack; usluga: Service },
+      zakres?: Zakres,
+    ): HTMLElement | null {
+      const sekcja = instantiate('tpl-wykres-sekcja');
+      if (!sekcja) return null;
+      sekcja.dataset.podmiot = klucz;
+      setText(sekcja, '[data-role="wyk-nazwa"]', tytul);
+      setText(sekcja, '[data-role="wyk-sekcja-podpis"]', podpis);
+      const siatka = q<HTMLElement>(sekcja, '[data-role="wyk-siatka"]');
+      if (!siatka) return sekcja;
+
+      const pokazUslugowe = tryb !== 'vps';
+      for (const rola of ['wyk-link-stan', 'wyk-szczegoly']) {
+        const element = q<HTMLElement>(sekcja, `[data-role="${rola}"]`);
+        if (element) element.hidden = !pokazUslugowe;
+      }
+      const diagnostyka = q<HTMLElement>(sekcja, '[data-role="wyk-diagnostyka"]');
+      if (diagnostyka) diagnostyka.hidden = tryb !== 'usluga';
+
+      if (para) {
+        const dot = q<HTMLElement>(sekcja, '[data-role="wyk-dot"]');
+        if (dot) {
+          dot.hidden = false;
+          setState(sekcja, '[data-role="wyk-dot"]', para.usluga.state);
+        }
+        setText(sekcja, '[data-role="wyk-stack"]', para.stack.name);
+        const repliki = q<HTMLElement>(sekcja, '[data-role="wyk-repliki"]');
+        if (repliki) {
+          repliki.hidden = false;
+          repliki.textContent = para.usluga.replicas_text
+            ?? `${para.usluga.running ?? 0}/${para.usluga.desired ?? 0}`;
+        }
+        const link = q<HTMLAnchorElement>(sekcja, '[data-role="wyk-link"]');
+        if (link && zakres) {
+          link.href = doHaszaWykresow(klucz, zakres.id);
+          link.title = `Szczegóły wykresów: ${klucz}`;
+        }
+        const szczegoly = q<HTMLElement>(sekcja, '[data-role="wyk-szczegoly"]');
+        if (szczegoly) szczegoly.dataset.usluga = klucz;
+        const linkStan = q<HTMLAnchorElement>(sekcja, '[data-role="wyk-link-stan"]');
+        if (linkStan) linkStan.href = doHasza(filtr, klucz);
+      } else {
+        const nazwa = q<HTMLAnchorElement>(sekcja, '[data-role="wyk-link"]');
+        if (nazwa) {
+          nazwa.removeAttribute('href');
+          nazwa.classList.add('row-name-plain');
+        }
+      }
+      return sekcja;
+    }
+
+    function zbudujSekcjeWykresow(
+      podmiot: string | null,
+      pary: ReadonlyArray<{ stack: Stack; usluga: Service }>,
+      zakres: Zakres,
+    ): void {
+      const doWyboru = podmiot === null || podmiot === PODMIOT_WSZYSTKIE
+        ? pary
+        : (wszystkiePary().length > 0 ? wszystkiePary() : pary);
+      const sekcje = q<HTMLElement>(app, '[data-role="wykresy-sekcje"]');
+      if (!sekcje) return;
+      const czas = etykietyCzasu(zakres, Math.floor(Date.now() / 1000));
+      const podpisCzasu = `${czas.od} – ${czas.do} UTC · ${podpisZakresu(zakres)}`;
+
+      if (podmiot === null) {
+        const sekcja = sekcjaWykresow(
+          'Cały VPS',
+          `node-exporter · ${podpisCzasu}`,
+          'vps',
+          'vps',
+        );
+        if (!sekcja) return;
+        const siatka = q<HTMLElement>(sekcja, '[data-role="wyk-siatka"]');
+        const ileFigur = opisWykresowVps(null, zakres).length;
+        for (let indeks = 0; indeks < ileFigur; indeks += 1) {
+          const figura = instantiate('tpl-wykres');
+          if (!figura || !siatka) continue;
+          siatka.append(figura);
+        }
+        sekcje.replaceChildren(sekcja);
+        return;
+      }
+
+      if (podmiot === PODMIOT_WSZYSTKIE) {
+        const elementy: HTMLElement[] = [];
+        for (const para of pary) {
+          const klucz = kluczSerii(para.stack.name, para.usluga.name);
+          const sekcja = sekcjaWykresow(
+            para.usluga.name,
+            `${para.stack.name} · ${podpisCzasu}`,
+            klucz,
+            'lista',
+            para,
+            zakres,
+          );
+          if (!sekcja) continue;
+          const siatka = q<HTMLElement>(sekcja, '[data-role="wyk-siatka"]');
+          const opisy = opisWykresowUslugi(para.usluga, para.stack.name, null, zakres, true);
+          for (let indeks = 0; indeks < opisy.length; indeks += 1) {
+            const figura = instantiate('tpl-wykres');
+            if (!figura || !siatka) continue;
+            siatka.append(figura);
+          }
+          elementy.push(sekcja);
+        }
+        sekcje.replaceChildren(...elementy);
+        return;
+      }
+
+      const znaleziona = znajdzUsluge(
+        doWyboru.map((para) => ({ stack: para.stack.name, usluga: para.usluga })),
+        podmiot,
+      );
+      if (!znaleziona) {
+        sekcje.replaceChildren();
+        pokazKomunikatWykresow(`Nie znaleziono usługi „${podmiot}" — wybierz ją z listy powyżej.`);
+        return;
+      }
+      const klucz = kluczSerii(znaleziona.stack, znaleziona.usluga.name);
+      const para = doWyboru.find((p) => kluczSerii(p.stack.name, p.usluga.name) === klucz);
+      if (!para) {
+        sekcje.replaceChildren();
+        pokazKomunikatWykresow(`Nie znaleziono usługi „${podmiot}" — wybierz ją z listy powyżej.`);
+        return;
+      }
+      const sekcja = sekcjaWykresow(
+        para.usluga.name,
+        `${para.stack.name} · ${podpisCzasu}`,
+        klucz,
+        'usluga',
+        para,
+        zakres,
+      );
+      if (!sekcja) return;
+      const siatka = q<HTMLElement>(sekcja, '[data-role="wyk-siatka"]');
+      const ileFigur = opisWykresowUslugi(para.usluga, para.stack.name, null, zakres).length;
+      for (let indeks = 0; indeks < ileFigur; indeks += 1) {
+        const figura = instantiate('tpl-wykres');
+        if (!figura || !siatka) continue;
+        siatka.append(figura);
+      }
+      wypelnijDiagnostyke(sekcja, ROLE_WYKRESY, znaleziona.usluga);
+      sekcje.replaceChildren(sekcja);
+    }
+
+    /** Wypełnienie/odświeżenie figur bez przebudowy DOM (serce „na żywo"). */
+    function wypelnijWykresy(
+      zbior: ZbiorSerii,
+      podmiot: string | null,
+      zakres: Zakres,
+      pary: ReadonlyArray<{ stack: Stack; usluga: Service }>,
+    ): void {
+      const sekcje = qa<HTMLElement>(app, '[data-role="wyk-sekcja"]');
+      let ile = 0;
+      for (const sekcja of sekcje) {
+        const klucz = sekcja.dataset.podmiot ?? '';
+        const figury = qa<HTMLElement>(sekcja, '[data-role="wyk-figura"]');
+        if (klucz === 'vps') {
+          const opisy = opisWykresowVps(zbior, zakres);
+          figury.forEach((figura, indeks) => {
+            const opis = opisy[indeks];
+            if (!opis) return;
+            rysujWykres(figura, opis, zakres, null);
+            ile += 1;
+          });
+          const rdzenie = ostatniaWartosc(seriaVps(zbior, 'vps_rdzenie'));
+          setText(
+            sekcja,
+            '[data-role="wyk-sekcja-podpis"]',
+            rdzenie === null
+              ? 'node-exporter'
+              : `node-exporter · ${formatujLiczbe(rdzenie, 0)} rdzeni`,
+          );
+          continue;
+        }
+        const zbiorPar = podmiot === PODMIOT_WSZYSTKIE ? pary : wszystkiePary();
+        const para = (zbiorPar.length > 0 ? zbiorPar : pary).find(
+          (p) => kluczSerii(p.stack.name, p.usluga.name) === klucz,
+        );
+        if (!para) continue;
+        const skrocony = podmiot === PODMIOT_WSZYSTKIE;
+        const opisy = opisWykresowUslugi(para.usluga, para.stack.name, zbior, zakres, skrocony);
+        figury.forEach((figura, indeks) => {
+          const opis = opisy[indeks];
+          if (!opis) return;
+          rysujWykres(figura, opis, zakres, klucz);
+          ile += 1;
+        });
+        setState(sekcja, '[data-role="wyk-dot"]', para.usluga.state);
+        setText(
+          sekcja,
+          '[data-role="wyk-repliki"]',
+          para.usluga.replicas_text ?? `${para.usluga.running ?? 0}/${para.usluga.desired ?? 0}`,
+        );
+      }
+      setText(app, '[data-role="wykresy-licznik"]', `${ile} wykresów`);
+    }
+
+    /**
+     * Przebudowa widoku wykresów. Wołane przy każdej zmianie trasy, ale DOM
+     * rusza się tylko wtedy, gdy zmienił się podmiot, zakres albo zbiór usług —
+     * inaczej odświeżanie co 5–10 s przewracałoby przewijanie.
      */
     async function renderWykresy(route: RouteWykresy): Promise<void> {
-      const lista = q<HTMLElement>(app, '[data-role="wykresy-lista"]');
-      const szczegoly = q<HTMLElement>(app, '[data-role="wykresy-szczegoly"]');
-      const komunikat = q<HTMLElement>(app, '[data-role="wykresy-komunikat"]');
-      if (!lista || !szczegoly) return;
-
-      const pokazKomunikat = (tekst: string | null): void => {
-        if (!komunikat) return;
-        komunikat.hidden = tekst === null;
-        komunikat.textContent = tekst ?? '';
-      };
+      const sekcje = q<HTMLElement>(app, '[data-role="wykresy-sekcje"]');
+      if (!sekcje) return;
 
       if (!snapshot) {
-        pokazKomunikat('Wczytywanie danych o usługach…');
+        pokazKomunikatWykresow('Wczytywanie danych o usługach…');
         return;
       }
 
@@ -2074,199 +2617,126 @@ import LogiView from '../components/LogiView.astro';
         stack.services.map((usluga) => ({ stack, usluga })),
       );
 
-      if (pary.length === 0) {
+      if (pary.length === 0 && route.podmiot !== null) {
         sygnaturaWykresow = '';
-        lista.replaceChildren();
-        szczegoly.replaceChildren();
-        szczegoly.hidden = true;
-        lista.hidden = false;
-        pokazKomunikat('Filtr nie przepuszcza żadnej usługi — wyczyść filtr w widoku stanu.');
+        sekcje.replaceChildren();
+        pokazKomunikatWykresow('Filtr nie przepuszcza żadnej usługi — wyczyść filtr w widoku stanu.');
         return;
       }
 
-      const dane = await pobierzSerie(zakres);
-      if (!dane) {
-        pokazKomunikat(
+      const zbior = await pobierzZbior(zakres);
+      if (!zbior) {
+        pokazKomunikatWykresow(
           'Nie udało się pobrać przebiegów z Prometheusa — wykresy są niedostępne, dane bieżące w widoku stanu nadal działają.',
         );
         return;
       }
-      pokazKomunikat(null);
+      pokazKomunikatWykresow(null);
 
       const sygnatura = [
-        route.usluga ?? 'lista',
+        route.podmiot ?? 'vps',
         zakres.id,
-        pary.map((para) => kluczSerii(para.stack.name, para.usluga.name)).join(','),
+        route.podmiot === PODMIOT_WSZYSTKIE
+          ? pary.map((para) => kluczSerii(para.stack.name, para.usluga.name)).join(',')
+          : '',
       ].join('|');
 
       if (sygnatura !== sygnaturaWykresow) {
         sygnaturaWykresow = sygnatura;
-        if (route.usluga) {
-          const znaleziona = znajdzUsluge(
-            pary.map((para) => ({ stack: para.stack.name, usluga: para.usluga })),
-            route.usluga,
-          );
-          if (!znaleziona) {
-            lista.replaceChildren();
-            szczegoly.hidden = false;
-            lista.hidden = true;
-            szczegoly.replaceChildren();
-            pokazKomunikat(
-              `Nie znaleziono usługi „${route.usluga}" — wróć do listy wykresów i wybierz usługę z listy.`,
-            );
-            return;
-          }
-          zbudujSzczegolyWykresow(znaleziona.stack, znaleziona.usluga, zakres);
-        } else {
-          zbudujListeWykresow(pary, zakres);
-          void renderTop(zakres);
-        }
+        zbudujSekcjeWykresow(route.podmiot, pary, zakres);
       }
-
-      odswiezWykresy(pary, dane, zakres, route.usluga);
+      wypelnijWykresy(zbior, route.podmiot, zakres, pary);
+      zaktualizujPodpisOdswiezania();
+      void renderTop(zakres);
     }
 
-    function zbudujListeWykresow(
-      pary: ReadonlyArray<{ stack: Stack; usluga: Service }>,
-      zakres: Zakres,
-    ): void {
-      const lista = q<HTMLElement>(app, '[data-role="wykresy-lista"]');
-      const szczegoly = q<HTMLElement>(app, '[data-role="wykresy-szczegoly"]');
-      if (!lista || !szczegoly) return;
-      szczegoly.hidden = true;
-      szczegoly.replaceChildren();
-      lista.hidden = false;
-
-      const czas = etykietyCzasu(zakres, Math.floor(Date.now() / 1000));
-      const karty: HTMLElement[] = [];
-      for (const para of pary) {
-        const karta = instantiate('tpl-wykres-karta');
-        if (!karta) continue;
-        karta.dataset.stack = para.stack.name;
-        karta.dataset.usluga = para.usluga.name;
-        setState(karta, '[data-role="wyk-dot"]', para.usluga.state);
-        setText(karta, '[data-role="wyk-nazwa"]', para.usluga.name);
-        setText(karta, '[data-role="wyk-stack"]', para.stack.name);
-        setText(
-          karta,
-          '[data-role="wyk-repliki"]',
-          para.usluga.replicas_text ?? `${para.usluga.running ?? 0}/${para.usluga.desired ?? 0}`,
-        );
-        const link = q<HTMLAnchorElement>(karta, '[data-role="wyk-link"]');
-        if (link) {
-          link.href = doHaszaWykresow(kluczSerii(para.stack.name, para.usluga.name), zakres.id);
-          link.title = `Szczegóły wykresów: ${para.stack.name}/${para.usluga.name}`;
-        }
-        const przycisk = q<HTMLElement>(karta, '[data-role="wyk-szczegoly"]');
-        if (przycisk) przycisk.dataset.usluga = kluczSerii(para.stack.name, para.usluga.name);
-
-        const siatka = q<HTMLElement>(karta, '[data-role="wyk-siatka"]');
-        if (siatka) {
-          for (const opis of opisFigur(metrykiUslugi(null, para.stack.name, para.usluga), para.usluga)) {
-            const figura = instantiate('tpl-wykres');
-            if (!figura) continue;
-            rysujFigure(figura, opis, false);
-            setText(figura, '[data-role="wyk-czas-od"]', czas.od);
-            setText(figura, '[data-role="wyk-czas-do"]', czas.do);
-            siatka.append(figura);
-          }
-        }
-        karty.push(karta);
-      }
-      lista.replaceChildren(...karty);
-    }
-
-    function zbudujSzczegolyWykresow(stack: string, usluga: Service, zakres: Zakres): void {
-      const lista = q<HTMLElement>(app, '[data-role="wykresy-lista"]');
-      const szczegoly = q<HTMLElement>(app, '[data-role="wykresy-szczegoly"]');
-      if (!lista || !szczegoly) return;
-      lista.hidden = true;
-      lista.replaceChildren();
-      szczegoly.hidden = false;
-
-      const kontener = instantiate('tpl-wykres-szczegoly');
-      if (!kontener) return;
-      kontener.dataset.stack = stack;
-      kontener.dataset.usluga = usluga.name;
-      setState(kontener, '[data-role="wyk-dot"]', usluga.state);
-      setText(kontener, '[data-role="wyk-nazwa-uslugi"]', usluga.name);
-      setText(kontener, '[data-role="wyk-stack-uslugi"]', stack);
-      setText(
-        kontener,
-        '[data-role="wyk-repliki-uslugi"]',
-        usluga.replicas_text ?? `${usluga.running ?? 0}/${usluga.desired ?? 0}`,
+    /**
+     * Wszystkie usługi ze snapshotu (bez filtra). Selektor podmiotu — jak ten
+     * w widoku „Logi" — jest niezależny od filtra, więc wybrana usługa musi się
+     * rozwiązać także wtedy, gdy filtr ukrywa jej kartę. Inaczej kliknięcie
+     * w zapisany link kończyłoby się „nie znaleziono usługi".
+     */
+    function wszystkiePary(): Array<{ stack: Stack; usluga: Service }> {
+      if (!snapshot) return [];
+      return snapshot.stacks.flatMap((stack) =>
+        stack.services.map((usluga) => ({ stack, usluga })),
       );
-      wypelnijDiagnostyke(kontener, ROLE_WYKRESY, usluga);
-      const czas = etykietyCzasu(zakres, Math.floor(Date.now() / 1000));
-      const siatka = q<HTMLElement>(kontener, '[data-role="wyk-duze"]');
-      if (siatka) {
-        for (const opis of opisFigur(metrykiUslugi(null, stack, usluga), usluga)) {
-          const figura = instantiate('tpl-wykres-duzy');
-          if (!figura) continue;
-          rysujFigure(figura, opis, true);
-          setText(figura, '[data-role="wyk-czas-od"]', `${czas.od} UTC`);
-          setText(figura, '[data-role="wyk-czas-do"]', `${czas.do} UTC`);
-          siatka.append(figura);
-        }
-      }
-      szczegoly.replaceChildren(kontener);
     }
 
-    /** Odświeżenie liczb i linii bez przebudowy DOM (co cykl odświeżania panelu). */
-    function odswiezWykresy(
-      pary: ReadonlyArray<{ stack: Stack; usluga: Service }>,
-      dane: SerieZbioru,
-      zakres: Zakres,
-      wybrana: string | null,
-    ): void {
-      const czas = etykietyCzasu(zakres, Math.floor(Date.now() / 1000));
-      if (wybrana) {
-        const kontener = q<HTMLElement>(app, '[data-role="wyk-szczegoly"]');
-        if (!kontener) return;
-        const znaleziona = znajdzUsluge(
-          pary.map((para) => ({ stack: para.stack.name, usluga: para.usluga })),
-          wybrana,
-        );
-        if (!znaleziona) return;
-        const stack = znaleziona.stack;
-        const usluga = znaleziona.usluga;
-        const opisy = opisFigur(metrykiUslugi(dane, stack, usluga), usluga);
-        qa<HTMLElement>(kontener, '[data-role="wyk-figura"]').forEach((figura, indeks) => {
-          const opis = opisy[indeks];
-          if (!opis) return;
-          rysujFigure(figura, opis, true);
-          setText(figura, '[data-role="wyk-czas-od"]', `${czas.od} UTC`);
-          setText(figura, '[data-role="wyk-czas-do"]', `${czas.do} UTC`);
-        });
-        setState(kontener, '[data-role="wyk-dot"]', usluga.state);
-        setText(
-          kontener,
-          '[data-role="wyk-repliki-uslugi"]',
-          usluga.replicas_text ?? `${usluga.running ?? 0}/${usluga.desired ?? 0}`,
-        );
-        wypelnijDiagnostyke(kontener, ROLE_WYKRESY, usluga);
+    function zaktualizujPodpisOdswiezania(): void {
+      const trasa = zHaszaWykresy(window.location.hash);
+      const odswiezanie = odswiezanieZId(trasa.odswiez);
+      setText(app, '[data-role="wykresy-odswiez-podpis"]', podpisOdswiezania(odswiezanie));
+      setText(
+        app,
+        '[data-role="wykresy-aktualizacja"]',
+        `aktualizacja ${new Date().toISOString().slice(11, 19)} UTC`,
+      );
+    }
+
+    /** Odświeżenie danych w miejscu — wołane przez timer widoku wykresów. */
+    async function odswiezDaneWykresow(): Promise<void> {
+      if (!snapshot || app.dataset.view !== 'wykresy') return;
+      const route = parseRoute();
+      if (route.kind !== 'wykresy') return;
+      const zakres = zakresZId(route.zakres);
+      const zbior = await pobierzZbior(zakres, true);
+      if (!zbior) {
+        pokazKomunikatWykresow('Odświeżenie nie powiodło się — Prometheus nie odpowiedział.');
         return;
       }
+      pokazKomunikatWykresow(null);
+      const widok = przygotujWidok(snapshot);
+      const pary = widok.stacki.stacki.flatMap((stack) =>
+        stack.services.map((usluga) => ({ stack, usluga })),
+      );
+      wypelnijWykresy(zbior, route.podmiot, zakres, pary);
+      zaktualizujPodpisOdswiezania();
+    }
 
-      const lista = q<HTMLElement>(app, '[data-role="wykresy-lista"]');
-      if (!lista) return;
-      for (const karta of qa<HTMLElement>(lista, '[data-role="wyk-karta"]')) {
-        const stack = karta.dataset.stack ?? '';
-        const nazwa = karta.dataset.usluga ?? '';
-        const para = pary.find((p) => p.stack.name === stack && p.usluga.name === nazwa);
-        if (!para) continue;
-        const opisy = opisFigur(metrykiUslugi(dane, stack, para.usluga), para.usluga);
-        qa<HTMLElement>(karta, '[data-role="wyk-figura"]').forEach((figura, indeks) => {
-          const opis = opisy[indeks];
-          if (opis) rysujFigure(figura, opis, false);
-        });
-        setState(karta, '[data-role="wyk-dot"]', para.usluga.state);
-        setText(
-          karta,
-          '[data-role="wyk-repliki"]',
-          para.usluga.replicas_text ?? `${para.usluga.running ?? 0}/${para.usluga.desired ?? 0}`,
+    function zatrzymajTimerWykresow(): void {
+      if (timerWykresow !== null) {
+        window.clearInterval(timerWykresow);
+        timerWykresow = null;
+      }
+    }
+
+    /**
+     * Timer odświeżania. Karta w tle = zero zapytań (`document.hidden`), a po
+     * powrocie dane dociąga zdarzenie `visibilitychange`.
+     */
+    function ustawTimerWykresow(id: OdswiezId): void {
+      zatrzymajTimerWykresow();
+      const odswiezanie = odswiezanieZId(id);
+      if (!czyOdswiezac(odswiezanie) || app.dataset.view !== 'wykresy') return;
+      timerWykresow = window.setInterval(() => {
+        if (document.hidden || app.dataset.view !== 'wykresy') return;
+        void odswiezDaneWykresow();
+      }, odswiezanie.ms as number);
+    }
+
+    /** Select podmiotu: „Cały VPS", „Wszystkie usługi" i każda usługa (jak w logach). */
+    function wypelnijPodmioty(trasa: RouteWykresy): void {
+      const select = q<HTMLSelectElement>(app, '[data-role="wykresy-podmiot"]');
+      if (!select) return;
+      const opcje = [
+        { klucz: '', etykieta: 'Cały VPS (node-exporter)' },
+        { klucz: PODMIOT_WSZYSTKIE, etykieta: 'Wszystkie usługi (CPU i RAM)' },
+        ...opcjeUslug().map((opcja) => ({ klucz: opcja.klucz, etykieta: opcja.etykieta })),
+      ];
+      const sygnatura = opcje.map((opcja) => opcja.klucz).join('|');
+      if (select.dataset.pelny !== sygnatura) {
+        select.dataset.pelny = sygnatura;
+        select.replaceChildren(
+          ...opcje.map((opcja) => {
+            const element = document.createElement('option');
+            element.value = opcja.klucz;
+            element.textContent = opcja.etykieta;
+            return element;
+          }),
         );
       }
+      select.value = trasa.podmiot ?? '';
     }
 
     function eksportCsv(): void {
@@ -2766,7 +3236,7 @@ import LogiView from '../components/LogiView.astro';
         if (action === 'wykres-zakres') {
           const zakres = zakresZId(trigger.dataset.zakres);
           const trasa = zHaszaWykresy(window.location.hash);
-          window.location.hash = doHaszaWykresow(trasa.usluga, zakres.id);
+          window.location.hash = doHaszaWykresow(trasa.podmiot, zakres.id, trasa.odswiez);
           return;
         }
         if (action === 'wykres-top') {
@@ -2790,8 +3260,12 @@ import LogiView from '../components/LogiView.astro';
           return;
         }
         if (action === 'wykres-usluga') {
-          const zakres = zakresZId(zHaszaWykresy(window.location.hash).zakres);
-          window.location.hash = doHaszaWykresow(trigger.dataset.usluga ?? null, zakres.id);
+          const trasa = zHaszaWykresy(window.location.hash);
+          window.location.hash = doHaszaWykresow(
+            trigger.dataset.usluga ?? null,
+            zakresZId(trasa.zakres).id,
+            trasa.odswiez,
+          );
           return;
         }
         if (action === 'pokaz-fokus') {
@@ -2874,6 +3348,21 @@ import LogiView from '../components/LogiView.astro';
         };
         odswiezWidok();
       }
+      if (target instanceof HTMLSelectElement && target.dataset.role === 'wykresy-podmiot') {
+        const trasa = zHaszaWykresy(window.location.hash);
+        window.location.hash = doHaszaWykresow(
+          target.value || null,
+          zakresZId(trasa.zakres).id,
+          trasa.odswiez,
+        );
+        return;
+      }
+      if (target instanceof HTMLSelectElement && target.dataset.role === 'wykresy-odswiez') {
+        const trasa = zHaszaWykresy(window.location.hash);
+        const odswiezanie = odswiezanieZId(target.value);
+        window.location.hash = doHaszaWykresow(trasa.podmiot, zakresZId(trasa.zakres).id, odswiezanie.id);
+        return;
+      }
       if (target instanceof HTMLSelectElement && target.dataset.role === 'logi-zrodlo') {
         const trasa = zHaszaLogi(window.location.hash);
         // Zmiana źródła kasuje wybór usługi tylko wtedy, gdy nowe źródło jej
@@ -2932,6 +3421,9 @@ import LogiView from '../components/LogiView.astro';
       if (document.visibilityState !== 'visible') return;
       const isStale = !lastGoodAt || Date.now() - lastGoodAt.getTime() > refreshMs;
       if (isStale) void load();
+      // Wykresy mają własny cykl: w tle nie pytamy Prometheusa, więc po powrocie
+      // na kartę dane mogły się zestarzeć o cały czas nieobecności.
+      if (app.dataset.view === 'wykresy') void odswiezDaneWykresow();
     });
 
     window.setInterval(() => void load(), refreshMs);
@@ -2946,6 +3438,8 @@ import LogiView from '../components/LogiView.astro';
     wczytajZwiete();
     wczytajStanZHasza();
     renderMeta();
+    const sekcjeWykresow = q<HTMLElement>(app, '[data-role="wykresy-sekcje"]');
+    if (sekcjeWykresow) podlaczTooltipy(sekcjeWykresow);
     applyRoute();
     void load();
   }

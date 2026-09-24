@@ -493,15 +493,61 @@ export function zbudujUrlQueryRange(expr: string, zakres: Zakres, teraz: number)
 }
 
 /* ------------------------------------------------------------------ *
+ * Odświeżanie danych w widoku wykresów
+ * ------------------------------------------------------------------ */
+
+/**
+ * Interwał odświeżania danych. Domyślnie 10 s — użytkownik chce „na żywo",
+ * ale 5 s potrafi już zamrugać na wolnym łączu, a 30 s jest dla porównania.
+ * `off` znaczy „nie odpytuj Prometheusa w tle" (np. przy analizie wykresu).
+ */
+export type OdswiezId = '5s' | '10s' | '30s' | 'off';
+
+export interface Odswiezanie {
+  id: OdswiezId;
+  etykieta: string;
+  /** Milisekundy; `null` = odświeżanie wyłączone. */
+  ms: number | null;
+}
+
+export const ODSWIEZANIA: readonly Odswiezanie[] = [
+  { id: '5s', etykieta: '5 s', ms: 5_000 },
+  { id: '10s', etykieta: '10 s', ms: 10_000 },
+  { id: '30s', etykieta: '30 s', ms: 30_000 },
+  { id: 'off', etykieta: 'Wyłączone', ms: null },
+];
+
+export const ODSWIEZANIE_DOMYSLNE: OdswiezId = '10s';
+
+export function odswiezanieZId(id: string | null | undefined): Odswiezanie {
+  const znalezione = ODSWIEZANIA.find((odswiezanie) => odswiezanie.id === id);
+  if (znalezione) return znalezione;
+  return ODSWIEZANIA.find((o) => o.id === ODSWIEZANIE_DOMYSLNE) as Odswiezanie;
+}
+
+export function podpisOdswiezania(odswiezanie: Odswiezanie): string {
+  return odswiezanie.ms === null
+    ? 'odświeżanie wyłączone'
+    : `dane co ${odswiezanie.etykieta}`;
+}
+
+/** Czy w ogóle stawiać timer („wyłączone" = zero zapytań w tle). */
+export function czyOdswiezac(odswiezanie: Odswiezanie): boolean {
+  return odswiezanie.ms !== null && odswiezanie.ms > 0;
+}
+
+/* ------------------------------------------------------------------ *
  * Trasa `#/wykresy`
  * ------------------------------------------------------------------ */
 
 export interface TrasaWykresow {
-  usluga: string | null;
+  /** `null` = cały VPS, `'wszystkie'` = lista usług, inaczej `stack/usługa`. */
+  podmiot: string | null;
   zakres: ZakresId;
+  odswiez: OdswiezId;
 }
 
-/** Czy hasz opisuje widok wykresów (`#/wykresy`, `#/wykresy/<usługa>?zakres=…`)? */
+/** Czy hasz opisuje widok wykresów (`#/wykresy`, `#/wykresy/<podmiot>?zakres=…`)? */
 export function czyTrasaWykresow(hash: string = ''): boolean {
   return /^#\/wykresy(?:\/|\?|$)/.test(hash || '');
 }
@@ -511,25 +557,188 @@ export function zHaszaWykresy(hash: string): TrasaWykresow {
   const [sciezka = '', zapytanie = ''] = czysty.split('?');
   const czesci = sciezka.split('/').filter((kawalek) => kawalek.length > 0);
   const surowa = czesci.length > 1 ? czesci.slice(1).join('/') : '';
-  let usluga: string | null = null;
+  let podmiot: string | null = null;
   if (surowa) {
     try {
-      usluga = decodeURIComponent(surowa);
+      podmiot = decodeURIComponent(surowa);
     } catch {
-      usluga = surowa;
+      podmiot = surowa;
     }
   }
   const parametry = new URLSearchParams(zapytanie);
   return {
-    usluga: usluga && usluga.length > 0 ? usluga : null,
+    podmiot: podmiot && podmiot.length > 0 ? podmiot : null,
     zakres: zakresZId(parametry.get('zakres')).id,
+    odswiez: odswiezanieZId(parametry.get('odswiez')).id,
   };
 }
 
-/** Adres widoku wykresów (zakres domyślny pomijamy — krótszy, czytelniejszy link). */
-export function doHaszaWykresow(usluga: string | null, zakres: ZakresId = ZAKRES_DOMYSLNY): string {
-  const baza = usluga ? `#/wykresy/${encodeURIComponent(usluga)}` : '#/wykresy';
-  return zakres === ZAKRES_DOMYSLNY ? baza : `${baza}?zakres=${zakres}`;
+/**
+ * Adres widoku wykresów. Wartości domyślne pomijamy — link ma być krótki
+ * i czytelny (`#/wykresy/ventiplan-prod/api?zakres=24h`).
+ */
+export function doHaszaWykresow(
+  podmiot: string | null,
+  zakres: ZakresId = ZAKRES_DOMYSLNY,
+  odswiez: OdswiezId = ODSWIEZANIE_DOMYSLNE,
+): string {
+  const baza = podmiot ? `#/wykresy/${encodeURIComponent(podmiot)}` : '#/wykresy';
+  const parametry = new URLSearchParams();
+  if (zakres !== ZAKRES_DOMYSLNY) parametry.set('zakres', zakres);
+  if (odswiez !== ODSWIEZANIE_DOMYSLNE) parametry.set('odswiez', odswiez);
+  const zapytanie = parametry.toString();
+  return zapytanie ? `${baza}?${zapytanie}` : baza;
+}
+
+/** Identyfikator podmiotu „wszystkie usługi" (osobny od nazw usług). */
+export const PODMIOT_WSZYSTKIE = 'wszystkie';
+
+/* ------------------------------------------------------------------ *
+ * Podmiot wykresu i tytuły
+ * ------------------------------------------------------------------ */
+
+/** Czytelna nazwa podmiotu: „cały VPS", „wszystkie usługi" albo nazwa usługi. */
+export function podmiotEtykieta(podmiot: string | null): string {
+  if (!podmiot) return 'cały VPS';
+  if (podmiot === PODMIOT_WSZYSTKIE) return 'wszystkie usługi';
+  const czesci = podmiot.split('/');
+  const nazwa = czesci.length > 1 ? czesci[czesci.length - 1] : podmiot;
+  return nazwa && nazwa.length > 0 ? nazwa : podmiot;
+}
+
+/**
+ * Tytuł nad wykresem. Wymaganie użytkownika brzmi wprost: nad każdym wykresem
+ * ma stać, co to za wykres i czego dotyczy („CPU — cały VPS",
+ * „RAM — jolski_na6_pl_prod_wordpress").
+ */
+export function tytulWykresu(metryka: string, podmiot: string | null): string {
+  return `${metryka} — ${podmiotEtykieta(podmiot)}`;
+}
+
+/* ------------------------------------------------------------------ *
+ * Wykresy całego VPS-a (`node_*` z node-exportera)
+ * ------------------------------------------------------------------ */
+
+export interface ZapytanieVps {
+  id: string;
+  expr: string;
+  opis: string;
+}
+
+/** Interfejsy wirtualne i mostki nie są ruchem VPS-a — inaczej liczymy podwójnie. */
+const BEZ_WIRTUALNYCH = 'device!~"lo|docker.*|veth.*|br-.*|fake0"';
+
+/**
+ * Dziewięć zapytań dla widoku „cały VPS". Wszystkie opierają się na metrykach,
+ * które na tym hoście realnie istnieją (sprawdzone zapytaniami do Prometheusa
+ * 22.09.2026): `node_cpu_seconds_total`, `node_memory_*`, `node_network_*`,
+ * `node_filesystem_*`, `node_load1`. Zapytania o „całość" (RAM, dysk, rdzenie)
+ * służą wyłącznie do narysowania linii limitu — nie robią osobnych wykresów.
+ */
+export function zapytaniaVps(): readonly ZapytanieVps[] {
+  return [
+    {
+      id: 'vps_cpu',
+      expr: '100 - (avg(rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)',
+      opis: 'CPU',
+    },
+    {
+      id: 'vps_ram',
+      expr: 'node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes',
+      opis: 'RAM użyta',
+    },
+    { id: 'vps_ram_total', expr: 'node_memory_MemTotal_bytes', opis: 'RAM całość' },
+    {
+      id: 'vps_rx',
+      expr: `sum(rate(node_network_receive_bytes_total{${BEZ_WIRTUALNYCH}}[5m]))`,
+      opis: 'Sieć odbiór',
+    },
+    {
+      id: 'vps_tx',
+      expr: `sum(rate(node_network_transmit_bytes_total{${BEZ_WIRTUALNYCH}}[5m]))`,
+      opis: 'Sieć wysyłka',
+    },
+    {
+      id: 'vps_fs',
+      expr: 'node_filesystem_size_bytes{mountpoint="/"} - node_filesystem_avail_bytes{mountpoint="/"}',
+      opis: 'Dysk użyty',
+    },
+    {
+      id: 'vps_fs_total',
+      expr: 'node_filesystem_size_bytes{mountpoint="/"}',
+      opis: 'Dysk całość',
+    },
+    { id: 'vps_load', expr: 'node_load1', opis: 'Obciążenie' },
+    { id: 'vps_rdzenie', expr: 'count(node_cpu_seconds_total{mode="idle"})', opis: 'Rdzenie' },
+  ];
+}
+
+/* ------------------------------------------------------------------ *
+ * Geometria i tooltip
+ * ------------------------------------------------------------------ */
+
+/**
+ * Rozmiar rysunku w jednostkach SVG. `viewBox` skaluje się do szerokości karty
+ * (maks. 800 px), więc jedna figura obsługuje i listę, i szczegóły — nie ma już
+ * dwóch rozmiarów wykresu („mały" był nieczytelny, co zgłosił użytkownik).
+ */
+export const WYKRES_SZEROKOSC = 800;
+export const WYKRES_WYSOKOSC = 240;
+export const WYKRES_MARGINES = 12;
+/** Liczba linii siatki = liczba etykiet osi Y. */
+export const WYKRES_LINIE = 4;
+
+/**
+ * Indeks najbliższego punktu dla pozycji kursora. Rysowanie rozkłada punkty
+ * równomiernie po szerokości (`punktyWykresu`), więc ten sam rachunek daje
+ * spójny tooltip: to, co pod kursorem, jest tym, co pokazujemy.
+ */
+export function indeksNajblizszy(
+  pozycjaX: number,
+  szerokosc: number = WYKRES_SZEROKOSC,
+  ile: number,
+): number | null {
+  if (!(ile > 0) || !(szerokosc > 0) || !Number.isFinite(pozycjaX)) return null;
+  if (ile === 1) return 0;
+  const udzial = Math.min(1, Math.max(0, pozycjaX / szerokosc));
+  return Math.round(udzial * (ile - 1));
+}
+
+/**
+ * Etykieta chwili dla tooltipa — zawsze UTC i zawsze z datą przy długich
+ * zakresach. Zmierzone na mocku: przy 24 h sama godzina dawała „22:06 → 22:06"
+ * i nie było widać, że to doba.
+ */
+export function etykietaPunktu(ts: number, zakres: Zakres): string {
+  const data = new Date(ts * 1000);
+  const dzien = `${dwa(data.getUTCDate())}.${dwa(data.getUTCMonth() + 1)}`;
+  const godzina = `${dwa(data.getUTCHours())}:${dwa(data.getUTCMinutes())}`;
+  if (zakres.sekundy <= 3600) return `${godzina}:${dwa(data.getUTCSeconds())} UTC`;
+  if (zakres.sekundy <= 86400) return `${godzina} UTC`;
+  return `${dzien} ${godzina} UTC`;
+}
+
+/** Wiersz tooltipa: nazwa serii i wartość w jednostce wykresu. */
+export interface WierszTooltipa {
+  nazwa: string;
+  wartosc: number | null;
+  tekst: string;
+}
+
+/**
+ * Buduje wiersze tooltipa dla jednego punktu. `serie` to kolejne linie wykresu
+ * (przy rx/tx i odczycie/zapisie są dwie — bez nazwy nie da się ich odróżnić).
+ */
+export function wierszeTooltipa(
+  serie: readonly { nazwa: string; wartosci: readonly (number | null | undefined)[] }[],
+  indeks: number,
+  jednostka: (wartosc: number | null) => string,
+): WierszTooltipa[] {
+  return serie.map((seria) => {
+    const surowa = seria.wartosci[indeks];
+    const wartosc = czyLiczba(surowa) ? surowa : null;
+    return { nazwa: seria.nazwa, wartosc, tekst: jednostka(wartosc) };
+  });
 }
 
 /* ------------------------------------------------------------------ *

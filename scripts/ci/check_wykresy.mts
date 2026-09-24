@@ -12,24 +12,37 @@
  */
 
 import {
+  ODSWIEZANIA,
+  ODSWIEZANIE_DOMYSLNE,
+  PODMIOT_WSZYSTKIE,
+  WYKRES_LINIE,
+  WYKRES_MARGINES,
+  WYKRES_SZEROKOSC,
+  WYKRES_WYSOKOSC,
   ZAKRESY,
   ZAKRES_DOMYSLNY,
   czyLiczba,
+  czyOdswiezac,
   czyTrasaWykresow,
   doHaszaWykresow,
   etykietyCzasu,
+  etykietaPunktu,
   formatujBajty,
   formatujLiczbe,
   formatujProcent,
   formatujPrzeplywnosc,
   graniceWykresu,
+  indeksNajblizszy,
   kluczSerii,
   limitCpuProcent,
   opisCpu,
   opisDysku,
   opisRam,
   opisSieci,
+  odswiezanieZId,
   osieY,
+  podpisOdswiezania,
+  podmiotEtykieta,
   podpisZakresu,
   procentLimitu,
   punktyWykresu,
@@ -38,7 +51,10 @@ import {
   statystykiDysku,
   statystykiRam,
   statystykiSieci,
+  tytulWykresu,
+  wierszeTooltipa,
   zHaszaWykresy,
+  zapytaniaVps,
   zakresZId,
   zapytaniaZbiorcze,
   zapytaniaTop,
@@ -279,22 +295,26 @@ ok(!czyTrasaWykresow('#/'), 'trasa: widok stanu to nie wykresy');
 ok(!czyTrasaWykresow('#/tool/grafana'), 'trasa: podgląd narzędzia to nie wykresy');
 ok(!czyTrasaWykresow('#/wykresyx'), 'trasa: podobna nazwa nie łapie się na wykresy');
 
-rowne(zHaszaWykresy('#/wykresy'), { usluga: null, zakres: ZAKRES_DOMYSLNY }, 'hasz: lista → brak usługi, domyślny zakres');
+rowne(
+  zHaszaWykresy('#/wykresy'),
+  { podmiot: null, zakres: ZAKRES_DOMYSLNY, odswiez: ODSWIEZANIE_DOMYSLNE },
+  'hasz: lista → cały VPS, domyślny zakres i odświeżanie',
+);
 rowne(
   zHaszaWykresy('#/wykresy/ventiplan-prod%2Fapi?zakres=24h'),
-  { usluga: 'ventiplan-prod/api', zakres: '24h' },
+  { podmiot: 'ventiplan-prod/api', zakres: '24h', odswiez: ODSWIEZANIE_DOMYSLNE },
   'hasz: usługa z ukośnikiem i zakres z parametru',
 );
 rowne(zHaszaWykresy('#/wykresy/api?zakres=bzdura').zakres, ZAKRES_DOMYSLNY, 'hasz: nieznany zakres → domyślny');
-rowne(zHaszaWykresy('#/wykresy/%E4%B8%AD').usluga, '中', 'hasz: nazwa z procentami dekodowana');
-rowne(zHaszaWykresy('#/wykresy/').usluga, null, 'hasz: końcowy ukośnik to wciąż lista');
+rowne(zHaszaWykresy('#/wykresy/%E4%B8%AD').podmiot, '中', 'hasz: nazwa z procentami dekodowana');
+rowne(zHaszaWykresy('#/wykresy/').podmiot, null, 'hasz: końcowy ukośnik to wciąż lista');
 
 rowne(doHaszaWykresow(null), '#/wykresy', 'hasz: lista bez zakresu (domyślny się nie zaśmieca)');
 rowne(doHaszaWykresow('api', '6h'), '#/wykresy/api', 'hasz: domyślny zakres nie trafia do adresu');
 rowne(doHaszaWykresow('api', '1h'), '#/wykresy/api?zakres=1h', 'hasz: inny zakres trafia do adresu');
 rowne(
   zHaszaWykresy(doHaszaWykresow('ventiplan-prod/api', '7d')),
-  { usluga: 'ventiplan-prod/api', zakres: '7d' },
+  { podmiot: 'ventiplan-prod/api', zakres: '7d', odswiez: ODSWIEZANIE_DOMYSLNE },
   'hasz: zapis i odczyt dają to samo (link do wysłania)',
 );
 
@@ -397,6 +417,125 @@ rowne(
 );
 rowne(ograniczTop(pozycje, 0).length, 0, 'top: limit 0 daje pustą listę');
 rowne(parsujTop({ data: { result: 'bzdura' } }), [], 'top: zły kształt → pusta lista');
+
+
+/* ---------------- odświeżanie (5 s / 10 s / 30 s / wyłączone) ---------------- */
+
+rowne(ODSWIEZANIA.length, 4, 'odświeżanie: cztery opcje');
+rowne(odswiezanieZId('5s').ms, 5000, 'odświeżanie: 5 s → 5000 ms');
+rowne(odswiezanieZId('30s').ms, 30000, 'odświeżanie: 30 s → 30000 ms');
+rowne(odswiezanieZId('off').ms, null, 'odświeżanie: wyłączone nie ma interwału');
+rowne(odswiezanieZId('bzdura').id, ODSWIEZANIE_DOMYSLNE, 'odświeżanie: nieznane → domyślne 10 s');
+rowne(odswiezanieZId(null).id, ODSWIEZANIE_DOMYSLNE, 'odświeżanie: brak → domyślne 10 s');
+ok(czyOdswiezac(odswiezanieZId('10s')), 'odświeżanie: 10 s ustawia timer');
+ok(!czyOdswiezac(odswiezanieZId('off')), 'odświeżanie: „wyłączone" nie ustawia timera (zero zapytań w tle)');
+rowne(podpisOdswiezania(odswiezanieZId('5s')), 'dane co 5 s', 'odświeżanie: podpis z interwałem');
+rowne(
+  podpisOdswiezania(odswiezanieZId('off')),
+  'odświeżanie wyłączone',
+  'odświeżanie: podpis dla „wyłączone"',
+);
+
+/* ---------------- trasa: podmiot + zakres + odświeżanie ---------------- */
+
+const trasaVps = zHaszaWykresy('#/wykresy');
+rowne(trasaVps.podmiot, null, 'trasa: #/wykresy to cały VPS');
+rowne(trasaVps.odswiez, ODSWIEZANIE_DOMYSLNE, 'trasa: bez parametru odświeżanie domyślne');
+rowne(zHaszaWykresy('#/wykresy/wszystkie').podmiot, PODMIOT_WSZYSTKIE, 'trasa: tryb „wszystkie usługi"');
+rowne(
+  zHaszaWykresy('#/wykresy/ventiplan-prod%2Fapi?zakres=24h&odswiez=5s').podmiot,
+  'ventiplan-prod/api',
+  'trasa: usługa z ukośnikiem wraca z hasza',
+);
+rowne(zHaszaWykresy('#/wykresy/ventiplan-prod%2Fapi?zakres=24h&odswiez=5s').odswiez, '5s', 'trasa: odświeżanie z hasza');
+rowne(doHaszaWykresow(null), '#/wykresy', 'trasa: domyślny adres jest krótki (bez parametrów)');
+rowne(
+  doHaszaWykresow('ventiplan-prod/api', '24h', '5s'),
+  '#/wykresy/ventiplan-prod%2Fapi?zakres=24h&odswiez=5s',
+  'trasa: pełny adres z parametrami',
+);
+rowne(
+  doHaszaWykresow('bugsink/db', ZAKRES_DOMYSLNY, 'off'),
+  '#/wykresy/bugsink%2Fdb?odswiez=off',
+  'trasa: pomijamy tylko wartości domyślne',
+);
+rowne(
+  zHaszaWykresy(doHaszaWykresow('star-sign/web', '7d', '30s')).podmiot,
+  'star-sign/web',
+  'trasa: zapis i odczyt są spójne',
+);
+
+/* ---------------- tytuły i podmiot ---------------- */
+
+rowne(podmiotEtykieta(null), 'cały VPS', 'podmiot: null → „cały VPS"');
+rowne(podmiotEtykieta(PODMIOT_WSZYSTKIE), 'wszystkie usługi', 'podmiot: tryb zbiorczy');
+rowne(podmiotEtykieta('ventiplan-prod/api'), 'api', 'podmiot: nazwa usługi bez stacka');
+rowne(tytulWykresu('CPU', null), 'CPU — cały VPS', 'tytuł: CPU całego VPS-a');
+rowne(tytulWykresu('RAM', 'jpolski/db'), 'RAM — db', 'tytuł: RAM wskazanej usługi');
+rowne(
+  tytulWykresu('Sieć (rx / tx)', 'jpolski/na6_pl_prod_wordpress'),
+  'Sieć (rx / tx) — na6_pl_prod_wordpress',
+  'tytuł: nazwa serii zostaje, nazwa usługi bez stacka',
+);
+
+/* ---------------- geometria i tooltip ---------------- */
+
+rowne(WYKRES_SZEROKOSC, 800, 'geometria: karta wykresu ma maks. 800 px szerokości');
+ok(WYKRES_WYSOKOSC >= 220 && WYKRES_WYSOKOSC <= 260, 'geometria: wysokość wykresu w widełkach 220–260 px');
+rowne(WYKRES_LINIE, 4, 'geometria: cztery linie siatki = cztery etykiety osi Y');
+rowne(WYKRES_MARGINES, 12, 'geometria: margines rysunku');
+rowne(indeksNajblizszy(0, 800, 10), 0, 'tooltip: lewa krawędź → pierwszy punkt');
+rowne(indeksNajblizszy(800, 800, 10), 9, 'tooltip: prawa krawędź → ostatni punkt');
+rowne(indeksNajblizszy(400, 800, 11), 5, 'tooltip: środek → punkt środkowy');
+rowne(indeksNajblizszy(-50, 800, 10), 0, 'tooltip: poza wykresem z lewej przycinamy do pierwszego');
+rowne(indeksNajblizszy(900, 800, 10), 9, 'tooltip: poza wykresem z prawej przycinamy do ostatniego');
+rowne(indeksNajblizszy(100, 800, 0), null, 'tooltip: brak punktów → brak indeksu');
+rowne(indeksNajblizszy(Number.NaN, 800, 10), null, 'tooltip: NaN nie wywala się');
+rowne(indeksNajblizszy(500, 800, 1), 0, 'tooltip: jedna wartość → punkt zerowy');
+
+const zakres1h = zakresZId('1h');
+const zakres24h = zakresZId('24h');
+const zakres7d = zakresZId('7d');
+const chwila = Date.UTC(2026, 8, 22, 21, 6, 30) / 1000;
+ok(etykietaPunktu(chwila, zakres1h).includes(':30'), 'tooltip: 1 h pokazuje sekundy');
+ok(etykietaPunktu(chwila, zakres1h).endsWith('UTC'), 'tooltip: czas zawsze w UTC');
+rowne(etykietaPunktu(chwila, zakres24h), '21:06 UTC', 'tooltip: 24 h bez daty (godzina wystarcza)');
+ok(etykietaPunktu(chwila, zakres7d).startsWith('22.09'), 'tooltip: 7 d z datą (inaczej „21:06" nic nie mówi)');
+
+const wiersze = wierszeTooltipa(
+  [
+    { nazwa: 'rx (odbiór)', wartosci: [1024, 2048] },
+    { nazwa: 'tx (wysyłka)', wartosci: [512, null] },
+  ],
+  1,
+  (v) => (v === null ? '—' : `${v} B/s`),
+);
+rowne(wiersze.length, 2, 'tooltip: tyle wierszy, ile serii');
+rowne(wiersze[0]?.nazwa, 'rx (odbiór)', 'tooltip: nazwa serii jest pokazywana');
+rowne(wiersze[0]?.tekst, '2048 B/s', 'tooltip: wartość w jednostce wykresu');
+rowne(wiersze[1]?.tekst, '—', 'tooltip: brak punktu pokazujemy kreską, nie zerem');
+
+/* ---------------- zapytania VPS-a ---------------- */
+
+const vps = zapytaniaVps();
+rowne(vps.length, 9, 'VPS: dziewięć zapytań (pięć wykresów + cztery serie pomocnicze)');
+ok(new Set(vps.map((z) => z.id)).size === vps.length, 'VPS: identyfikatory zapytań są unikalne');
+ok(vps.every((z) => z.expr.trim().length > 0), 'VPS: każde zapytanie ma treść');
+ok(vps.every((z) => z.expr.includes('node_')), 'VPS: wszystko opiera się na metrykach node_*');
+ok(
+  vps.some((z) => z.expr.includes('node_cpu_seconds_total')),
+  'VPS: CPU z node_cpu_seconds_total',
+);
+ok(vps.some((z) => z.expr.includes('node_memory_MemAvailable_bytes')), 'VPS: RAM z node_memory_*');
+ok(vps.some((z) => z.expr.includes('node_load1')), 'VPS: obciążenie z node_load1');
+ok(
+  vps.some((z) => z.expr.includes('node_network_receive_bytes_total') && z.expr.includes('device!~')),
+  'VPS: sieć pomija interfejsy wirtualne (inaczej liczymy podwójnie)',
+);
+ok(
+  vps.some((z) => z.expr.includes('node_filesystem_size_bytes') && z.expr.includes('mountpoint="/"')),
+  'VPS: dysk liczy partycję główną',
+);
 
 /* ---------------- wynik ---------------- */
 

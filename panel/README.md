@@ -171,43 +171,63 @@ przeglądarki działa, a widok odtwarza się po odświeżeniu strony.
 
 ### Widok „Wykresy" (bez ramki Grafany)
 
-Po co: żeby ocenić zużycie jednej usługi nie trzeba wchodzić do Grafany —
-osadzona ramka oddaje wykresy razem z cudzą nawigacją i nie da się w niej
-przeskoczyć „ta usługa, ale w 24 h".
+Po co: żeby ocenić zużycie nie trzeba wchodzić do Grafany — osadzona ramka oddaje
+wykresy razem z cudzą nawigacją i nie da się w niej przeskoczyć „ta usługa, ale
+w 24 h".
 
-- **Ranking** (góra `#/wykresy`) — „Top 10 usług" z przełącznikiem CPU / RAM /
-  sieć; jedno zapytanie `topk(10, …)` na metrykę (migawka, nie przebieg), klik
-  w wiersz otwiera szczegóły tej usługi.
-- **Lista** (`#/wykresy`) — karta na każdą usługę widoczną po filtrach
-  (filtrowanie i sortowanie per stack działa jak w widoku stanu): CPU, RAM
-  (z linią limitu) i sieć rx/tx. Pod każdym wykresem liczby tekstem, np.
-  `RAM: 51,0 MiB / 512,0 MiB · 10,0% limitu · maks. 47,5 MiB` oraz
-  `CPU: 12,00% · limit 0,25 vCPU · 48,0% limitu` (linia limitu także na
-  wykresie CPU — limit z API przeliczamy na procent jednego rdzenia: 0,25 vCPU
-  = 25%).
-- **Szczegóły** (`#/wykresy/<stack>/<usługa>?zakres=…`) — cztery duże wykresy
-  z osią czasu (UTC), statystykami (`teraz / maks. / średnia`) oraz przyciskami
-  zakresu 1 h / 6 h / 24 h / 7 d. Stan zakresu siedzi w haszu, więc link do
-  „ta usługa w 24 h" działa i przeżywa odświeżenie.
-- **Dane**: wartości bieżące z `/status/api.json`, przebiegi z
-  `/prometheus/api/v1/query_range` (ten sam origin, przez proxy panelu).
-  Zapytań jest **pięć na cały widok**, nie trzy na usługę: Prometheus oddaje
-  wszystkie serie jednym `sum by (stack, service) (…)`, a panel wybiera swoją
-  usługę. Wynik trzymamy w cache 60 s, więc przełączanie usług nie młóci
-  Prometheusa.
-- **Limity**: CPU i RAM bierzemy z `/status/api.json` (`cpu_limit_cores`,
-  `mem_limit_bytes`) — discovery czyta je ze spec usługi Swarm
-  (`Resources.Limits.NanoCPUs` / `MemoryBytes`), bo metryki znają wyłącznie
-  limit RAM z `docker stats`. Kolejność źródeł dla RAM: API → metryka
-  `swarm_container_memory_limit_bytes` (fallback). Gdy limit jest `null`,
-  interfejs pisze wprost „limit: brak w API" — **nie zgadujemy progu**.
-  Sieć nie ma limitu z definicji, więc pokazujemy B/s.
-- **Rysowanie**: własne `<polyline>` w SVG (jak sparkline w tabeli usług),
-  zero zewnętrznych bibliotek; każdy wykres ma `role="img"` i `aria-label`.
-- **Czysta logika** (zakresy, formatowanie, procenty limitów, osie, geometria,
-  trasa) siedzi w `src/lib/wykresy.ts` i jest testowana Node'em:
-  `node scripts/ci/check_wykresy.mts` (102 sprawdzenia w CI, krok „Testy logiki
-  wykresów" w jobie `panel`).
+**Układ (wymagania użytkownika):**
+
+- **Podmiot wybiera się na górze** (wzorzec z widoku „Logi"): `Cały VPS
+  (node-exporter)`, `Wszystkie usługi (CPU i RAM)` oraz każda usługa jako
+  `stack / usługa`. Domyślnie **cały VPS**. Wybór siedzi w haszu, więc link
+  „ta usługa w 24 h, co 5 s" działa i przeżywa odświeżenie.
+- **Maksymalnie dwa wykresy w wierszu**, karta do **800 px** szerokości
+  (`WYKRES_SZEROKOSC`), rysunek **240 px** wysokości (na ekranie ≤700 px —
+  220 px). Na 1980 px karty mają dokładnie 800 px i układają się 2 / 2 / 1.
+- **Nad każdym wykresem tytuł**: `CPU — cały VPS`, `RAM — grafana`,
+  `Sieć (rx / tx) — na6_pl_prod_wordpress`, `Dysk (odczyt / zapis) — …`.
+- **Sekcja = podmiot**: nagłówek z nazwą, stackiem, stanem i replikami oraz
+  wyraźny separator (lewa krawędź + własne tło), żeby nie było wątpliwości, gdzie
+  kończy się jedna usługa.
+- **Tooltip**: najechanie na wykres (albo `Tab` + strzałki) pokazuje pionową
+  linię, kropkę na każdej serii oraz czas (UTC, przy 7 d z datą) i wartości
+  z jednostkami; przy wykresach dwuseriowych widać nazwy (`rx (odbiór)`,
+  `tx (wysyłka)`, `odczyt`, `zapis`). `Esc` zamyka tooltip.
+
+**Co pokazują wykresy:**
+
+| Podmiot | Wykresy |
+| --- | --- |
+| Cały VPS | CPU, RAM (linia = pamięć całkowita), Sieć rx/tx, Dysk (linia = pojemność `/`), Obciążenie (linia = liczba rdzeni) |
+| Jedna usługa | CPU (linia = limit z API), RAM (linia = limit), Sieć rx/tx, Dysk odczyt/zapis + diagnostyka usługi |
+| Wszystkie usługi | CPU i RAM każdej usługi (dwa wykresy na sekcję — 47 usług × 4 wykresy co 10 s byłoby zbyt ciężkie) |
+
+**Odświeżanie „na żywo":** przełącznik `5 s / 10 s (domyślnie) / 30 s /
+Wyłączone`. Timer odświeża **dane w miejscu** — podmieniane są tylko atrybuty
+`points` i teksty, więc lista nie jest przebudowywana, przewijanie i stan
+kontrolek zostają (zmierzone: ten sam węzeł w DOM i `scrollY` zachowany po
+cyklu). Gdy karta przeglądarki jest w tle (`document.hidden`), nie leci **żadne**
+zapytanie; po powrocie na kartę dane dociąga `visibilitychange`. „Wyłączone"
+to zero zapytań w tle (zmierzone: 0 przez 12 s).
+
+**Dane:** wartości bieżące i limity z `/status/api.json`, przebiegi z
+`/prometheus/api/v1/query_range` (ten sam origin, przez proxy panelu).
+Zapytań jest **16 na pełny cykl** — 7 metryk usług (`sum by (stack, service) (…)`)
+i 9 metryk `node_*` dla VPS-a — a nie 3 na usługę (przy 47 usługach byłoby
+~200 żądań). Cache: 60 s przy wejściu w widok, 2 s przy odświeżaniu na żywo.
+
+**Limity:** CPU i RAM z API (`cpu_limit_cores`, `mem_limit_bytes` — discovery
+czyta je ze spec usługi Swarm), a gdy API ich nie zna, RAM schodzi na metrykę
+`swarm_container_memory_limit_bytes`. Gdy limitu nie ma, interfejs pisze wprost
+„limit: brak w API" — **nie zgadujemy progu**. Sieć i dysk limitu nie mają.
+
+**Rysowanie:** własne `<polyline>` w SVG, zero zewnętrznych bibliotek; każdy
+wykres ma `role="img"` i `aria-label` z podsumowaniem (teraz / maksimum).
+
+**Czysta logika** (zakresy, odświeżanie, trasa z podmiotem, formatowanie,
+procenty limitów, osie, geometria, tooltip) siedzi w `src/lib/wykresy.ts`
+i jest testowana Node'em: `node scripts/ci/check_wykresy.mts`
+(**203 sprawdzenia** w CI, krok „Testy logiki wykresów" w jobie `panel`).
 
 Kafelek z `"embed": true` ładuje narzędzie w tym samym widoku; kafelek z
 `"embed": false` otwiera nową kartę (`target="_blank" rel="noopener"`). Kafelek
@@ -311,7 +331,7 @@ panel/
       ├─ StatusHeader.astro  HostStat.astro  StatBlock.astro
       ├─ ToolGrid.astro      ToolTile.astro  IframeView.astro
       ├─ FiltersBar.astro    ChangesSection.astro SortableTh.astro
-      ├─ WykresyView.astro   # widok „Wykresy": nagłówek, zakresy, szablony wykresów
+      ├─ WykresyView.astro   # widok „Wykresy": selektor podmiotu, zakresy, odświeżanie, szablony
       ├─ ChecksSection.astro StacksSection.astro CertsSection.astro
       ├─ BackupSection.astro SecuritySection.astro AlertsSection.astro
       ├─ SectionCard.astro   ErrorBanner.astro     IconSprite.astro
