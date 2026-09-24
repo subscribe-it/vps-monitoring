@@ -313,6 +313,56 @@ komend nie pojawiła się żadna operacja zmieniająca
 - widoczny focus (`:focus-visible`), link „Przejdź do treści”,
 - `prefers-reduced-motion: reduce` wyłącza przejścia i pulsowanie wskaźnika.
 
+## Motywy: jasny i ciemny (systemowe)
+
+Motywy wybiera **system**, nie JavaScript. W `panel/src/styles/global.css` są
+dwa motywy daisyUI o tym samym zestawie tokenów:
+
+| Motyw | Rola | `color-scheme` |
+| --- | --- | --- |
+| `ops-day` | domyślny — brak preferencji albo `prefers-color-scheme: light` | `light` |
+| `ops` | wchodzi przez `prefersdark` — `prefers-color-scheme: dark` | `dark` |
+
+Ponieważ wyboru dokonuje przeglądarka przez `@media (prefers-color-scheme)`,
+pierwsza klatka jest już w docelowym motywie: **nie ma migotania** i nie ma
+skryptu ustawiającego motyw. `Base.astro` celowo **nie** ustawia `data-theme`
+(atrybut nadpisałby preferencję użytkownika) i deklaruje
+`<meta name="color-scheme" content="light dark">`; `html` ma
+`color-scheme: light dark`, żeby kontrolki przeglądarki (scrollbar, pola,
+kursor) szły za motywem.
+
+Nasze własne tokeny (stany `--state-*`, `--shadow-overlay`, `--color-subtle`)
+nie należą do daisyUI, więc mają własne warianty: w bloku
+`@media (prefers-color-scheme: dark)` oraz w jawnych zakresach
+`[data-theme="ops"]` / `[data-theme="ops-day"]` (przydatnych w testach).
+
+**Zasady, których pilnuje `node scripts/ci/check_motyw.mts`:**
+1. oba motywy definiują dokładnie ten sam zestaw tokenów,
+2. jasny jest domyślny, ciemny wchodzi przez `prefersdark`,
+3. w regułach nie ma kolorów na sztywno (hex/rgb) — kolor wchodzi wyłącznie
+   z tokenu motywu,
+4. `Base.astro` nie ustawia `data-theme` i deklaruje `color-scheme: light dark`,
+5. każdy własny token ma wariant dla trybu ciemnego.
+
+### Motyw w osadzanych narzędziach (Grafana, Prometheus)
+
+Panel i ramka narzędzia mają **własne** motywy, więc `panel/src/lib/motyw.ts`
+dokłada do adresu ramki `theme=dark|light` — ale tylko dla narzędzi, które ten
+parametr faktycznie rozumieją (Grafana, Prometheus). Alertmanager, Portainer,
+Cockpit i healthchecks.io nie mają potwierdzonego parametru motywu, więc dla
+nich funkcja zwraca `null` i nic nie zmieniamy. Istniejące parametry z API
+(`embed_query`, np. `kiosk` dla Grafany) są zachowane, a parametr nie jest
+dublowany, jeśli już występuje w adresie.
+
+Gdy preferencja systemu zmieni się w trakcie pracy (automatyczny tryb nocny),
+panel podmienia `src` ramki tylko wtedy, gdy narzędzie rozumie `theme=`;
+pozostałe ramki zostają bez przeładowania. Weryfikacja: `#/tool/grafana`
+w trybie jasnym daje `/grafana?kiosk&theme=light`, po przełączeniu systemu na
+ciemny — `/grafana?kiosk&theme=dark` (zmierzone).
+
+Zmiana motywu w testach: emulacja `prefers-color-scheme` w narzędziach
+przeglądarki albo ręcznie `document.documentElement.dataset.theme = 'ops'`.
+
 ## Progi wizualne (tylko prezentacja)
 
 API zwraca gotowe stany dla sekcji, więc panel ich nie wymyśla. Progi stosowane

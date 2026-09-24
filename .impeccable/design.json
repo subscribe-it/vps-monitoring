@@ -1,0 +1,127 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-23T00:00:00Z",
+  "title": "Design System: Monitoring VPS — panel operatorski",
+  "extensions": {
+    "colorMeta": {
+      "void-slate": { "role": "neutral", "displayName": "Void Slate", "canonical": "oklch(17% 0.014 255)", "tonalRamp": ["oklch(15% 0.014 255)", "oklch(20% 0.014 255)", "oklch(26% 0.015 255)", "oklch(34% 0.016 255)", "oklch(46% 0.016 255)", "oklch(62% 0.014 255)", "oklch(78% 0.012 255)", "oklch(93% 0.008 255)"] },
+      "panel-slate": { "role": "neutral", "displayName": "Panel Slate", "canonical": "oklch(21.5% 0.016 255)", "tonalRamp": ["oklch(15% 0.014 255)", "oklch(21.5% 0.016 255)", "oklch(28% 0.017 255)", "oklch(36% 0.018 255)", "oklch(48% 0.018 255)", "oklch(64% 0.015 255)", "oklch(80% 0.012 255)", "oklch(94% 0.008 255)"] },
+      "edge-slate": { "role": "neutral", "displayName": "Edge Slate", "canonical": "oklch(27% 0.018 255)", "tonalRamp": ["oklch(16% 0.014 255)", "oklch(22% 0.016 255)", "oklch(27% 0.018 255)", "oklch(35% 0.019 255)", "oklch(47% 0.019 255)", "oklch(63% 0.016 255)", "oklch(79% 0.013 255)", "oklch(94% 0.008 255)"] },
+      "pale-ink": { "role": "neutral", "displayName": "Pale Ink", "canonical": "oklch(93% 0.008 255)", "tonalRamp": ["oklch(18% 0.02 255)", "oklch(26% 0.02 255)", "oklch(38% 0.018 255)", "oklch(52% 0.016 255)", "oklch(66% 0.013 255)", "oklch(78% 0.011 255)", "oklch(87% 0.009 255)", "oklch(93% 0.008 255)"] },
+      "instrument-cyan": { "role": "primary", "displayName": "Instrument Cyan", "canonical": "oklch(76% 0.13 218)", "tonalRamp": ["oklch(24% 0.06 218)", "oklch(34% 0.09 218)", "oklch(44% 0.11 218)", "oklch(54% 0.12 218)", "oklch(63% 0.13 218)", "oklch(70% 0.13 218)", "oklch(76% 0.13 218)", "oklch(88% 0.07 218)"] },
+      "chart-violet": { "role": "secondary", "displayName": "Chart Violet", "canonical": "oklch(72% 0.09 268)", "tonalRamp": ["oklch(24% 0.05 268)", "oklch(33% 0.07 268)", "oklch(42% 0.08 268)", "oklch(51% 0.09 268)", "oklch(59% 0.09 268)", "oklch(66% 0.09 268)", "oklch(72% 0.09 268)", "oklch(86% 0.05 268)"] },
+      "gauge-teal": { "role": "tertiary", "displayName": "Gauge Teal", "canonical": "oklch(80% 0.13 195)", "tonalRamp": ["oklch(26% 0.06 195)", "oklch(35% 0.09 195)", "oklch(45% 0.11 195)", "oklch(55% 0.12 195)", "oklch(64% 0.13 195)", "oklch(72% 0.13 195)", "oklch(80% 0.13 195)", "oklch(90% 0.07 195)"] },
+      "signal-green": { "role": "primary", "displayName": "Signal Green", "canonical": "oklch(79% 0.16 155)", "tonalRamp": ["oklch(26% 0.07 155)", "oklch(36% 0.11 155)", "oklch(46% 0.14 155)", "oklch(56% 0.16 155)", "oklch(65% 0.16 155)", "oklch(72% 0.16 155)", "oklch(79% 0.16 155)", "oklch(90% 0.08 155)"] },
+      "signal-amber": { "role": "primary", "displayName": "Signal Amber", "canonical": "oklch(85% 0.14 85)", "tonalRamp": ["oklch(28% 0.06 85)", "oklch(38% 0.09 85)", "oklch(48% 0.11 85)", "oklch(58% 0.13 85)", "oklch(68% 0.14 85)", "oklch(77% 0.14 85)", "oklch(85% 0.14 85)", "oklch(93% 0.07 85)"] },
+      "signal-red": { "role": "primary", "displayName": "Signal Red", "canonical": "oklch(73% 0.18 22)", "tonalRamp": ["oklch(24% 0.08 22)", "oklch(34% 0.12 22)", "oklch(44% 0.15 22)", "oklch(54% 0.17 22)", "oklch(61% 0.18 22)", "oklch(67% 0.18 22)", "oklch(73% 0.18 22)", "oklch(88% 0.08 22)"] },
+      "quiet-slate": { "role": "neutral", "displayName": "Quiet Slate", "canonical": "oklch(72% 0.012 255)", "tonalRamp": ["oklch(30% 0.012 255)", "oklch(38% 0.012 255)", "oklch(45% 0.012 255)", "oklch(52% 0.012 255)", "oklch(58% 0.012 255)", "oklch(65% 0.012 255)", "oklch(72% 0.012 255)", "oklch(84% 0.008 255)"] },
+      "paper-cool": { "role": "neutral", "displayName": "Paper Cool", "canonical": "oklch(98.5% 0.004 255)", "tonalRamp": ["oklch(24% 0.02 255)", "oklch(38% 0.014 255)", "oklch(52% 0.012 255)", "oklch(66% 0.01 255)", "oklch(78% 0.008 255)", "oklch(88% 0.006 255)", "oklch(94% 0.005 255)", "oklch(98.5% 0.004 255)"] },
+      "ink-slate": { "role": "neutral", "displayName": "Ink Slate", "canonical": "oklch(24% 0.02 255)", "tonalRamp": ["oklch(24% 0.02 255)", "oklch(32% 0.02 255)", "oklch(42% 0.018 255)", "oklch(54% 0.016 255)", "oklch(66% 0.014 255)", "oklch(78% 0.011 255)", "oklch(90% 0.007 255)", "oklch(96% 0.006 255)"] },
+      "instrument-blue": { "role": "primary", "displayName": "Instrument Blue", "canonical": "oklch(52% 0.15 240)", "tonalRamp": ["oklch(22% 0.06 240)", "oklch(30% 0.09 240)", "oklch(38% 0.12 240)", "oklch(46% 0.14 240)", "oklch(52% 0.15 240)", "oklch(70% 0.10 240)", "oklch(84% 0.06 240)", "oklch(95% 0.02 240)"] }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "Tytuł strony i nazwa widoku." },
+      "title": { "displayName": "Title", "purpose": "Nagłówki sekcji i kart." },
+      "body": { "displayName": "Body", "purpose": "Dane, opisy, treści logów." },
+      "label": { "displayName": "Label", "purpose": "Podpisy pól, nagłówki kolumn, osie." },
+      "mono": { "displayName": "Mono", "purpose": "Liczby, identyfikatory, treści komend i logów." }
+    },
+    "shadows": [
+      { "name": "overlay-day", "value": "0 2px 10px oklch(30% 0.02 255 / 0.18)", "purpose": "Sticky pasek i ramki narzędzi w motywie jasnym." },
+      { "name": "overlay-night", "value": "0 6px 18px -12px oklch(0% 0 0 / 0.75)", "purpose": "Sticky pasek i ramki narzędzi w motywie ciemnym." },
+      { "name": "state-halo", "value": "0 0 0 3px color-mix(in oklab, var(--state) 22%, transparent)", "purpose": "Obwódka odpowiedzi na stan (aktywny wiersz, fokus)." }
+    ],
+    "motion": [
+      { "name": "ease-standard", "value": "cubic-bezier(0.2, 0, 0, 1)", "purpose": "Zmiany stanu kontrolek i podświetleń." },
+      { "name": "duration-fast", "value": "120ms", "purpose": "Hover, fokus, przełączenie chipsa." },
+      { "name": "duration-slow", "value": "240ms", "purpose": "Wejście widoku, zmiana motywu." }
+    ],
+    "breakpoints": [
+      { "name": "narrow", "value": "700px" },
+      { "name": "two-col", "value": "900px" },
+      { "name": "three-col", "value": "1800px" },
+      { "name": "four-col", "value": "2400px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Przycisk operatorski",
+      "kind": "button",
+      "refersTo": "button-ops",
+      "description": "Akcja drugorzędna w kartach i nagłówkach (kopiuj, odśwież, szczegóły).",
+      "html": "<button class=\"ds-btn-ops\" type=\"button\">Kopiuj</button>",
+      "css": ".ds-btn-ops { background: var(--color-base-200); color: var(--color-base-content); border: 1px solid var(--color-base-300); border-radius: var(--radius-selector, 0.5rem); min-height: 32px; padding: 0 10px; font: 500 0.8125rem/1 var(--font-sans); cursor: pointer; transition: background 120ms cubic-bezier(0.2, 0, 0, 1), border-color 120ms cubic-bezier(0.2, 0, 0, 1); } .ds-btn-ops:hover { background: var(--color-base-300); } .ds-btn-ops:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }"
+    },
+    {
+      "name": "Pigułka stanu",
+      "kind": "chip",
+      "refersTo": "pill-state",
+      "description": "Stan usługi w słowniku ok/warning/critical/unknown/disabled.",
+      "html": "<span class=\"ds-pill\" data-state=\"warning\">ostrzeżenie</span>",
+      "css": ".ds-pill { display: inline-flex; align-items: center; gap: 4px; border-radius: 9999px; padding: 2px 8px; font: 500 0.6875rem/1.6 var(--font-sans); letter-spacing: 0.04em; text-transform: uppercase; background: color-mix(in oklab, var(--state) 18%, transparent); color: var(--state); border: 1px solid color-mix(in oklab, var(--state) 32%, transparent); } .ds-pill[data-state=\"ok\"] { --state: var(--color-success); } .ds-pill[data-state=\"warning\"] { --state: var(--color-warning); } .ds-pill[data-state=\"critical\"] { --state: var(--color-error); } .ds-pill[data-state=\"unknown\"] { --state: var(--color-base-content); }"
+    },
+    {
+      "name": "Karta sekcji",
+      "kind": "card",
+      "refersTo": "card-section",
+      "description": "Kontener sekcji panelu: nagłówek 12/16 px i treść.",
+      "html": "<section class=\"ds-card\"><header class=\"ds-card-head\"><h2>Bezpieczeństwo</h2></header><div class=\"ds-card-body\">…</div></section>",
+      "css": ".ds-card { background: var(--color-base-200); color: var(--color-base-content); border: 1px solid var(--color-base-300); border-radius: var(--radius-box, 0.75rem); overflow: hidden; } .ds-card-head { padding: 10px 16px; border-bottom: 1px solid color-mix(in oklab, var(--color-base-300) 70%, transparent); } .ds-card-head h2 { margin: 0; font: 600 0.875rem/1.3 var(--font-sans); } .ds-card-body { padding: 16px; }"
+    },
+    {
+      "name": "Pole filtra",
+      "kind": "input",
+      "description": "Filtr tekstowy nad listami (usługi, logi, sekcje).",
+      "html": "<input class=\"ds-input\" type=\"search\" placeholder=\"Filtruj usługi…\" />",
+      "css": ".ds-input { background: var(--color-base-100); color: var(--color-base-content); border: 1px solid var(--color-base-300); border-radius: var(--radius-field, 0.5rem); min-height: 32px; padding: 0 10px; font: 400 0.8125rem/1 var(--font-sans); } .ds-input::placeholder { color: color-mix(in oklab, var(--color-base-content) 55%, transparent); } .ds-input:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }"
+    },
+    {
+      "name": "Karta wykresu",
+      "kind": "custom",
+      "refersTo": "chart-card",
+      "description": "Wykres z tytułem nad rysunkiem i statystykami pod nim; szerokość z siatki, wysokość rysunku 240 px.",
+      "html": "<figure class=\"ds-chart\"><figcaption>CPU — cała maszyna</figcaption><svg viewBox=\"0 0 100 40\" role=\"img\" aria-label=\"Zużycie CPU\"><polyline points=\"0,30 25,22 50,26 75,14 100,18\" /></svg><p class=\"ds-chart-stats\">teraz 18,0% · maks. 19,3% · średnia 12,4%</p></figure>",
+      "css": ".ds-chart { margin: 0; background: var(--color-base-200); border: 1px solid var(--color-base-300); border-radius: var(--radius-box, 0.75rem); padding: 16px; } .ds-chart figcaption { font: 600 0.75rem/1.4 var(--font-sans); color: var(--color-base-content); margin-bottom: 6px; } .ds-chart svg { display: block; width: 100%; height: 240px; } .ds-chart polyline { fill: none; stroke: var(--color-primary); stroke-width: 1.6; vector-effect: non-scaling-stroke; } .ds-chart-stats { margin: 8px 0 0; font: 400 0.75rem/1.5 var(--font-mono, monospace); font-variant-numeric: tabular-nums; color: color-mix(in oklab, var(--color-base-content) 74%, transparent); }"
+    },
+    {
+      "name": "Nawigacja widoków",
+      "kind": "nav",
+      "description": "Poziomy pasek: nazwa widoku i przełączniki Stan / Wykresy / Logi, przyklejony przy przewijaniu.",
+      "html": "<nav class=\"ds-nav\"><a class=\"ds-nav-link\" aria-current=\"page\" href=\"#/\">Stan</a><a class=\"ds-nav-link\" href=\"#/wykresy\">Wykresy</a><a class=\"ds-nav-link\" href=\"#/logi\">Logi</a></nav>",
+      "css": ".ds-nav { display: flex; gap: 8px; align-items: center; padding: 8px 16px; background: color-mix(in oklab, var(--color-base-100) 92%, transparent); backdrop-filter: blur(6px); box-shadow: var(--shadow-overlay, 0 2px 10px oklch(30% 0.02 255 / 0.18)); } .ds-nav-link { color: color-mix(in oklab, var(--color-base-content) 78%, transparent); text-decoration: none; font: 500 0.8125rem/1 var(--font-sans); padding: 6px 8px; border-radius: var(--radius-selector, 0.5rem); } .ds-nav-link:hover { background: var(--color-base-200); color: var(--color-base-content); } .ds-nav-link[aria-current=\"page\"] { background: color-mix(in oklab, var(--color-primary) 16%, transparent); color: var(--color-base-content); font-weight: 600; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "Pulpit sterowniczy, nie kokpit samolotu",
+    "overview": "Panel jest instrumentem pomiarowym: ciemna (albo jasna, zależnie od pory i pokoju) powierzchnia, na niej dyskretna siatka danych i jeden akcent, który niesie znaczenie. Nic nie konkuruje z liczbami — kolor pojawia się tylko tam, gdzie coś znaczy. Gęstość jest świadoma: operator patrzy na ~47 usług, więc wiersze są ciasne, a separacje hojne. Świat wizualny nie zmienia się między motywami: zmienia się tylko paleta, więc panel pokazany klientowi wygląda tak samo znajomo o 9:00 i o 23:00.",
+    "keyCharacteristics": [
+      "dwa motywy systemowe (prefers-color-scheme), jedna tożsamość",
+      "jeden akcent + kolory wyłącznie semantyczne",
+      "powierzchnie płaskie, głębia z tonalnego podziału, nie z cieni",
+      "dane zawsze z jednostką i kontekstem (limit, próg, czas)",
+      "uczciwe stany: unknown wygląda jak brak wiedzy, nie jak zero"
+    ],
+    "rules": [
+      { "name": "The One Voice Rule", "body": "Kolor akcentu zajmuje mniej niż ~10% powierzchni ekranu; jeśli akcentów jest więcej, któryś przestał coś znaczyć.", "section": "colors" },
+      { "name": "The No-Decoration Rule", "body": "Żaden kolor nie występuje „dla ożywienia”. Kolor wchodzi wyłącznie jako stan, seria danych, próg albo interakcja.", "section": "colors" },
+      { "name": "The Tabular Rule", "body": "Każda liczba, która się odświeża, jest monospace albo tabularna — inaczej odświeżanie co 10 s „tańczy” na ekranie.", "section": "typography" },
+      { "name": "The One Step Rule", "body": "Między sąsiadującymi poziomami hierarchii jest dokładnie jeden krok (11 → 12 → 13 → 14 px).", "section": "typography" },
+      { "name": "The Flat-By-Default Rule", "body": "Powierzchnie są płaskie w spoczynku; cień pojawia się wyłącznie jako odpowiedź na stan (sticky, focus, hover).", "section": "elevation" }
+    ],
+    "dos": [
+      "Do używaj tokenów motywu (var(--color-*), color-mix(... base-content ...)) — każdy kolor musi przetrwać zmianę prefers-color-scheme.",
+      "Do nadawaj każdej liczbie jednostkę i kontekst (limit, próg, zakres czasu).",
+      "Do rozróżniaj serie wykresu kolorem i stylem linii (przerywana/dash).",
+      "Do utrzymuj kontrast ≥ 4,5:1 dla tekstu i ≥ 3:1 dla linii w obu motywach.",
+      "Do trzymaj tap targety ≥ 24 px, także w ciasnych nagłówkach.",
+      "Do ustawiaj color-scheme zgodnie z motywem, żeby kontrolki przeglądarki nie odstawały."
+    ],
+    "donts": [
+      "Don't wpisuj kolorów na sztywno w komponentach ani w skryptach — wykresy i tooltipy rysują się z tokenów motywu.",
+      "Don't dodawaj grubszej niż 1 px kolorowej krawędzi bocznej jako ozdobnika.",
+      "Don't animuj width/height w pętli odświeżania; animacje tylko transform/opacity i wyłącznie przy prefers-reduced-motion: no-preference.",
+      "Don't udawaj danych: brak serii to pusty wykres z komunikatem, nie linia na zerze, a brak pomiaru to „—”, nie 0.",
+      "Don't zmieniaj układu przy odświeżeniu danych co 5–10 s (żadnej przebudowy listy, żadnego skoku przewijania)."
+    ]
+  }
+}

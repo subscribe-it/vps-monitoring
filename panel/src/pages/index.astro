@@ -236,6 +236,7 @@ import LogiView from '../components/LogiView.astro';
     opisZadania,
     skrotDigest,
   } from '../lib/usluga';
+  import { adresPoZmianieMotywu, parametrMotywu, zbudujAdres } from '../lib/motyw';
 
   function bootstrap(app: HTMLElement): void {
     const endpoint = app.dataset.endpoint ?? '/status/api.json';
@@ -534,9 +535,18 @@ import LogiView from '../components/LogiView.astro';
      */
     function embedSrc(tool: Tool): string {
       if (!tool.url) return '';
-      const parametr = tool.embed_query?.trim();
-      if (!parametr) return tool.url;
-      return `${tool.url}${tool.url.includes('?') ? '&' : '?'}${parametr}`;
+      // Grafana i Prometheus mają WŁASNY motyw, więc przekazujemy im wybór
+      // systemu (`theme=dark|light`); reszta narzędzi nie zna takiego
+      // parametru i `zbudujAdres` go po prostu pomija.
+      return zbudujAdres(tool.url, [
+        tool.embed_query,
+        parametrMotywu(tool.id, ciemnySystemu()),
+      ]);
+    }
+
+    /** Czy system jest teraz w trybie ciemnym (czytane na żywo, nie raz). */
+    function ciemnySystemu(): boolean {
+      return window.matchMedia('(prefers-color-scheme: dark)').matches;
     }
 
     /**
@@ -3280,6 +3290,27 @@ import LogiView from '../components/LogiView.astro';
     window.addEventListener('hashchange', () => {
       wczytajStanZHasza();
       odswiezWidok();
+    });
+
+    /*
+     * Zmiana preferencji systemu w trakcie pracy (np. automatyczny tryb nocny):
+     * sam panel przełącza się arkuszem stylów, ale ramka narzędzia ma własny
+     * motyw — więc podmieniamy jej adres tylko wtedy, gdy narzędzie rozumie
+     * `theme=` (Grafana, Prometheus). Bez tego jasny panel trzymałby ciemną
+     * ramkę w środku.
+     */
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+      if (!frame || !mountedToolId) return;
+      const narzedzie = snapshot?.tools.find((t) => t.id === mountedToolId);
+      if (!narzedzie?.url) return;
+      const nowy = adresPoZmianieMotywu(
+        narzedzie.id,
+        narzedzie.url,
+        narzedzie.embed_query,
+        ciemnySystemu(),
+      );
+      if (!nowy || nowy === frame.src) return;
+      frame.src = nowy;
     });
     document.addEventListener('fullscreenchange', renderFullscreenState);
 

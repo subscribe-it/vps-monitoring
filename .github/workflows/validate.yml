@@ -283,5 +283,11 @@ jobs:
       - name: Testy obsługi usługi (diagnostyka, komendy)
         run: node scripts/ci/check_usluga.mts
 
+      # Motyw wybiera SYSTEM (prefers-color-scheme), więc pomyłka w tokenach
+      # jest widoczna dopiero u użytkownika — np. ciemny prostokąt na jasnym
+      # tle albo znikający tekst. Ten test pilnuje niezmienników obu motywów.
+      - name: Testy motywu (jasny/ciemny, tokeny, brak kolorów na sztywno)
+        run: node scripts/ci/check_motyw.mts
+
       - name: Kontrola artefaktu
         run: test -f panel/dist/index.html

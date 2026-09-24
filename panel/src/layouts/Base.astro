@@ -18,13 +18,15 @@ const {
 ---
 
 <!doctype html>
-<html lang="pl" data-theme="ops">
+<!-- Bez `data-theme`: motyw wybiera system (prefers-color-scheme). Atrybut
+     ustawiony na sztywno nadpisałby preferencję użytkownika. -->
+<html lang="pl">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title}</title>
     <meta name="description" content={description} />
-    <meta name="color-scheme" content="dark" />
+    <meta name="color-scheme" content="light dark" />
     <meta name="robots" content="noindex, nofollow" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <IconSprite />
