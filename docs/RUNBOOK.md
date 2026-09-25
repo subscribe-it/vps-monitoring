@@ -340,6 +340,43 @@ sudo journalctl -u ssh --since '24 hours ago' | grep -E 'Accepted|Failed' | tail
 
 ---
 
+## <a name="ataki"></a>🟡 AttackXssAttempt / AttackSqliAttempt / AttackPathTraversal / AttackLog4Shell / AttackScannerProbe / ScanBehaviorDetected / CrowdSecLocalBan / CrowdSecMetricsMissing — ktoś atakuje aplikacje
+
+**Co to znaczy:** monitoring zobaczył w access logu edge'a payload ataku (XSS, SQL injection, path traversal, Log4Shell), skanowanie typowych ścieżek (`.env`, `.git`, `wp-login.php`, `xmlrpc.php`, `phpmyadmin`, `vendor/phpunit`) albo zachowanie skanera (jeden adres zbiera masę odpowiedzi 4xx). `CrowdSecLocalBan` znaczy, że CrowdSec zablokował adres **na podstawie własnych scenariuszy** (czyli widzi realne zdarzenie w naszych logach), a `CrowdSecMetricsMissing` — że straciliśmy wgląd w to, co blokuje edge.
+
+**⚠️ Warunek działania wykrywania payloadów:** reguły czytają access log Traefika. Zmierzone 25.09.2026: **ten log nie powstaje od 17.08.2026** (alert `TraefikNoAccessLogs` jest aktywny), więc reguły `Attack*` i `ScanBehaviorDetected` **milczą z braku danych** — to nie znaczy „brak ataków". Panel pokazuje wtedy w sekcji „Ataki i skanowanie" wprost **brak danych**. Po przywróceniu access logu (procedura: `#logs`) reguły działają bez zmian. `CrowdSec*` działają niezależnie (metryki CrowdSeca, nie log).
+
+**Sprawdź, skąd atakują (gotowe zapytania, Loki → Explore):**
+```logql
+# top adresów IP atakujących w 24 h (wszystkie kategorie naraz)
+topk(10, sum by (ClientHost) (
+  count_over_time({job="traefik"} | json | __error__="" | RequestHost != "traefik"
+    |~ `(?i)<script|onerror=|union select|or 1=1|\.\./|jndi:|/\.env|wp-login\.php|xmlrpc\.php` [24h])
+))
+
+# co dokładnie próbował konkretny adres (podmień IP)
+{job="traefik"} | json | __error__="" | ClientHost = "1.2.3.4" |~ `(?i)<script|union select|\.\./|jndi:` 
+
+# kto zbiera najwięcej błędów 4xx (zachowanie skanera)
+topk(10, sum by (ClientHost) (
+  count_over_time({job="traefik"} | json | __error__="" | RequestHost != "traefik"
+    | DownstreamStatus >= 400 [10m])
+))
+
+# czy CrowdSec już go zablokował (metryki, nie logi)
+sort_desc(cs_active_decisions{action="ban"})
+```
+Uwaga do sond: `ClientHost` to adres wejściowy Swarma, dopóki w konfiguracji Traefika nie ma `--accesslog.fields.headers.names.X-Forwarded-For=keep` — wtedy zobaczysz prawdziwe adresy klientów (patrz `#logs`).
+
+**Działaj:**
+1. Sprawdź w panelu, czy adres zbiera **błędy 5xx** — 5xx przy próbie SQLi oznacza, że payload dojechał do aplikacji (to już incydent, nie skanowanie).
+2. Sprawdź, czy adres jest zablokowany: `sudo fail2ban-client status` (bany SSH) oraz decyzje CrowdSeca (`cs_active_decisions` w Prometheusie). CrowdSec działa w cudzym stacku edge'a — **nie restartuj go i nie zmieniaj mu konfiguracji bez decyzji właściciela**.
+3. Jeśli adres nadal atakuje i nie jest blokowany, zdecyduj o blokadzie na poziomie edge (np. reguła CrowdSeca lub blokada na firewallu) — zmiany w cudzym stacku wymagają Twojej akceptacji.
+4. Log4Shell (`jndi:`) traktuj poważnie: sprawdź, czy któraś usługa używa biblioteki Log4j.
+5. Nie kasuj reguł, jeśli „milczą" — najpierw sprawdź, czy access log płynie (`#logs`).
+
+---
+
 ## Czego ten runbook nie robi
 
 Nie zawiera kroków modyfikujących cudze stacki. Każda taka operacja wymaga

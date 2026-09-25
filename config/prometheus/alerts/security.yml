@@ -17,3 +17,32 @@ groups:
           summary: "Publicznie otwarty port administracyjny: {{ $labels.instance }}"
           description: "Port {{ $labels.instance }} odpowiada na publicznym adresie od ponad 5 minut. Zamknij go firewallem (ufw) albo ogranicz do swojego adresu IP — procedura: runbook #adminport."
           runbook: "#adminport"
+
+      # CrowdSec sam banuje adresy na podstawie logów — ale na tym hoście
+      # wszystkie jego decyzje pochodzą z community blocklist (`origin="CAPI"`),
+      # a NIE z lokalnych scenariuszy (zmierzone 25.09.2026, suma decyzji
+      # lokalnych = 0). Lokalna decyzja oznacza więc realne zdarzenie: CrowdSec
+      # zobaczył atak w NASZYCH logach i zareagował. Dlatego alarmujemy o
+      # pierwszej takiej decyzji (a nie o skoku listy CAPI, co jest szumem).
+      - alert: CrowdSecLocalBan
+        expr: sum(cs_active_decisions{origin!="CAPI"}) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CrowdSec zablokował adres na podstawie własnych scenariuszy"
+          description: "CrowdSec ma {{ $value | printf \"%.0f\" }} aktywnych decyzji, które NIE pochodzą z community blocklist — czyli wykrył atak w logach tego hosta (HTTP lub SSH). Sprawdź w panelu sekcję „Ataki i skanowanie”, a w CrowdSec — jakie scenariusze się zapaliły (runbook #ataki)."
+          runbook: "#ataki"
+
+      # Brak metryk CrowdSeca = straciliśmy wgląd w to, co blokuje edge.
+      # Osobny alert (nie polegamy na ogólnym ScrapeTargetDown), bo celowo
+      # scrape'ujemy cudzy stack i chcemy wiedzieć, gdy przestanie odpowiadać.
+      - alert: CrowdSecMetricsMissing
+        expr: up{job="crowdsec"} == 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Brak metryk CrowdSec ({{ $labels.crowdsec_instance }})"
+          description: "Endpoint metryk CrowdSeca ({{ $labels.instance }}) nie odpowiada od 15 minut. Nie widzimy wtedy, ile adresów jest zablokowanych ani za co. Sprawdź, czy kontener CrowdSeca w stacku edge'a działa — NIE restartuj go bez decyzji właściciela (runbook #ataki)."
+          runbook: "#ataki"

@@ -1,0 +1,125 @@
+# Pasowne wykrywanie atakow w monitoringu (Loki), na podstawie access logu Traefika.
+#
+# Skad dane: promtail czyta access log edge'a z wolumenu
+# `portainer-edge-gateway_traefik-logs` (job="traefik"). Etykieta strumienia to
+# praktycznie tylko `RequestHost` — reszta pol (ClientHost, RequestPath,
+# DownstreamStatus, Duration) siedzi w TRESCI linii, dlatego kazde zapytanie
+# zaczyna sie od `| json`, a `__error__=""` odsiewa linie, ktore nie sa JSON-em.
+#
+# ZMIERZONE 22.09.2026 — WARUNEK DZIALANIA TYCH REGUL:
+#   Access log edge'a NIE jest zapisywany od 17.08.2026 (plik
+#   /traefik-logs/access.log stoi na 2 019 076 B, ostatnia linia z 17.08).
+#   Alert `TraefikNoAccessLogs` jest przez to aktywny, a te reguly MILCZA,
+#   bo nie maja danych. To stan ZRODLA, nie awaria regul: po przywroceniu
+#   access logu w konfiguracji Traefika dzialaja bez zadnych zmian.
+#   Sekcja „Ataki i skanowanie" w panelu pokazuje w tym stanie wprost
+#   „brak danych" (a nie zero zdarzen).
+#
+# Progi — skad takie liczby (uzasadnienie, nie zgadywanie):
+#   * Normalny ruch na tym hoście to pojedyncze zadania na adres IP na 10 minut
+#     (klienci, boty wyszukiwarek, monitoring). Progi 5 i 10 zdarzen z JEDNEGO
+#     adresu w 10 minut sa kilkadziesiat razy powyzej normalnego szumu, a typowy
+#     skaner przekracza je w kilka sekund.
+#   * Wzorce payloadow (XSS/SQLi/traversal/scanner paths) liczymy OSOBNO dla
+#     kazdego adresu IP (`sum by (ClientHost)`), wiec jeden hałaśliwy bot nie
+#     ukryje ataku z innego adresu.
+#   * Detekcja behawioralna (40 odpowiedzi 4xx z jednego IP w 10 minut) lapie
+#     takze payloady, ktorych nie ma na zadnej liscie wzorcow — to jest ta
+#     reguła, ktora dziala po wprowadzeniu nowego exploita.
+#   * Wszystkie okna sa krotkie (10 minut), bo ruler Lokiego ewaluuje reguly
+#     co 30 s i nie moze byc obciazony cieszkimi zapytaniami na 24 h.
+#
+# Regexów z ukośnikami NIE piszemy w cudzyslowie (LogQL/Go nie zna escape `\.`);
+# uzywamy surowych stringow w backtickach — wtedy `\.` jest doslownym backslashem
+# i kropka, dokladnie tak, jak w regexie.
+groups:
+  - name: ataki-access-log
+    interval: 30s
+    rules:
+
+      - alert: AttackXssAttempt
+        expr: |
+          sum by (ClientHost) (
+            count_over_time({job="traefik"} | json | __error__="" | RequestHost != "traefik"
+              |~ `(?i)<script|onerror=|javascript:|%3cscript` [10m])
+          ) > 5
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Proba XSS z {{ $labels.ClientHost }}"
+          description: "{{ $value | printf \"%.0f\" }} zadan z payloadem XSS z jednego adresu w 10 minut. Sprawdz w panelu sekcje „Ataki i skanowanie”, czy to pojedynczy skaner, i czy CrowdSec/fail2ban zdazyl zablokowac adres (runbook #ataki)."
+          runbook: "#ataki"
+
+      - alert: AttackSqliAttempt
+        expr: |
+          sum by (ClientHost) (
+            count_over_time({job="traefik"} | json | __error__="" | RequestHost != "traefik"
+              |~ `(?i)union select|union%20select|or 1=1|information_schema|sleep\(` [10m])
+          ) > 5
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Proba SQL injection z {{ $labels.ClientHost }}"
+          description: "{{ $value | printf \"%.0f\" }} zadan z payloadem SQL injection z jednego adresu w 10 minut. Sprawdz, czy aplikacja nie odpowiada 5xx (to znaczyloby, ze zapytanie doszlo do bazy) i czy adres jest zablokowany (runbook #ataki)."
+          runbook: "#ataki"
+
+      - alert: AttackPathTraversal
+        expr: |
+          sum by (ClientHost) (
+            count_over_time({job="traefik"} | json | __error__="" | RequestHost != "traefik"
+              |~ `\.\./|/etc/passwd|%2e%2e%2f` [10m])
+          ) > 5
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Proba wyjscia poza katalog (traversal) z {{ $labels.ClientHost }}"
+          description: "{{ $value | printf \"%.0f\" }} zadan z proba path traversal z jednego adresu w 10 minut (np. `/etc/passwd`, `../`). Sprawdz kody odpowiedzi w panelu i czy adres jest zablokowany (runbook #ataki)."
+          runbook: "#ataki"
+
+      - alert: AttackLog4Shell
+        expr: |
+          sum by (ClientHost) (
+            count_over_time({job="traefik"} | json | __error__="" | RequestHost != "traefik"
+              |= "jndi:" [10m])
+          ) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Proba exploitacji Log4Shell z {{ $labels.ClientHost }}"
+          description: "{{ $value | printf \"%.0f\" }} zadan z ciagiem `jndi:` (Log4Shell) z jednego adresu. Ten wzorzec nie wystepuje w normalnym ruchu, wiec kazde trafienie jest powazne — sprawdz, czy ktoras usluga uzywa biblioteki Log4j, i zablokuj adres (runbook #ataki)."
+          runbook: "#ataki"
+
+      - alert: AttackScannerProbe
+        expr: |
+          sum by (ClientHost) (
+            count_over_time({job="traefik"} | json | __error__="" | RequestHost != "traefik"
+              |~ `(?i)/\.env|/\.git/|wp-login\.php|xmlrpc\.php|phpmyadmin|vendor/phpunit|wp-config\.php` [10m])
+          ) > 10
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Skanowanie typowych sciezek z {{ $labels.ClientHost }}"
+          description: "{{ $value | printf \"%.0f\" }} zadan do sciezek, ktore normalny uzytkownik nie odwiedza (`.env`, `.git`, `wp-login.php`, `xmlrpc.php`, `phpmyadmin`, `vendor/phpunit`). To rozpoznawanie technologii przed atakiem — sprawdz, czy adres jest zablokowany (runbook #ataki)."
+          runbook: "#ataki"
+
+      # Detekcja BEHAWIORALNA: nie patrzy na payload, tylko na to, ze jeden
+      # adres zbiera mase bledow. To lapie nowe exploity i skanery, ktorych
+      # nie ma na zadnej liscie wzorcow.
+      - alert: ScanBehaviorDetected
+        expr: |
+          sum by (ClientHost) (
+            count_over_time({job="traefik"} | json | __error__="" | RequestHost != "traefik"
+              | DownstreamStatus >= 400 [10m])
+          ) > 40
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Mozliwe skanowanie z {{ $labels.ClientHost }} ({{ $value | printf \"%.0f\" }} bledow)"
+          description: "Jeden adres zebral ponad 40 odpowiedzi 4xx w 10 minut — to wzorzec skanera (normalny uzytkownik nie generuje tylu bledow). Sprawdz w panelu „Ataki i skanowanie”, jakie sciezki probowal, i czy CrowdSec go zablokowal (runbook #ataki)."
+          runbook: "#ataki"

@@ -61,6 +61,31 @@ scrape_configs:
     static_configs:
       - targets: ['notifier:8080']
 
+  # --- CrowdSec: cudze stacki, TYLKO ODCZYT metryk --------------------------
+  # CrowdSec stoi w stackach edge'a (nie w naszym), ale jego endpoint metryk
+  # `:6060/metrics` jest osiągalny z sieci monitoringu — sprawdzone 25.09.2026
+  # z wnętrza kontenera discovery (HTTP 200, 53 metryki `cs_*`). Nie zmieniamy
+  # niczego w cudzych stackach: to zwykły scrape GET.
+  #
+  # Po co to zbieramy: `cs_active_decisions{action,origin,reason}` pokazuje, ile
+  # adresow jest zablokowanych i ZA CO (m.in. `http:exploit`, `http:scan`,
+  # `ssh:bruteforce`), a `cs_lapi_*` — czy CrowdSec w ogole rozmawia ze swoim
+  # lokalnym API. To jedyne miejsce, w ktorym widzimy skutecznosc ochrony edge'a.
+  #
+  # UWAGA (zmierzone): na tym hoście wszystkie decyzje maja `origin="CAPI"`,
+  # czyli pochodza z community blocklist, a NIE z lokalnych scenariuszy.
+  # Dlatego alert nie alarmuje o skoku listy CAPI (to szum), tylko o pierwszej
+  # LOKALNEJ decyzji — patrz `CrowdSecLocalBan` w alerts/security.yml.
+  - job_name: 'crowdsec'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['portainer-edge-gateway_crowdsec:6060']
+        labels:
+          crowdsec_instance: 'edge'
+      - targets: ['traefik_crowdsec:6060']
+        labels:
+          crowdsec_instance: 'traefik-old'
+
   # --- host ---------------------------------------------------------------
   - job_name: 'node-exporter'
     static_configs:

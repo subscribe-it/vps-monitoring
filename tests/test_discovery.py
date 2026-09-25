@@ -578,7 +578,7 @@ class ApiJsonTests(unittest.TestCase):
         payload = service.api_json()
         self.assertEqual(
             list(payload.keys()),
-            ["generated_at", "overall", "host", "checks", "stacks", "certs", "backup", "alerts", "security", "tools"],
+            ["generated_at", "overall", "host", "checks", "stacks", "certs", "backup", "alerts", "security", "ataki", "tools"],
         )
         self.assertTrue(payload["generated_at"].endswith("Z"))
         self.assertEqual(payload["overall"], "ok")
@@ -696,7 +696,7 @@ class BrokenDependencyTests(unittest.TestCase):
     """
 
     SCHEMA = ["generated_at", "overall", "host", "checks", "stacks", "certs",
-              "backup", "alerts", "security", "tools"]
+              "backup", "alerts", "security", "ataki", "tools"]
 
     def _service(self, json_get, services=None, tasks=None, containers=None):
         docker = FakeDocker(
@@ -1457,6 +1457,149 @@ class LogsEndpointTests(unittest.TestCase):
         kod, payload = service.logs_section({"zrodlo": ["traefik"]})
         self.assertEqual(kod, 503)
         self.assertIn("Loki nie odpowiedziało", payload["error"])
+
+
+class AtakiFromLokiTests(unittest.TestCase):
+    """Sekcja „Ataki i skanowanie" liczona z access logu Traefika (Loki).
+
+    Powód: wykrywanie XSS/SQLi/traversal/skanowania ma działać samo, a przy tym
+    NIE KŁAMAĆ. Gdy access log nie płynie (zmierzone: stoi od 17.08.2026), panel
+    musi powiedzieć „brak danych" — zero zdarzeń w tej sytuacji znaczyłoby
+    „sprawdziłem i jest czysto", czyli dokładnie odwrotnie niż jest.
+    """
+
+    def _json_get(self, odpowiedzi, licznik=None):
+        """Router zapytań do Loki.
+
+        Najpierw patrzymy na ZAPYTANIE LogQL (zdekodowane), a dopiero potem na
+        cały adres — bo część rzeczy (np. `limit=1`, `direction=backward`) widać
+        wyłącznie w parametrach żądania, nie w samym zapytaniu.
+        """
+
+        def json_get(url, timeout=5.0):
+            if licznik is not None:
+                licznik.append(url)
+            zapytanie = ""
+            if "?" in url:
+                zapytanie = urllib.parse.parse_qs(urllib.parse.urlparse(url).query).get(
+                    "query", [""])[0]
+            for fragment, wartosc in odpowiedzi.items():
+                if fragment in zapytanie or fragment in url:
+                    if isinstance(wartosc, Exception):
+                        raise wartosc
+                    return wartosc
+            return {"data": {"result": []}}
+
+        return json_get
+
+    @staticmethod
+    def _wektor(pozycje):
+        return {"data": {"result": [
+            {"metric": etykiety, "value": [0, str(wartosc)]} for etykiety, wartosc in pozycje
+        ]}}
+
+    def test_brak_loki_to_none_a_nie_zera(self):
+        sekcja = discovery.sekcja_atakow(
+            "http://loki:3100", self._json_get({"": OSError("connection refused")}))
+        self.assertIsNone(sekcja)
+
+    def test_liczy_wzorce_zrodla_sciezki_i_skanowanie(self):
+        # Klucze sprawdzamy w kolejności: najpierw najbardziej szczegółowe
+        # (zapytanie o ostatnie zdarzenie niesie ZLEPIONY wzorzec wszystkich
+        # kategorii, więc pasowałoby też do fragmentów wzorców).
+        odpowiedzi = {
+            "limit=1": {"data": {"result": [
+                {"values": [["1790000000000000000", "{}"]]}]}},
+            "count_over_time({job=\"traefik\"}[15m])": self._wektor([({}, 120)]),
+            "topk(5, sum by (RequestPath)": self._wektor(
+                [({"RequestPath": "/.env"}, 12), ({"RequestPath": "/wp-login.php"}, 4)]),
+            "DownstreamStatus >= 400": self._wektor(
+                [({"ClientHost": "9.9.9.9"}, 55), ({"ClientHost": "8.8.8.8"}, 3)]),
+            "<script|onerror=": self._wektor([({"ClientHost": "9.9.9.9"}, 7)]),
+            "union select|union%20select": self._wektor([({"ClientHost": "8.8.8.8"}, 2)]),
+            "(?i)/\\.env|/\\.git/": self._wektor([({"ClientHost": "9.9.9.9"}, 12)]),
+        }
+        sekcja = discovery.sekcja_atakow(
+            "http://loki:3100", self._json_get(odpowiedzi), teraz=1790000000)
+
+        self.assertEqual(sekcja["state"], "ok")
+        self.assertIs(sekcja["zrodlo_aktywne"], True)
+        # xss 7 + sqli 2 + skaner 12 = 21 (traversal i log4shell bez trafień)
+        self.assertEqual(sekcja["zdarzenia_24h"], 21)
+        self.assertEqual({w["klucz"]: w["ile"] for w in sekcja["wzorce"]},
+                         {"xss": 7, "sqli": 2, "traversal": 0, "log4shell": 0, "skaner": 12})
+        # źródła: 9.9.9.9 ma 19 (xss + skaner), 8.8.8.8 ma 2 — malejąco
+        self.assertEqual([z["ip"] for z in sekcja["top_ip"]], ["9.9.9.9", "8.8.8.8"])
+        self.assertEqual(sekcja["top_ip"][0]["ile"], 19)
+        self.assertIn("skaner", sekcja["top_ip"][0]["wzorce"])
+        self.assertEqual(sekcja["top_sciezki"][0], {"sciezka": "/.env", "ile": 12})
+        # próg 4xx: tylko 9.9.9.9 (55) przekracza 40
+        self.assertEqual(sekcja["skanowanie_10m"], 1)
+        self.assertEqual(sekcja["ostatnie"], "2026-09-21T14:13:20Z")
+
+    def test_log4shell_liczy_sie_jako_zdarzenie(self):
+        odpowiedzi = {
+            "count_over_time({job=\"traefik\"}[15m])": self._wektor([({}, 5)]),
+            "jndi:": self._wektor([({"ClientHost": "1.2.3.4"}, 1)]),
+        }
+        sekcja = discovery.sekcja_atakow(
+            "http://loki:3100", self._json_get(odpowiedzi), teraz=1790000000)
+        self.assertEqual(sekcja["zdarzenia_24h"], 1)
+        self.assertEqual(sekcja["top_ip"], [{"ip": "1.2.3.4", "ile": 1, "wzorce": ["log4shell"]}])
+
+    def test_brak_ruchu_w_logu_to_unknown_a_nie_czysto(self):
+        odpowiedzi = {
+            "count_over_time({job=\"traefik\"}[15m])": self._wektor([({}, 0)]),
+        }
+        sekcja = discovery.sekcja_atakow(
+            "http://loki:3100", self._json_get(odpowiedzi), teraz=1790000000)
+        self.assertEqual(sekcja["state"], "unknown")
+        self.assertIs(sekcja["zrodlo_aktywne"], False)
+        self.assertEqual(sekcja["zdarzenia_24h"], 0)
+
+    def test_smieci_w_odpowiedzi_nie_wywracaja_sekcji(self):
+        # Kolejność kluczy ma znaczenie: zapytanie o ścieżki zawiera ZLEPIONY
+        # wzorzec wszystkich kategorii, więc pasuje też do fragmentów wzorców —
+        # dlatego najbardziej szczegółowe odpowiedzi podajemy pierwsze.
+        odpowiedzi = {
+            "topk(5, sum by (RequestPath)": {"data": {"result": [
+                {"metric": {"RequestPath": None}, "value": [0, "2"]}]}},
+            "count_over_time({job=\"traefik\"}[15m])": {"data": {"result": [
+                {"metric": {}, "value": []}, {"metric": None, "value": None}, "bzdura",
+                {"metric": {}, "value": [0, "nie-liczba"]}]}},
+            "<script|onerror=": {"data": {"result": [{"metric": {"ClientHost": ""},
+                                                      "value": [0, "3"]}]}},
+            "DownstreamStatus >= 400": {"data": {"result": []}},
+        }
+        sekcja = discovery.sekcja_atakow(
+            "http://loki:3100", self._json_get(odpowiedzi), teraz=1790000000)
+        self.assertEqual(sekcja["state"], "unknown")  # źródła nie dało się potwierdzić
+        self.assertEqual(sekcja["top_ip"], [])  # puste IP pomijamy
+        self.assertEqual(sekcja["top_sciezki"], [{"sciezka": "(brak)", "ile": 2}])
+        self.assertEqual(sekcja["skanowanie_10m"], 0)
+
+    def test_sekcja_w_api_ma_ttl_i_nie_mloci_loki(self):
+        """Panel odświeża api.json co 30 s — jedno policzenie = 8 zapytań do Loki."""
+        wolania = []
+        odpowiedzi = {"count_over_time({job=\"traefik\"}[15m])": self._wektor([({}, 10)])}
+        service = build_service(
+            FakeDocker(services=[]),
+            config=make_config(LOKI_URL="http://loki:3100"),
+            json_get=self._json_get(odpowiedzi, wolania),
+        )
+        pierwsza = service.ataki_section()
+        ile_po_pierwszej = len(wolania)
+        druga = service.ataki_section()
+        self.assertGreater(ile_po_pierwszej, 1)
+        self.assertEqual(len(wolania), ile_po_pierwszej)  # z cache, bez nowych zapytań
+        self.assertEqual(pierwsza, druga)
+
+    def test_brak_loki_url_daje_pusta_sekcje(self):
+        service = build_service(FakeDocker(services=[]), config=make_config())
+        sekcja = service.ataki_section()
+        self.assertEqual(sekcja, discovery.empty_ataki())
+        self.assertIsNone(sekcja["zdarzenia_24h"])
+        self.assertEqual(sekcja["state"], "unknown")
 
 
 if __name__ == "__main__":

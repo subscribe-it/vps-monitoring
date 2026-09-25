@@ -30,3 +30,53 @@ tests:
       - eval_time: 6m
         alertname: AdminPortExposed
         exp_alerts: []
+
+  # CrowdSec: na tym hoście WSZYSTKIE decyzje pochodzą z community blocklist
+  # (`origin="CAPI"`), więc lokalna decyzja jest realnym zdarzeniem — i tylko
+  # o nią alarmujemy. Test pilnuje obu stron: CAPI milczy, lokalna zapala.
+  - name: decyzja CrowdSeca z CAPI -> cisza (to nie nasz atak)
+    interval: 1m
+    input_series:
+      - series: 'cs_active_decisions{action="ban",origin="CAPI",reason="http:exploit"}'
+        values: '2500+0x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: CrowdSecLocalBan
+        exp_alerts: []
+
+  - name: lokalna decyzja CrowdSeca -> CrowdSecLocalBan
+    interval: 1m
+    input_series:
+      - series: 'cs_active_decisions{action="ban",origin="CAPI",reason="http:exploit"}'
+        values: '2500+0x10'
+      - series: 'cs_active_decisions{action="ban",origin="crowdsec",reason="http:scan"}'
+        values: '1+0x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: CrowdSecLocalBan
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "CrowdSec zablokował adres na podstawie własnych scenariuszy"
+              description: "CrowdSec ma 1 aktywnych decyzji, które NIE pochodzą z community blocklist — czyli wykrył atak w logach tego hosta (HTTP lub SSH). Sprawdź w panelu sekcję „Ataki i skanowanie”, a w CrowdSec — jakie scenariusze się zapaliły (runbook #ataki)."
+              runbook: '#ataki'
+
+  - name: brak metryk CrowdSeca -> CrowdSecMetricsMissing
+    interval: 1m
+    input_series:
+      - series: 'up{job="crowdsec",crowdsec_instance="edge",instance="portainer-edge-gateway_crowdsec:6060"}'
+        values: '0+0x20'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: CrowdSecMetricsMissing
+        exp_alerts:
+          - exp_labels:
+              job: crowdsec
+              crowdsec_instance: edge
+              instance: portainer-edge-gateway_crowdsec:6060
+              severity: warning
+            exp_annotations:
+              summary: "Brak metryk CrowdSec (edge)"
+              description: "Endpoint metryk CrowdSeca (portainer-edge-gateway_crowdsec:6060) nie odpowiada od 15 minut. Nie widzimy wtedy, ile adresów jest zablokowanych ani za co. Sprawdź, czy kontener CrowdSeca w stacku edge'a działa — NIE restartuj go bez decyzji właściciela (runbook #ataki)."
+              runbook: '#ataki'

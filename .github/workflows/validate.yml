@@ -295,5 +295,10 @@ jobs:
       - name: Testy zwijania grup (klucze, zapis, stan zbiorczy)
         run: node scripts/ci/check_zwijanie.mts
 
+      # Sekcja „Ataki i skanowanie” musi odróżniać „nie wiem” (access log nie
+      # płynie) od „czysto” — zielony kafelek przy braku danych usypia czujność.
+      - name: Testy sekcji ataków (stan, podpisy, kolejność, odmiana liczb)
+        run: node scripts/ci/check_ataki.mts
+
       - name: Kontrola artefaktu
         run: test -f panel/dist/index.html

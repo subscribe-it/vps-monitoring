@@ -45,6 +45,13 @@ w takim przypadku pola uzupełniane są zerami, a `overall` degraduje się do `w
   "security": { "ssh_failed_24h": 203, "ssh_bans_24h": 12,
                 "ssh_failed_ips": [ { "ip": "45.148.10.10", "count": 41 } ],
                 "ssh_failed_sources": 7, "logins_24h": [], "state": "ok" },
+  "ataki": {
+    "state": "ok", "zrodlo_aktywne": true, "zdarzenia_24h": 21,
+    "wzorce": [ { "klucz": "xss", "nazwa": "XSS (wstrzyknięcie skryptu)", "ile": 7 } ],
+    "top_ip": [ { "ip": "45.148.10.10", "ile": 19, "wzorce": ["xss", "skaner"] } ],
+    "top_sciezki": [ { "sciezka": "/.env", "ile": 12 } ],
+    "skanowanie_10m": 1, "ostatnie": "2026-09-21T14:13:20Z"
+  },
   "tools": [
     { "id": "grafana", "name": "Grafana", "url": "/grafana", "embed": true,
       "embed_query": "kiosk", "state": "ok", "kind": "internal", "icon": "chart-line",
@@ -82,6 +89,18 @@ Linie są posortowane malejąco po czasie. `400` = brak usługi przy źródle `u
 `503` = brak `LOKI_URL` albo Loki nie odpowiedziało (pole `error` ma czytelny powód).
 Etykieta `service` w Loki ma **prefiks stacka** (`<stack>_<usługa>`), bo tak ustawia
 ją promtail z `com.docker.swarm.service.name`.
+
+- Sekcja `ataki` („Ataki i skanowanie") liczy się z **access logu Traefika** w Loki:
+  `zdarzenia_24h` to suma dopasowań pięciu wzorców (XSS, SQL injection, path
+  traversal, Log4Shell, skanowanie ścieżek), `wzorce` rozbija to na kategorie,
+  `top_ip` to adresy z liczbą prób i listą kategorii, `top_sciezki` — najczęściej
+  zaczepiane ścieżki, a `skanowanie_10m` mówi, ilu adresów przekroczyło próg
+  40 odpowiedzi 4xx w 10 minut (detekcja behawioralna: łapie też payloady, których
+  nie ma na liście wzorców).
+- **`zrodlo_aktywne: false` znaczy „access log nie płynie"** (albo nie ma ruchu) —
+  wtedy `state` = `unknown`, a panel pokazuje „brak danych", NIE zero zdarzeń.
+  Zmierzone 25.09.2026: log edge'a nie powstawał od 17.08.2026, więc sekcja jest
+  w tym stanie do czasu przywrócenia `--accesslog` w Traefiku (`docs/RUNBOOK.md` → `#logs`).
 
 ## Zasady
 

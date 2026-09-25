@@ -22,6 +22,7 @@ import ErrorBanner from '../components/ErrorBanner.astro';
 import FiltersBar from '../components/FiltersBar.astro';
 import GroupTemplate from '../components/GroupTemplate.astro';
 import IframeView from '../components/IframeView.astro';
+import AtakiSection from '../components/AtakiSection.astro';
 import SecuritySection from '../components/SecuritySection.astro';
 import StacksSection from '../components/StacksSection.astro';
 import StatusBar from '../components/StatusBar.astro';
@@ -60,6 +61,7 @@ import LogiView from '../components/LogiView.astro';
           <BackupSection />
           <SecuritySection />
         </div>
+        <AtakiSection />
       </div>
 
       <IframeView />
@@ -114,6 +116,7 @@ import LogiView from '../components/LogiView.astro';
     usageState,
     worstState,
     type Alert,
+    type Ataki,
     type Backup,
     type Cert,
     type Check,
@@ -152,6 +155,19 @@ import LogiView from '../components/LogiView.astro';
     type WierszCsv,
     type Zmiana,
   } from '../lib/filtry';
+  import {
+    etykietaWzorca,
+    ileAktywnychWzorcow,
+    liczba,
+    maDaneAtakow,
+    opisSkanowania,
+    opisZdarzen,
+    podsumowanieAtakow,
+    sciezkiDoListy,
+    stanAtakow,
+    wzorceDoListy,
+    zrodlaDoListy,
+  } from '../lib/ataki';
   import { spriteHref } from '../lib/icons';
   import {
     PODMIOT_WSZYSTKIE,
@@ -1143,6 +1159,94 @@ import LogiView from '../components/LogiView.astro';
       );
     }
 
+    /**
+     * Sekcja „Ataki i skanowanie”.
+     *
+     * Trzy stany, które muszą być rozróżnialne na pierwszy rzut oka:
+     *   * `brak danych` — access log nie płynie (albo API nie ma sekcji),
+     *   * `czysto`      — log płynie i nic nie dopasowano,
+     *   * `warning`     — log płynie i są trafienia (kafel pokazuje, ile i z ilu adresów).
+     */
+    function renderAtaki(ataki: Ataki | null): void {
+      const sekcja = section('ataki');
+      if (!sekcja) return;
+      const stan = stanAtakow(ataki);
+      updateSection('ataki', [stan], maDaneAtakow(ataki) ? String(ataki?.zdarzenia_24h ?? 0) : DASH);
+      emptyState('ataki', ataki === null);
+
+      const brakDanych = q<HTMLElement>(sekcja, '[data-role="ataki-unknown"]');
+      if (brakDanych) brakDanych.hidden = !ataki || ataki.zrodlo_aktywne !== false;
+
+      if (!maDaneAtakow(ataki)) {
+        // Nie wiemy => kreska, nie zero. „0 prób" przy niepłynącym access logu
+        // byłoby liczbą wyssaną z braku danych (patrz `maDaneAtakow`).
+        setField('ataki-state', stateLabel(stan), ataki ? opisZdarzen(ataki) : 'brak danych', stan);
+        setField('ataki-zdarzenia', DASH, opisZdarzen(ataki), stan);
+        setField('ataki-skanowanie', DASH, opisSkanowania(ataki, 40), stan);
+      } else {
+        setField('ataki-state', stateLabel(stan), 'stan z /status/api.json', stan);
+        setField('ataki-zdarzenia', fmtInt(ataki?.zdarzenia_24h), opisZdarzen(ataki), stan);
+        setField('ataki-skanowanie', fmtInt(ataki?.skanowanie_10m), opisSkanowania(ataki, 40), stan);
+      }
+
+      const wzorce = wzorceDoListy(ataki);
+      setText(sekcja, '[data-role="ataki-wzorce-count"]', ataki ? String(ileAktywnychWzorcow(ataki)) : DASH);
+      const ip = zrodlaDoListy(ataki);
+      setText(sekcja, '[data-role="ataki-ip-count"]', ataki ? String(ip.length) : DASH);
+      const sciezki = sciezkiDoListy(ataki);
+      setText(sekcja, '[data-role="ataki-sciezki-count"]', ataki ? String(sciezki.length) : DASH);
+
+      // Puste stany list mówią prawdę: „nic nie znaleziono" tylko wtedy, gdy
+      // naprawdę wiemy (źródło płynie), a nie gdy nie mamy danych.
+      const wiemy = maDaneAtakow(ataki) && ataki?.zrodlo_aktywne === true;
+      for (const [klucz, ile] of [
+        ['wzorce', wzorce.length],
+        ['ip', ip.length],
+        ['sciezki', sciezki.length],
+      ] as const) {
+        const pusty = q<HTMLElement>(sekcja, `[data-role="ataki-${klucz}-nic"]`);
+        if (pusty) pusty.hidden = !wiemy || ile > 0;
+      }
+
+      const podpis = q<HTMLElement>(sekcja, '[data-role="rollup"]');
+      if (podpis) podpis.setAttribute('aria-label', `Stan sekcji: ${podsumowanieAtakow(ataki)}`);
+
+      if (!stale('ataki', [ataki, wzorce, ip, sciezki])) return;
+      wypelnijListe(sekcja, '[data-role="ataki-wzorce"]', 'tpl-atak-wzorzec-row', wzorce, (wiersz, wzorzec) => {
+        setTextWithTitle(wiersz, '[data-role="nazwa"]', wzorzec.nazwa);
+        setText(wiersz, '[data-role="ile"]', fmtInt(wzorzec.ile));
+      });
+      wypelnijListe(sekcja, '[data-role="ataki-ip"]', 'tpl-atak-ip-row', ip, (wiersz, zrodlo) => {
+        setTextWithTitle(wiersz, '[data-role="ip"]', zrodlo.ip);
+        const etykiety = zrodlo.wzorce.map(etykietaWzorca).join(', ');
+        setText(wiersz, '[data-role="wzorce"]', etykiety);
+        setText(wiersz, '[data-role="ile"]', liczba(zrodlo.ile, 'próba', 'próby', 'prób'));
+      });
+      wypelnijListe(sekcja, '[data-role="ataki-sciezki"]', 'tpl-atak-sciezka-row', sciezki, (wiersz, sciezka) => {
+        setTextWithTitle(wiersz, '[data-role="sciezka"]', sciezka.sciezka);
+        setText(wiersz, '[data-role="ile"]', fmtInt(sciezka.ile));
+      });
+    }
+
+    /** Wypełnia listę z szablonu (jedno miejsce na całą sekcję — bez `innerHTML`). */
+    function wypelnijListe<T>(
+      korzen: HTMLElement,
+      selektor: string,
+      szablon: string,
+      pozycje: readonly T[],
+      wypelnij: (wiersz: HTMLElement, pozycja: T) => void,
+    ): void {
+      const holder = q<HTMLElement>(korzen, selektor);
+      if (!holder) return;
+      holder.replaceChildren();
+      for (const pozycja of pozycje) {
+        const wiersz = instantiate(szablon);
+        if (!wiersz) continue;
+        wypelnij(wiersz, pozycja);
+        holder.append(wiersz);
+      }
+    }
+
     function renderAlerts(alerts: Alert[]): void {
       const grid = section('alerts');
       if (!grid) return;
@@ -1267,7 +1371,7 @@ import LogiView from '../components/LogiView.astro';
      * jeszcze żadnego udanego odczytu (inaczej trzymamy ostatnie dane).
      */
     function renderNoData(): void {
-      for (const key of ['checks', 'stacks', 'certs', 'backup', 'security', 'alerts', 'tools']) {
+      for (const key of ['checks', 'stacks', 'certs', 'backup', 'security', 'ataki', 'alerts', 'tools']) {
         const el = section(key);
         if (!el) continue;
         el.dataset.state = 'unknown';
@@ -1333,6 +1437,7 @@ import LogiView from '../components/LogiView.astro';
       renderCerts(widok.certy.pozycje);
       renderBackup(snapshot.backup);
       renderSecurity(snapshot.security, widok.logowania.pozycje);
+      renderAtaki(snapshot.ataki);
       /*
        * Kolejność ma znaczenie: sekcje ustawiają własne stany „brak danych",
        * a `renderFiltry` koryguje je po nich — filtr, który coś ukrył, to nie

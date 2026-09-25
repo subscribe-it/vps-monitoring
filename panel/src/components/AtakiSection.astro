@@ -1,0 +1,98 @@
+---
+/**
+ * Sekcja (f): „Ataki i skanowanie” (`ataki`) — próby XSS, SQL injection,
+ * path traversal, Log4Shell i skanowania ścieżek, liczone w discovery
+ * z access logu Traefika (Loki), plus detekcja behawioralna po liczbie 4xx.
+ *
+ * Zasada: gdy access log nie płynie, sekcja mówi „brak danych”, a NIE „zero
+ * zdarzeń” — zielony kafelek znaczy „sprawdziłem i jest czysto”.
+ */
+import { Icon } from 'astro-icon/components';
+import SectionCard from './SectionCard.astro';
+import StatBlock from './StatBlock.astro';
+---
+
+<SectionCard section="ataki" title="Ataki i skanowanie" icon="lucide:bug">
+  <div class="field-grid">
+    <StatBlock field="ataki-state" label="Stan" icon="lucide:shield-alert" />
+    <StatBlock field="ataki-zdarzenia" label="Próby ataku 24 h" icon="lucide:crosshair" />
+    <StatBlock field="ataki-skanowanie" label="Skanowanie (4xx / 10 min)" icon="lucide:radar" />
+  </div>
+
+  <div class="border-t border-base-300">
+    <header class="flex items-center gap-2 px-4 pt-2.5 pb-1">
+      <Icon name="lucide:crosshair" size={14} class="subtle" aria-hidden="true" />
+      <h3 class="card-title text-xs">Czego próbowano (24 h)</h3>
+      <span class="count-chip" data-role="ataki-wzorce-count">—</span>
+    </header>
+    <div data-role="ataki-wzorce"></div>
+    <div class="empty-ops" data-role="ataki-wzorce-nic" hidden>
+      <Icon name="lucide:circle-check" size={16} aria-hidden="true" />
+      <span>Żadnych prób ataku w ostatnich 24 godzinach.</span>
+    </div>
+  </div>
+
+  <div class="border-t border-base-300">
+    <header class="flex items-center gap-2 px-4 pt-2.5 pb-1">
+      <Icon name="lucide:globe-lock" size={14} class="subtle" aria-hidden="true" />
+      <h3 class="card-title text-xs">Skąd atakują (24 h)</h3>
+      <span class="count-chip" data-role="ataki-ip-count">—</span>
+    </header>
+    <div data-role="ataki-ip"></div>
+    <div class="empty-ops" data-role="ataki-ip-nic" hidden>
+      <Icon name="lucide:circle-check" size={16} aria-hidden="true" />
+      <span>Brak adresów z próbami ataku.</span>
+    </div>
+  </div>
+
+  <div class="border-t border-base-300">
+    <header class="flex items-center gap-2 px-4 pt-2.5 pb-1">
+      <Icon name="lucide:route" size={14} class="subtle" aria-hidden="true" />
+      <h3 class="card-title text-xs">Najczęściej zaczepiane ścieżki</h3>
+      <span class="count-chip" data-role="ataki-sciezki-count">—</span>
+    </header>
+    <div data-role="ataki-sciezki"></div>
+    <div class="empty-ops" data-role="ataki-sciezki-nic" hidden>
+      <Icon name="lucide:circle-check" size={16} aria-hidden="true" />
+      <span>Żadna ścieżka nie była zaczepiana przez payloady ataków.</span>
+    </div>
+  </div>
+
+  <div class="empty-ops" data-role="ataki-unknown" hidden>
+    <Icon name="lucide:help-circle" size={16} aria-hidden="true" />
+    <span
+      >Brak danych o atakach — access log Traefika nie płynie (alert
+      <em>TraefikNoAccessLogs</em>). Po przywróceniu logu sekcja liczy się sama;
+      procedura: runbook <em>#logs</em>.</span
+    >
+  </div>
+  <div class="empty-ops" data-role="empty" hidden>
+    <Icon name="lucide:inbox" size={16} aria-hidden="true" />
+    <span>Brak danych o atakach — API nie zwróciło tej sekcji.</span>
+  </div>
+</SectionCard>
+
+<template id="tpl-atak-wzorzec-row">
+  <div class="row-ops" data-role="atak-wzorzec">
+    <Icon name="lucide:crosshair" size={14} class="subtle shrink-0" aria-hidden="true" />
+    <span class="min-w-0 flex-1 truncate text-xs font-medium" data-role="nazwa"></span>
+    <span class="num subtle text-xs" data-role="ile"></span>
+  </div>
+</template>
+
+<template id="tpl-atak-ip-row">
+  <div class="row-ops" data-role="atak-ip">
+    <Icon name="lucide:globe-lock" size={14} class="subtle shrink-0" aria-hidden="true" />
+    <span class="num min-w-0 flex-1 truncate text-xs font-medium" data-role="ip"></span>
+    <span class="subtle min-w-0 truncate text-xs" data-role="wzorce"></span>
+    <span class="num subtle text-xs" data-role="ile"></span>
+  </div>
+</template>
+
+<template id="tpl-atak-sciezka-row">
+  <div class="row-ops" data-role="atak-sciezka">
+    <Icon name="lucide:route" size={14} class="subtle shrink-0" aria-hidden="true" />
+    <span class="num min-w-0 flex-1 truncate text-xs font-medium" data-role="sciezka"></span>
+    <span class="num subtle text-xs" data-role="ile"></span>
+  </div>
+</template>

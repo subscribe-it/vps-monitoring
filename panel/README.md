@@ -133,10 +133,10 @@ panel nigdy nie wywala się na nieoczekiwanym stanie.
 `src/lib/status.ts` parsuje odpowiedź **bez rzucania wyjątków**: brakujące lub
 błędne pole staje się `null`, pustą tablicą albo stanem `unknown`, a widok pokazuje
 kreskę (`—`). Pola, które mogą być `null`: `url`, `detail`, `since`, `latency_ms`,
-`stack`, `summary`, `expires_at`, `backup`, `security`, całe `host`.
+`stack`, `summary`, `expires_at`, `backup`, `security`, `ataki`, całe `host`.
 
 `overall` jest używane wprost; jeśli go brak, panel liczy stan ogólny jako
-najgorszy ze stanów `checks`, `stacks`, `certs`, `alerts`, `backup`, `security`.
+najgorszy ze stanów `checks`, `stacks`, `certs`, `alerts`, `backup`, `security`, `ataki`.
 
 `tools[].icon` to nazwa ikony lucide (np. `chart-line`). Ikona spoza wbudowanej
 listy dostaje bezpieczny zamiennik (`box`) — kafelek nigdy nie zostaje pusty.
@@ -253,6 +253,31 @@ nagłówek i sekcje stanu znikają, a `iframe` zajmuje całą pozostałą wysoko
 W ramce trzymane jest **jedno** osadzenie naraz: przełączenie narzędzia ładuje
 nowe, a powrót do widoku stanu nie usuwa ramki (dzięki temu narzędzie nie traci
 swojego stanu przy skoku do stanu i z powrotem).
+
+### Sekcja „Ataki i skanowanie" (`ataki`)
+
+Panel pokazuje, czy ktoś próbuje atakować aplikacje — na podstawie **access logu
+Traefika** zbieranego do Loki przez promtail. Sekcja ma trzy kafelki (stan, liczba
+prób 24 h, skanowanie po 4xx) i trzy listy: czego próbowano (kategorie), skąd
+atakują (adresy IP z kategoriami) i najczęściej zaczepiane ścieżki.
+
+Reguły, które decydują o kolorze (`src/lib/ataki.ts`):
+
+* **`unknown` (brak danych)** — access log nie płynie (`zrodlo_aktywne: false`)
+  albo API nie ma tej sekcji. Panel mówi wtedy wprost „brak danych", bo **zero
+  zdarzeń przy braku danych znaczyłoby „sprawdziłem i jest czysto"** — a to
+  nieprawda. Zmierzone 25.09.2026: log edge'a nie powstawał od 17.08.2026,
+  więc sekcja jest w tym stanie do czasu przywrócenia `--accesslog`.
+* **`ok`** — log płynie i w 24 h nie ma żadnego dopasowania.
+* **`warning`** — log płynie i są trafienia; kafel mówi, ile zdarzeń i z ilu adresów.
+
+Kategorie (klucze z API): `xss`, `sqli`, `traversal`, `log4shell`, `skaner`.
+Detekcja behawioralna (`skanowanie_10m`) liczy adresy, które przekroczyły próg
+40 odpowiedzi 4xx w 10 minut — łapie też to, czego nie ma na liście wzorców.
+
+Testy: `node scripts/ci/check_ataki.mts` (44 sprawdzenia: stan, podpisy, kolejność
+list, odmiana liczebników, odporność na śmieci).
+
 
 ### Zero zależności w runtime
 

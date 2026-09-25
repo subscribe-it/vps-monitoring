@@ -145,6 +145,44 @@ export interface Security {
   state: State;
 }
 
+/** Jeden wzorzec ataku (kategoria) z liczbą dopasowań w oknie 24 h. */
+export interface AtakWzorzec {
+  klucz: string;
+  nazwa: string;
+  ile: number;
+}
+
+/** Adres IP, z którego przyszły próby ataku — z listą kategorii. */
+export interface AtakZrodlo {
+  ip: string;
+  ile: number;
+  wzorce: string[];
+}
+
+/** Ścieżka najczęściej zaczepiana przez payloady ataków. */
+export interface AtakSciezka {
+  sciezka: string;
+  ile: number;
+}
+
+/**
+ * Sekcja „Ataki i skanowanie” liczona w discovery z access logu Traefika (Loki).
+ *
+ * `state: unknown` + `zrodlo_aktywne: false` znaczy „access log nie płynie”
+ * (albo nie ma ruchu) — panel pokazuje wtedy „brak danych”, a nie zero zdarzeń.
+ */
+export interface Ataki {
+  state: State;
+  zrodlo_aktywne: boolean | null;
+  zdarzenia_24h: number | null;
+  wzorce: AtakWzorzec[];
+  top_ip: AtakZrodlo[];
+  top_sciezki: AtakSciezka[];
+  /** Ile adresów przekroczyło próg odpowiedzi 4xx w 10 min (null = brak danych). */
+  skanowanie_10m: number | null;
+  ostatnie: string | null;
+}
+
 export interface Tool {
   id: string;
   name: string;
@@ -168,6 +206,7 @@ export interface StatusSnapshot {
   backup: Backup | null;
   alerts: Alert[];
   security: Security | null;
+  ataki: Ataki | null;
   tools: Tool[];
 }
 
@@ -467,6 +506,19 @@ function rows(value: unknown): Rec[] {
   return arr(value).filter(isRec);
 }
 
+/**
+ * Lista napisów z tablicy dowolnych wartości.
+ *
+ * Osobny helper, bo `rows()` odsiewa wszystko, co nie jest obiektem — lista
+ * kluczy kategorii (`wzorce: ["xss", "skaner"]`) przepadłaby przez to po cichu
+ * (zmierzone: kolumna z kategoriami była pusta, choć dane przyszły z API).
+ */
+function napisy(value: unknown): string[] {
+  return arr(value)
+    .map((element) => (typeof element === 'string' ? element.trim() : ''))
+    .filter((element) => element !== '');
+}
+
 function parseHost(raw: unknown): HostSnapshot | null {
   if (!isRec(raw)) return null;
   return {
@@ -586,6 +638,35 @@ function parseSecurity(raw: unknown): Security | null {
   };
 }
 
+/**
+ * Sekcja „Ataki i skanowanie”. Zwraca `null`, gdy API nie ma tej sekcji —
+ * wtedy panel pokazuje „brak danych”, a nie zera.
+ */
+function parseAtaki(raw: unknown): Ataki | null {
+  if (!isRec(raw)) return null;
+  return {
+    state: normalizeState(raw.state),
+    zrodlo_aktywne: typeof raw.zrodlo_aktywne === 'boolean' ? raw.zrodlo_aktywne : null,
+    zdarzenia_24h: num(raw.zdarzenia_24h),
+    wzorce: rows(raw.wzorce).map((row, index) => ({
+      klucz: str(row.klucz) ?? `wzorzec-${index}`,
+      nazwa: str(row.nazwa) ?? str(row.klucz) ?? `Wzorzec ${index + 1}`,
+      ile: num(row.ile) ?? 0,
+    })),
+    top_ip: rows(raw.top_ip).map((row) => ({
+      ip: str(row.ip) ?? DASH,
+      ile: num(row.ile) ?? 0,
+      wzorce: napisy(row.wzorce),
+    })),
+    top_sciezki: rows(raw.top_sciezki).map((row) => ({
+      sciezka: str(row.sciezka) ?? DASH,
+      ile: num(row.ile) ?? 0,
+    })),
+    skanowanie_10m: num(raw.skanowanie_10m),
+    ostatnie: str(raw.ostatnie),
+  };
+}
+
 function parseTools(raw: unknown): Tool[] {
   return rows(raw).map((row, index) => ({
     id: str(row.id) ?? `tool-${index}`,
@@ -616,6 +697,7 @@ export function parseStatus(raw: unknown): StatusSnapshot {
     backup: parseBackup(root.backup),
     alerts: parseAlerts(root.alerts),
     security: parseSecurity(root.security),
+    ataki: parseAtaki(root.ataki),
     tools: parseTools(root.tools),
   };
 }

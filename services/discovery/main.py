@@ -1507,6 +1507,194 @@ def sekcja_z_loki(loki_url, json_get, limit_logowan=20, teraz=None):
 
 
 # --------------------------------------------------------------------------
+# Sekcja „Ataki i skanowanie" (Loki, access log Traefika)
+# --------------------------------------------------------------------------
+# Po co: monitoring ma sam zauważyć próbę ataku (XSS, SQL injection, traversal,
+# skanowanie ścieżek), a nie tylko pokazywać, że aplikacja odpowiada. Dane bierzemy
+# z access logu edge'a, który promtail zbiera do Loki (`job="traefik"`).
+#
+# ZMIERZONE 25.09.2026 — WARUNEK DZIAŁANIA: access log edge'a nie jest zapisywany
+# od 17.08.2026 (alert TraefikNoAccessLogs jest aktywny). Dopóki tak jest, ta
+# sekcja pokazuje wprost „brak danych" (`state: unknown`, liczniki `null`), a NIE
+# zera — inaczej panel kłamałby spokojem.
+#
+# Zapytania buduje serwer z tych stałych (żaden tekst użytkownika nie trafia do
+# LogQL — ta sama zasada co w `/status/logs`).
+ATAKI_SELECTOR = '{job="traefik"} | json | __error__="" | RequestHost != "traefik"'
+# Regex w SUROWYM stringu LogQL (backticki), bo LogQL/Go nie zna escape `\.`:
+# w backtickach backslash jest dosłowny, czyli dokładnie tak, jak w regexie.
+ATAKI_WZORCE = (
+    ("xss", "XSS (wstrzyknięcie skryptu)",
+     r"(?i)<script|onerror=|javascript:|%3cscript"),
+    ("sqli", "SQL injection",
+     r"(?i)union select|union%20select|or 1=1|information_schema|sleep\("),
+    ("traversal", "Wyjście poza katalog (path traversal)",
+     r"\.\./|/etc/passwd|%2e%2e%2f"),
+    ("log4shell", "Log4Shell (jndi)",
+     r"jndi:"),
+    ("skaner", "Skanowanie typowych ścieżek",
+     r"(?i)/\.env|/\.git/|wp-login\.php|xmlrpc\.php|phpmyadmin|vendor/phpunit|wp-config\.php"),
+)
+ATAKI_OKNO = "24h"
+ATAKI_ILE_IP = 5
+ATAKI_ILE_SCIEZEK = 5
+# Próg detekcji behawioralnej — ten sam co w regule ScanBehaviorDetected
+# (config/loki/rules/fake/ataki.yml), żeby panel i alert mówiły to samo.
+ATAKI_PROG_4XX = 40
+
+
+def empty_ataki():
+    """Puste „Ataki i skanowanie" — liczniki jako None, nie 0 (patrz empty_security)."""
+    return {
+        "state": "unknown",
+        "zrodlo_aktywne": None,
+        "zdarzenia_24h": None,
+        "wzorce": [],
+        "top_ip": [],
+        "top_sciezki": [],
+        "skanowanie_10m": None,
+        "ostatnie": None,
+    }
+
+
+def _wektor_zbierz(dane):
+    """Zamienia wektor Loki (`sum by (...)` / `topk`) w listę (etykiety, wartość).
+
+    Odporne na śmieci: brak `data`, brak `result`, niepoprawna liczba — pomijamy
+    wpis, a nie wywalamy całej sekcji.
+    """
+    wynik = []
+    for seria in ((dane or {}).get("data") or {}).get("result") or []:
+        if not isinstance(seria, dict):
+            continue
+        etykiety = seria.get("metric") if isinstance(seria.get("metric"), dict) else {}
+        wartosc = seria.get("value")
+        if not isinstance(wartosc, list) or len(wartosc) < 2:
+            continue
+        try:
+            wynik.append((etykiety, float(wartosc[1])))
+        except (TypeError, ValueError):
+            continue
+    return wynik
+
+
+def sekcja_atakow(loki_url, json_get, teraz=None):
+    """Buduje sekcję `ataki` z access logu Traefika. None, gdy Loki nie odpowiada."""
+    teraz = time.time() if teraz is None else teraz
+    sekcja = empty_ataki()
+    odpowiedzialo = False
+
+    def zapytanie(zapytanie_logql, typ="query", **dodatkowe):
+        parametry = {"query": zapytanie_logql}
+        if typ == "query":
+            parametry["time"] = "%.0f" % teraz
+            sciezka = "/loki/api/v1/query"
+        else:
+            parametry.update(dodatkowe)
+            sciezka = "/loki/api/v1/query_range"
+        return json_get("%s%s?%s" % (loki_url, sciezka, urllib.parse.urlencode(parametry)),
+                        timeout=8.0)
+
+    # 1) Czy access log w ogóle płynie (15 min). To rozstrzyga, czy wolno pokazać
+    #    liczby, czy trzeba powiedzieć „brak danych".
+    try:
+        wektor = _wektor_zbierz(zapytanie('sum(count_over_time({job="traefik"}[15m]))'))
+        odpowiedzialo = True
+        sekcja["zrodlo_aktywne"] = bool(wektor) and wektor[0][1] > 0
+    except Exception as wyjatek:  # noqa: BLE001 - brak Loki => zostaje None
+        log("Ataki: Loki nie odpowiedziało o ruch (%s)", wyjatek)
+
+    # 2) Liczniki i źródła per wzorzec (jedno zapytanie na wzorzec, grupowane po IP).
+    liczniki_ip = {}
+    suma = 0
+    wzorce = []
+    for klucz, nazwa, wzorzec in ATAKI_WZORCE:
+        zapytanie_logql = "sum by (ClientHost) (count_over_time(%s |~ `%s` [%s]))" % (
+            ATAKI_SELECTOR, wzorzec, ATAKI_OKNO)
+        try:
+            wektor = _wektor_zbierz(zapytanie(zapytanie_logql))
+        except Exception as wyjatek:  # noqa: BLE001
+            log("Ataki: Loki nie odpowiedziało na wzorzec %s (%s)", klucz, wyjatek)
+            continue
+        odpowiedzialo = True
+        ile = int(sum(wartosc for _, wartosc in wektor))
+        wzorce.append({"klucz": klucz, "nazwa": nazwa, "ile": ile})
+        suma += ile
+        for etykiety, wartosc in wektor:
+            adres_ip = str(etykiety.get("ClientHost") or "").strip()
+            if not adres_ip:
+                continue
+            wpis = liczniki_ip.setdefault(adres_ip, {"ip": adres_ip, "ile": 0, "wzorce": []})
+            wpis["ile"] += int(wartosc)
+            if klucz not in wpis["wzorce"]:
+                wpis["wzorce"].append(klucz)
+
+    if wzorce:
+        sekcja["wzorce"] = wzorce
+        sekcja["zdarzenia_24h"] = suma
+    if liczniki_ip:
+        sekcja["top_ip"] = sorted(
+            liczniki_ip.values(), key=lambda wpis: (-wpis["ile"], wpis["ip"]))[:ATAKI_ILE_IP]
+
+    # 3) Które ścieżki są zaczepiane (zlepiony wzorzec wszystkich kategorii).
+    zlepione = "|".join("(?:%s)" % wzorzec for _, _, wzorzec in ATAKI_WZORCE)
+    try:
+        wektor = _wektor_zbierz(zapytanie(
+            "topk(%d, sum by (RequestPath) (count_over_time(%s |~ `%s` [%s])))" % (
+                ATAKI_ILE_SCIEZEK, ATAKI_SELECTOR, zlepione, ATAKI_OKNO)))
+        odpowiedzialo = True
+        sekcja["top_sciezki"] = [
+            {"sciezka": str(etykiety.get("RequestPath") or "(brak)")[:200], "ile": int(wartosc)}
+            for etykiety, wartosc in wektor
+        ]
+    except Exception as wyjatek:  # noqa: BLE001
+        log("Ataki: Loki nie odpowiedziało na ścieżki (%s)", wyjatek)
+
+    # 4) Detekcja behawioralna: ile adresów ma więcej niż próg odpowiedzi 4xx.
+    try:
+        wektor = _wektor_zbierz(zapytanie(
+            "topk(%d, sum by (ClientHost) (count_over_time(%s | DownstreamStatus >= 400 [10m])))" % (
+                ATAKI_ILE_IP, ATAKI_SELECTOR)))
+        odpowiedzialo = True
+        sekcja["skanowanie_10m"] = sum(
+            1 for _, wartosc in wektor if wartosc > ATAKI_PROG_4XX)
+    except Exception as wyjatek:  # noqa: BLE001
+        log("Ataki: Loki nie odpowiedziało na detekcję skanowania (%s)", wyjatek)
+
+    # 5) Kiedy ostatnio cokolwiek dopasowano (panel pokazuje „ostatnie zdarzenie").
+    try:
+        dane = zapytanie(
+            "%s |~ `%s`" % (ATAKI_SELECTOR, zlepione),
+            typ="range",
+            start=str(int((teraz - 24 * 3600) * 1e9)),
+            end=str(int(teraz * 1e9)),
+            limit="1",
+            direction="backward",
+        )
+        odpowiedzialo = True
+        for strumien in ((dane or {}).get("data") or {}).get("result") or []:
+            for wpis in (strumien or {}).get("values") or []:
+                if isinstance(wpis, list) and wpis:
+                    try:
+                        sekcja["ostatnie"] = iso_z(float(wpis[0]) / 1e9)
+                    except (TypeError, ValueError):
+                        pass
+                    break
+            if sekcja["ostatnie"]:
+                break
+    except Exception as wyjatek:  # noqa: BLE001
+        log("Ataki: Loki nie odpowiedziało na ostatnie zdarzenie (%s)", wyjatek)
+
+    if not odpowiedzialo:
+        return None
+    # Stan: `ok` tylko wtedy, gdy widzimy ruch w access logu. Gdy log nie płynie
+    # (albo nie ma żadnego ruchu), mówimy „unknown" — panel pokaże „brak danych",
+    # a nie zero zdarzeń, bo to byłoby kłamstwo.
+    sekcja["state"] = "ok" if sekcja["zrodlo_aktywne"] else "unknown"
+    return sekcja
+
+
+# --------------------------------------------------------------------------
 # Narzędzia pokazywane w panelu
 # --------------------------------------------------------------------------
 TOOLS = (
@@ -2088,6 +2276,28 @@ class DiscoveryService:
             )
         return alerts
 
+    # Sekcja „Ataki i skanowanie": panel odświeża `/status/api.json` co 30 s,
+    # a jedno policzenie tej sekcji to 8 zapytań do Loki (5 wzorców + ścieżki +
+    # skanowanie + ruch). Bez cache młócilibyśmy Loki bez potrzeby, więc trzymamy
+    # wynik 60 s (a po nieudanym odczycie próbujemy szybciej — 15 s).
+    ATAKI_TTL_SECONDS = 60
+    ATAKI_TTL_BLEDU_SECONDS = 15
+
+    def ataki_section(self):
+        default = empty_ataki()
+        if not self.config.loki_url:
+            return default
+        teraz = self.clock()
+        zapis = getattr(self, "_ataki_cache", None)
+        if zapis is not None:
+            ttl = self.ATAKI_TTL_SECONDS if zapis[2] else self.ATAKI_TTL_BLEDU_SECONDS
+            if teraz - zapis[0] < ttl:
+                return zapis[1]
+        sekcja = sekcja_atakow(self.config.loki_url, self.json_get, teraz=teraz)
+        wynik = sekcja if isinstance(sekcja, dict) else default
+        self._ataki_cache = (teraz, wynik, isinstance(sekcja, dict))
+        return wynik
+
     def logs_section(self, zapytanie):
         """Linie logów z Loki dla panelu. Zwraca `(kod HTTP, payload)`.
 
@@ -2250,6 +2460,9 @@ class DiscoveryService:
         security = self._safe("security", self.security_section, empty_security())
         if not isinstance(security, dict):
             security = empty_security()
+        ataki = self._safe("ataki", self.ataki_section, empty_ataki())
+        if not isinstance(ataki, dict):
+            ataki = empty_ataki()
         tools = self._safe_list("tools", self.tools_section)
         overall = self._safe(
             "overall",
@@ -2268,6 +2481,7 @@ class DiscoveryService:
             "backup": backup,
             "alerts": alerts,
             "security": security,
+            "ataki": ataki,
             "tools": tools,
         }
 
