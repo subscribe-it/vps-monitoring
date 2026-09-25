@@ -768,6 +768,38 @@ import LogiView from '../components/LogiView.astro';
 
     /* ---------------- render: sekcje stanu ---------------- */
 
+    /*
+     * „HTTP 404" na ścieżce sondy to nie awaria aplikacji, tylko brak wskazanej
+     * ścieżki health. Panel mówi to wprost i daje etykietę do wklejenia, żeby
+     * taki wpis nie uczył ignorowania ostrzeżeń (zmierzone: ventiplan-prod/api).
+     */
+    const RUNBOOK_URL =
+      'https://github.com/subscribe-it/vps-monitoring/blob/main/docs/RUNBOOK.md#sciezkasondy';
+
+    function ustawPodpowiedzSciezki(row: HTMLElement, check: Check): void {
+      const hint = q<HTMLElement>(row, '[data-role="sciezka-hint"]');
+      if (!hint) return;
+      const czterysta = /\b4\d\d\b/.test(check.detail ?? '');
+      const pokazac = check.state === 'warning' && czterysta && Boolean(check.health_label);
+      hint.hidden = !pokazac;
+      if (!pokazac) return;
+
+      const sciezka = check.probe_path ?? '/';
+      setText(
+        hint,
+        '[data-role="sciezka-tekst"]',
+        `Usługa odpowiada, ale ścieżka ${sciezka} nie istnieje — wskaż ścieżkę sondy: `,
+      );
+      const kopiuj = q<HTMLButtonElement>(hint, '[data-role="kopiuj-sciezke"]');
+      if (kopiuj) {
+        kopiuj.dataset.kopiuj = check.health_label ?? '';
+        kopiuj.title = check.health_label ?? '';
+        kopiuj.disabled = !check.health_label;
+      }
+      const link = q<HTMLAnchorElement>(hint, '[data-role="sciezka-runbook"]');
+      if (link) link.href = RUNBOOK_URL;
+    }
+
     function renderChecks(checks: Check[]): void {
       const grid = section('checks');
       if (!grid) return;
@@ -795,6 +827,7 @@ import LogiView from '../components/LogiView.astro';
           row.dataset.state = check.state;
           setTextWithTitle(row, '[data-role="name"]', check.name);
           setTextWithTitle(row, '[data-role="detail"]', check.detail ?? stateLabel(check.state));
+          ustawPodpowiedzSciezki(row, check);
           setText(
             row,
             '[data-role="latency"]',
@@ -1029,6 +1062,27 @@ import LogiView from '../components/LogiView.astro';
       );
     }
 
+    /** Top źródła nieudanych prób SSH — liczone w discovery (nie etykietą w Loki). */
+    function renderZrodlaSsh(grid: HTMLElement, security: Security | null): void {
+      const lista = security?.ssh_failed_ips ?? [];
+      const holder = q<HTMLElement>(grid, '[data-role="ssh-ips"]');
+      setText(grid, '[data-role="ssh-ips-count"]', security?.ssh_failed_sources === null || !security ? '—' : String(lista.length));
+      const pusty = q<HTMLElement>(grid, '[data-role="ssh-ips-empty"]');
+      const brakDanych = q<HTMLElement>(grid, '[data-role="ssh-ips-unknown"]');
+      if (pusty) pusty.hidden = !security || lista.length > 0 || security.ssh_failed_sources === null;
+      if (brakDanych) brakDanych.hidden = Boolean(security) && security?.ssh_failed_sources !== null;
+      if (!holder) return;
+      if (!stale('ssh-ips', lista)) return;
+      holder.replaceChildren();
+      for (const zrodlo of lista) {
+        const row = instantiate('tpl-ssh-ip-row');
+        if (!row) continue;
+        setTextWithTitle(row, '[data-role="ip"]', zrodlo.ip);
+        setText(row, '[data-role="count"]', `${fmtInt(zrodlo.count)} prób`);
+        holder.append(row);
+      }
+    }
+
     function renderSecurity(security: Security | null, loginy: Login[] | null = null): void {
       const grid = section('security');
       if (!grid) return;
@@ -1041,9 +1095,14 @@ import LogiView from '../components/LogiView.astro';
         setField('security-bans', DASH, '', 'unknown');
       } else {
         setField('security-state', stateLabel(security.state), 'stan z /status/api.json', security.state);
-        setField('security-failed', fmtInt(security.ssh_failed_24h), 'nieudane próby SSH', security.state);
+        const zrodla = security.ssh_failed_sources;
+        const opisProby =
+          zrodla === null ? 'nieudane próby SSH' : `nieudane próby SSH z ${fmtInt(zrodla)} adresów`;
+        setField('security-failed', fmtInt(security.ssh_failed_24h), opisProby, security.state);
         setField('security-bans', fmtInt(security.ssh_bans_24h), 'zablokowane adresy', security.state);
       }
+
+      renderZrodlaSsh(grid, security);
 
       const logins = loginy ?? security?.logins_24h ?? [];
       setText(grid, '[data-role="logins-count"]', String(logins.length));

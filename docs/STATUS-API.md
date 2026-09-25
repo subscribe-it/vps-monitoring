@@ -42,7 +42,9 @@ w takim przypadku pola uzupełniane są zerami, a `overall` degraduje się do `w
     { "name": "AppDown", "severity": "critical", "stack": "ventiplan-prod",
       "summary": "…", "since": "…" }
   ],
-  "security": { "ssh_failed_24h": 203, "ssh_bans_24h": null, "logins_24h": [], "state": "ok" },
+  "security": { "ssh_failed_24h": 203, "ssh_bans_24h": 12,
+                "ssh_failed_ips": [ { "ip": "45.148.10.10", "count": 41 } ],
+                "ssh_failed_sources": 7, "logins_24h": [], "state": "ok" },
   "tools": [
     { "id": "grafana", "name": "Grafana", "url": "/grafana", "embed": true,
       "embed_query": "kiosk", "state": "ok", "kind": "internal", "icon": "chart-line",
@@ -116,3 +118,28 @@ ją promtail z `com.docker.swarm.service.name`.
   a liczniki są `null` — panel pokazuje wtedy „—", żeby nie udawać zera.
   Bany (`ssh_bans_24h`) są `null`, bo fail2ban pisze do journala tylko
   start/stop; pełne dane da zewnętrzny `SECURITY_JSON_URL` (ma pierwszeństwo).
+
+## Ścieżka sondy i podpowiedź etykiety
+
+Każdy check w `checks[]` niesie trzy pola, które odróżniają „aplikacja padła" od
+„aplikacja żyje, ale nie obsługuje tej ścieżki":
+
+| Pole | Typ | Znaczenie |
+| --- | --- | --- |
+| `probe_path` | `string` | Ścieżka, którą NAPRAWDĘ sondujemy (np. `/`, `/api`). |
+| `path_source` | `string` | Skąd ścieżka: `label` (`monitoring.io/health-path`), `probe` (`monitoring.io/probe`), `rule` (`PathPrefix` z reguły Traefika), `default` (`DEFAULT_PROBE_PATH` albo `/`). |
+| `health_label` | `string \| null` | Gotowa linia do wklejenia (`monitoring.io/health-path=/health`), gdy ścieżki nikt nie ustawił świadomie. `null`, jeśli etykieta już jest. |
+
+Panel pokazuje podpowiedź tylko dla stanu `warning` z kodem 4xx i tylko wtedy,
+gdy `health_label` istnieje — nigdy nie zgaduje ścieżki za użytkownika.
+
+## Sekcja `security` — źródła nieudanych prób SSH
+
+- `ssh_failed_ips`: do 5 najaktywniejszych adresów (`{ "ip": …, "count": … }`),
+  liczone w usłudze discovery po stronie Pythona (etykieta `ip` w promtailu
+  oznaczałaby eksplozję liczności w Loki),
+- `ssh_failed_sources`: liczba RÓŻNYCH adresów w 24 h (`null`, gdy Loki nie
+  odpowiedziało — panel pokazuje wtedy „—", nie zero),
+- `ssh_bans_24h`: bany fail2bana z pliku `/var/log/fail2ban.log` (job `fail2ban`).
+  Wcześniej liczone z journala, gdzie fail2ban pisze tylko start/stop, więc
+  zawsze było `0`/`null`.

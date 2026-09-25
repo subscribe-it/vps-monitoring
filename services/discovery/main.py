@@ -589,12 +589,19 @@ def _is_true(value):
 class Target:
     """Cel monitoringu (jeden URL do sondy i do HTTP SD)."""
 
-    __slots__ = ("url", "host", "path", "stack", "service", "app", "module", "severity", "router")
+    __slots__ = ("url", "host", "path", "path_source", "stack", "service", "app", "module",
+                 "severity", "router")
 
-    def __init__(self, url, host, path, stack, service, app, module, severity, router):
+    def __init__(self, url, host, path, stack, service, app, module, severity, router,
+                 path_source="default"):
         self.url = url
         self.host = host
         self.path = path
+        # Skąd wzięła się ścieżka sondy: "label" (monitoring.io/health-path),
+        # "probe" (monitoring.io/probe), "rule" (PathPrefix z reguły Traefika),
+        # "default" (DEFAULT_PROBE_PATH albo samo "/"). Panel pokazuje sugestię
+        # etykiety tylko wtedy, gdy ścieżka NIE jest świadomie ustawiona.
+        self.path_source = path_source
         self.stack = stack
         self.service = service
         self.app = app
@@ -668,6 +675,7 @@ def build_targets(services, config):
                     parsed.hostname or "",
                     parsed.path or "",
                     probe_override,
+                    "probe",
                 )
             )
         else:
@@ -677,15 +685,22 @@ def build_targets(services, config):
                     log("Pomijam router %s usługi %s: reguła bez Host() (%r)", router, full_name, rule)
                     continue
                 host, path = parsed
+                if health_path:
+                    zrodlo_sciezki = "label"
+                elif path:
+                    zrodlo_sciezki = "rule"
+                else:
+                    zrodlo_sciezki = "default"
                 path = health_path or path or config.default_probe_path
-                urls.append((router, host, path, build_traefik_url(host, path)))
+                urls.append((router, host, path, build_traefik_url(host, path), zrodlo_sciezki))
         seen_urls = set()
-        for router, host, path, url in urls:
+        for router, host, path, url, zrodlo_sciezki in urls:
             if url in seen_urls:
                 continue
             seen_urls.add(url)
             targets.append(
-                Target(url, host, _normalize_path(path), stack, display_name, app, module, severity, router)
+                Target(url, host, _normalize_path(path), stack, display_name, app, module, severity,
+                       router, zrodlo_sciezki)
             )
     if skipped_services:
         log("Pominięto %d usług (SKIP_* / monitoring.io/skip / traefik.enable=false)", skipped_services)
@@ -1364,7 +1379,8 @@ def empty_backup():
 def empty_security():
     # Liczniki jako None, a nie 0: „nie wiem" nie może wyglądać jak „zero
     # zdarzeń". Panel renderuje None jako „—" (fmtInt w panel/src/lib/status.ts).
-    return {"ssh_failed_24h": None, "ssh_bans_24h": None, "logins_24h": [], "state": "unknown"}
+    return {"ssh_failed_24h": None, "ssh_bans_24h": None, "ssh_failed_ips": [],
+            "ssh_failed_sources": None, "logins_24h": [], "state": "unknown"}
 
 
 # --- sekcja „Bezpieczeństwo" z Loki ----------------------------------------
@@ -1376,17 +1392,28 @@ def empty_security():
 # liczby banów z journala nie da się policzyć — zostaje None, a panel pokazuje
 # „—" zamiast fałszywego zera.
 LOKI_SSH = 'unit="ssh.service"'
-LOKI_FAIL2BAN = 'unit="fail2ban.service"'
+# UWAGA (zmierzone 22.09.2026): fail2ban pisze do journala tylko start/stop
+# („Server ready", „Shutdown successful"), więc licznik banów czytał ZERO i reguła
+# Fail2banBanSpike była martwa. Bany liczymy z pliku /var/log/fail2ban.log, który
+# zbiera osobny job promtaila (`job="fail2ban"`).
+LOKI_FAIL2BAN = 'job="fail2ban"'
 LOKI_LICZNIKI = (
     ("ssh_failed_24h",
      'sum(count_over_time({job="journald", %s} |= "Failed password" [24h]))' % LOKI_SSH),
     ("ssh_bans_24h",
-     'sum(count_over_time({job="journald", %s} |~ "(?i)ban" [24h]))' % LOKI_FAIL2BAN),
+     'sum(count_over_time({%s} |~ "Ban " [24h]))' % LOKI_FAIL2BAN),
 )
 LOKI_LOGINY = '{job="journald", %s} |= "Accepted"' % LOKI_SSH
 LOKI_LOGIN_WZORZEC = re.compile(
     r"Accepted (?P<metoda>\S+) for (?P<uzytkownik>\S+) from (?P<ip>\S+) port (?P<port>\d+)"
 )
+# Nieudane próby: liczymy źródła PO STRONIE PYTHONA, a nie etykietą w promtailu —
+# etykieta `ip` oznaczałaby setki nowych strumieni w Loki (eksplozja liczności).
+LOKI_NIEUDANE = '{job="journald", %s} |~ "Failed password|Invalid user"' % LOKI_SSH
+LOKI_IP_WZORZEC = re.compile(r"from (?P<ip>[0-9a-fA-F:.]{3,45})")
+LOKI_LIMIT_NIEUDANYCH = 500
+LOKI_ILE_IP = 5
+SUGESTIA_SCIEZKI = "/health"
 
 
 def sekcja_z_loki(loki_url, json_get, limit_logowan=20, teraz=None):
@@ -1441,6 +1468,37 @@ def sekcja_z_loki(loki_url, json_get, limit_logowan=20, teraz=None):
                     "method": dopasowanie.group("metoda"),
                     "at": iso_z(float(znacznik) / 1e9),
                 })
+
+    adres = "%s/loki/api/v1/query_range?%s" % (
+        loki_url,
+        urllib.parse.urlencode({
+            "query": LOKI_NIEUDANE,
+            "start": str(koniec_ns - 24 * 3600 * 10**9),
+            "end": str(koniec_ns),
+            "limit": str(LOKI_LIMIT_NIEUDANYCH),
+            "direction": "backward",
+        }),
+    )
+    try:
+        dane = json_get(adres, timeout=5.0)
+    except Exception as wyjatek:  # noqa: BLE001 - brak danych => zostają puste listy
+        log("Loki nie odpowiedziało na nieudane próby SSH (%s)", wyjatek)
+    else:
+        odpowiedzialo = True
+        liczniki = {}
+        for strumien in ((dane or {}).get("data") or {}).get("result") or []:
+            for _, linia in strumien.get("values") or []:
+                dopasowanie = LOKI_IP_WZORZEC.search(linia or "")
+                if not dopasowanie:
+                    continue
+                adres_ip = dopasowanie.group("ip")
+                liczniki[adres_ip] = liczniki.get(adres_ip, 0) + 1
+        if liczniki:
+            sekcja["ssh_failed_ips"] = [
+                {"ip": adres_ip, "count": ile}
+                for adres_ip, ile in sorted(liczniki.items(), key=lambda para: (-para[1], para[0]))[:LOKI_ILE_IP]
+            ]
+            sekcja["ssh_failed_sources"] = len(liczniki)
 
     if not odpowiedzialo:
         return None
@@ -1880,6 +1938,16 @@ class DiscoveryService:
                     "state": probe.state,
                     "detail": probe.detail_pl(),
                     "url": url,
+                    # Ścieżka, którą NAPRAWDĘ sondujemy, i gotowa etykieta do
+                    # wklejenia, gdy ścieżki nikt nie ustawił świadomie. Bez tego
+                    # „HTTP 404" wygląda jak awaria aplikacji, a to zwykle znaczy
+                    # „ta aplikacja nie obsługuje /" (zmierzone: ventiplan-prod/api).
+                    "probe_path": _normalize_path(target.path) or "/",
+                    "path_source": target.path_source,
+                    "health_label": (
+                        None if target.path_source in ("label", "probe")
+                        else "%s=%s" % (LABEL_HEALTH_PATH, SUGESTIA_SCIEZKI)
+                    ),
                     "since": iso_z(since),
                     "latency_ms": int(round(probe.latency * 1000.0)),
                 }

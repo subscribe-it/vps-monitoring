@@ -1,0 +1,19 @@
+groups:
+  - name: security-exposure
+    interval: 30s
+    rules:
+
+      # Port administracyjny (Cockpit, Docker API, bazy, Redis...) odpowiadający
+      # na publicznym adresie to najkrótsza droga do przejęcia serwera.
+      # UWAGA o zasięgu sondy: leci z TEGO SAMEGO VPS-a, więc łapie port
+      # publicznie wiązany, ale nie zastępuje skanowania z zewnątrz — to robi
+      # krok smoke w CI (runner GitHuba sprawdza te same porty przy wdrożeniu).
+      - alert: AdminPortExposed
+        expr: probe_success{job="blackbox-admin-ports"} == 1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Publicznie otwarty port administracyjny: {{ $labels.instance }}"
+          description: "Port {{ $labels.instance }} odpowiada na publicznym adresie od ponad 5 minut. Zamknij go firewallem (ufw) albo ogranicz do swojego adresu IP — procedura: runbook #adminport."
+          runbook: "#adminport"

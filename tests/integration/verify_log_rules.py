@@ -51,8 +51,10 @@ PRZYPADKI = [
      "Accepted publickey for ubuntu from 195.60.64.7 port 43210 ssh2: ED25519 SHA256:abc"),
     ("SshAuthFailuresSpike", {"job": "journald", "unit": "ssh.service"},
      "Failed password for invalid user admin from 1.2.3.4 port 1234 ssh2", 51),
-    ("Fail2banBanSpike", {"job": "journald", "unit": "fail2ban.service"},
-     "NOTICE  [sshd] Ban 1.2.3.4", 6),
+    # Bany idą z pliku /var/log/fail2ban.log (job `fail2ban`), bo do journala
+    # fail2ban pisze tylko start/stop — wcześniejszy selektor był martwy.
+    ("Fail2banBanSpike", {"job": "fail2ban", "host": "ovh-vps-1"},
+     "2026-09-22 22:31:07,123 fail2ban.actions        [123]: NOTICE  [sshd] Ban 1.2.3.4", 6),
     ("CockpitLogin", {"job": "journald", "unit": "cockpit-ws"},
      "cockpit-session: Successful login for user admin from 195.60.64.7"),
     ("KernelDiskErrors", {"job": "journald", "transport": "kernel"},

@@ -1,0 +1,32 @@
+rule_files:
+  - ../alerts/security.yml
+evaluation_interval: 1m
+
+tests:
+  - name: port administracyjny odpowiada -> AdminPortExposed
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="blackbox-admin-ports",instance="57.129.41.248:9090",severity="critical"}'
+        values: '1+0x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: AdminPortExposed
+        exp_alerts:
+          - exp_labels:
+              job: blackbox-admin-ports
+              instance: 57.129.41.248:9090
+              severity: critical
+            exp_annotations:
+              summary: 'Publicznie otwarty port administracyjny: 57.129.41.248:9090'
+              description: 'Port 57.129.41.248:9090 odpowiada na publicznym adresie od ponad 5 minut. Zamknij go firewallem (ufw) albo ogranicz do swojego adresu IP — procedura: runbook #adminport.'
+              runbook: '#adminport'
+
+  - name: port zamkniety -> cisza
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="blackbox-admin-ports",instance="57.129.41.248:2375",severity="critical"}'
+        values: '0+0x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: AdminPortExposed
+        exp_alerts: []

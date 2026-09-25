@@ -30,6 +30,22 @@ import StatBlock from './StatBlock.astro';
       <span>Żadne logowanie nie pasuje do filtra.</span>
     </div>
   </div>
+  <div class="border-t border-base-300">
+    <header class="flex items-center gap-2 px-4 pt-2.5 pb-1">
+      <Icon name="lucide:ban" size={14} class="subtle" aria-hidden="true" />
+      <h3 class="card-title text-xs">Skąd próbują się włamać (24 h)</h3>
+      <span class="count-chip" data-role="ssh-ips-count">—</span>
+    </header>
+    <div data-role="ssh-ips"></div>
+    <div class="empty-ops" data-role="ssh-ips-empty" hidden>
+      <Icon name="lucide:circle-check" size={16} aria-hidden="true" />
+      <span>Brak nieudanych prób SSH w ostatnich 24 godzinach.</span>
+    </div>
+    <div class="empty-ops" data-role="ssh-ips-unknown" hidden>
+      <Icon name="lucide:help-circle" size={16} aria-hidden="true" />
+      <span>Brak danych o źródłach prób — Loki nie odpowiedziało.</span>
+    </div>
+  </div>
   <div class="empty-ops" data-role="empty" hidden>
     <Icon name="lucide:inbox" size={16} aria-hidden="true" />
     <span>Brak danych o bezpieczeństwie — API nie zwróciło tej sekcji.</span>
@@ -42,5 +58,13 @@ import StatBlock from './StatBlock.astro';
     <span class="min-w-0 flex-1 truncate text-xs font-medium" data-role="service"></span>
     <span class="num subtle text-xs" data-role="ip"></span>
     <span class="subtle num text-xs" data-role="at"></span>
+  </div>
+</template>
+
+<template id="tpl-ssh-ip-row">
+  <div class="row-ops" data-role="ssh-ip">
+    <Icon name="lucide:ban" size={14} class="subtle shrink-0" aria-hidden="true" />
+    <span class="num min-w-0 flex-1 truncate text-xs font-medium" data-role="ip"></span>
+    <span class="num subtle text-xs" data-role="count"></span>
   </div>
 </template>

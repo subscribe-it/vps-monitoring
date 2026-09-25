@@ -55,6 +55,12 @@ export interface Check {
   state: State;
   detail: string | null;
   url: string | null;
+  /** Ścieżka, którą naprawdę sondujemy (np. "/" albo "/api"). */
+  probe_path: string | null;
+  /** Skąd ścieżka: label | probe | rule | default. */
+  path_source: string | null;
+  /** Gotowa etykieta do wklejenia, gdy ścieżki nikt nie ustawił świadomie. */
+  health_label: string | null;
   since: string | null;
   latency_ms: number | null;
 }
@@ -123,9 +129,18 @@ export interface Login {
   at: string | null;
 }
 
+export interface SshSource {
+  ip: string;
+  count: number;
+}
+
 export interface Security {
   ssh_failed_24h: number | null;
   ssh_bans_24h: number | null;
+  /** Najaktywniejsze źródła nieudanych prób SSH (top 5), liczone w discovery. */
+  ssh_failed_ips: SshSource[];
+  /** Ile RÓŻNYCH adresów IP próbowało (null = brak danych, nie zero). */
+  ssh_failed_sources: number | null;
   logins_24h: Login[];
   state: State;
 }
@@ -481,6 +496,9 @@ function parseChecks(raw: unknown): Check[] {
     state: normalizeState(row.state),
     detail: str(row.detail),
     url: str(row.url),
+    probe_path: str(row.probe_path),
+    path_source: str(row.path_source),
+    health_label: str(row.health_label),
     since: str(row.since),
     latency_ms: num(row.latency_ms),
   }));
@@ -554,6 +572,11 @@ function parseSecurity(raw: unknown): Security | null {
   return {
     ssh_failed_24h: num(raw.ssh_failed_24h),
     ssh_bans_24h: num(raw.ssh_bans_24h),
+    ssh_failed_ips: rows(raw.ssh_failed_ips).map((row) => ({
+      ip: str(row.ip) ?? DASH,
+      count: num(row.count) ?? 0,
+    })),
+    ssh_failed_sources: num(raw.ssh_failed_sources),
     state: normalizeState(raw.state),
     logins_24h: rows(raw.logins_24h).map((row) => ({
       service: str(row.service) ?? 'unknown',

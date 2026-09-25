@@ -1026,6 +1026,47 @@ class ContainerUsageTests(unittest.TestCase):
             self.assertIn(oczekiwana, nazwy)
 
 
+class ProbePathTests(unittest.TestCase):
+    """Ścieżka sondy w API: panel musi umieć odróżnić „404 na /" od awarii."""
+
+    def _check(self, labels, **env):
+        service = build_service(FakeDocker(services=[make_service("ventiplan-prod_api", labels)]),
+                                config=make_config(**env))
+        service.refresh()
+        return service.checks_section()[0]
+
+    def test_etykieta_health_path_wygrywa_i_nie_daje_sugestii(self):
+        check = self._check({
+            "traefik.http.routers.api.rule": "Host(`app.ventiplan.pl`) && PathPrefix(`/api`)",
+            "monitoring.io/health-path": "/healthz",
+        })
+        self.assertEqual(check["probe_path"], "/healthz")
+        self.assertEqual(check["path_source"], "label")
+        self.assertIsNone(check["health_label"])
+
+    def test_pathprefix_z_reguly_daje_sugestie_etykiety(self):
+        check = self._check({
+            "traefik.http.routers.api.rule": "Host(`app.ventiplan.pl`) && PathPrefix(`/api`)",
+        })
+        self.assertEqual(check["probe_path"], "/api")
+        self.assertEqual(check["path_source"], "rule")
+        self.assertEqual(check["health_label"], "monitoring.io/health-path=/health")
+
+    def test_brak_sciezki_to_default_i_podpowiedz(self):
+        check = self._check({"traefik.http.routers.api.rule": "Host(`app.ventiplan.pl`)"})
+        self.assertEqual(check["probe_path"], "/")
+        self.assertEqual(check["path_source"], "default")
+        self.assertEqual(check["health_label"], "monitoring.io/health-path=/health")
+
+    def test_probe_override_nie_daje_sugestii(self):
+        check = self._check({
+            "traefik.http.routers.api.rule": "Host(`app.ventiplan.pl`)",
+            "monitoring.io/probe": "https://inny.example.com/ping",
+        })
+        self.assertEqual(check["path_source"], "probe")
+        self.assertIsNone(check["health_label"])
+
+
 class SecurityFromLokiTests(unittest.TestCase):
     """Sekcja „Bezpieczeństwo" liczona z Loki (promtail zbiera journald sshd).
 
@@ -1034,12 +1075,41 @@ class SecurityFromLokiTests(unittest.TestCase):
     """
 
     def _json_get(self, odpowiedzi):
+        """Router zapytań do Loki.
+
+        Nowe testy podają fragment ZAPYTANIA LogQL (np. `Accepted`,
+        `Failed password|Invalid user`, `job="fail2ban"`), starsze — fragment
+        adresu („Failed", „query_range"). Najpierw szukamy po zapytaniu, potem po
+        adresie. Zapytanie o ŹRÓDŁA nieudanych prób dostaje domyślnie pustą listę,
+        żeby przez przypadek nie policzyć IP z logowań (obie rodziny zapytań idą
+        przez `query_range`).
+        """
+        import urllib.parse as _up
+
+        def wartosc(pozycja):
+            if isinstance(pozycja, Exception):
+                raise pozycja
+            return pozycja
+
         def json_get(url, timeout=5.0):
-            for fragment, wartosc in odpowiedzi.items():
+            zapytanie = _up.unquote(
+                _up.parse_qs(_up.urlparse(url).query).get("query", [""])[0]
+            )
+            for klucz, pozycja in odpowiedzi.items():
+                if klucz in zapytanie:
+                    return wartosc(pozycja)
+            if "Failed password|Invalid user" in zapytanie:
+                # Gdy CAŁY stub to wyjątki, test symuluje „Loki nie odpowiada" —
+                # wtedy żadne zapytanie nie może zwrócić sukcesu (inaczej stan
+                # wyszedłby „ok" przy martwym Loki).
+                wyjatki = [pozycja for pozycja in odpowiedzi.values()
+                           if isinstance(pozycja, Exception)]
+                if wyjatki and len(wyjatki) == len(odpowiedzi):
+                    raise wyjatki[0]
+                return {"data": {"result": []}}
+            for fragment, pozycja in odpowiedzi.items():
                 if fragment in url:
-                    if isinstance(wartosc, Exception):
-                        raise wartosc
-                    return wartosc
+                    return wartosc(pozycja)
             raise AssertionError("nieoczekiwany adres w teście: " + url)
 
         return json_get
@@ -1123,6 +1193,34 @@ class SecurityFromLokiTests(unittest.TestCase):
         self.assertIsNone(sekcja["ssh_failed_24h"])
         self.assertIsNone(sekcja["ssh_bans_24h"])
         self.assertEqual(sekcja["logins_24h"], [])
+
+    def test_zrodla_nieudanych_prob_liczone_w_pythonie(self):
+        """Top adresy i liczba RÓŻNYCH adresów — liczone z linii, nie etykietą."""
+        nieudane = {"data": {"result": [{"values": [
+            ["1758530000000000000", "Sep 22 10:00:00 vps sshd[1]: Failed password for root from 45.148.10.10 port 51000 ssh2"],
+            ["1758529000000000000", "Sep 22 09:59:00 vps sshd[1]: Failed password for invalid user admin from 45.148.10.10 port 51001 ssh2"],
+            ["1758528000000000000", "Sep 22 09:58:00 vps sshd[1]: Invalid user test from 91.240.118.172 port 40000"],
+            ["1758527000000000000", "Sep 22 09:57:00 vps sshd[1]: Failed password for root from 45.148.10.10 port 51002 ssh2"],
+        ]}]}}
+        sekcja = self._sekcja({
+            '|= "Failed password" [24h]': {"data": {"result": [{"value": [0, "204"]}]}},
+            'job="fail2ban"': {"data": {"result": [{"value": [0, "12"]}]}},
+            "Failed password|Invalid user": nieudane,
+            "Accepted": {"data": {"result": []}},
+        })
+        self.assertEqual(sekcja["ssh_failed_24h"], 204)
+        self.assertEqual(sekcja["ssh_bans_24h"], 12, "bany mają iść z joba fail2ban")
+        self.assertEqual(sekcja["ssh_failed_sources"], 2)
+        self.assertEqual(
+            sekcja["ssh_failed_ips"],
+            [{"ip": "45.148.10.10", "count": 3}, {"ip": "91.240.118.172", "count": 1}],
+        )
+
+    def test_brak_loki_nie_udaje_zer_w_zrodlach(self):
+        sekcja = self._sekcja({"{": OSError("connection refused")})
+        self.assertEqual(sekcja["state"], "unknown")
+        self.assertIsNone(sekcja["ssh_failed_sources"])
+        self.assertEqual(sekcja["ssh_failed_ips"], [])
 
     def test_zewnetrzny_json_ma_pierwszenstwo_nad_loki(self):
         service = build_service(

@@ -130,3 +130,33 @@ scrape_configs:
         target_label: instance
       - target_label: __address__
         replacement: blackbox-exporter:9115
+
+  # --- porty administracyjne: NIE mogą być publiczne ------------------------
+  # Sonda działa z TEGO SAMEGO VPS-a (ruch wychodzi na publiczny adres i wraca),
+  # więc wykrywa „port odpowiada na publicznym adresie", ale NIE zastępuje
+  # skanowania z internetu — to robi krok smoke w CI (runner GitHuba).
+  # Kolejność ma znaczenie: gdy port jest zamknięty, probe_success = 0.
+  - job_name: 'blackbox-admin-ports'
+    metrics_path: /probe
+    params:
+      module: [tcp_connect]
+    static_configs:
+      - targets:
+          - 57.129.41.248:9090   # Cockpit
+          - 57.129.41.248:9443   # Portainer (HTTPS)
+          - 57.129.41.248:2375   # Docker API (bez TLS)
+          - 57.129.41.248:2376   # Docker API (TLS)
+          - 57.129.41.248:5432   # PostgreSQL
+          - 57.129.41.248:3306   # MySQL / MariaDB
+          - 57.129.41.248:6379   # Redis
+          - 57.129.41.248:9200   # Elasticsearch
+          - 57.129.41.248:11211  # memcached
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+      - target_label: severity
+        replacement: critical

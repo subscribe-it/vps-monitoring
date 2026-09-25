@@ -148,6 +148,32 @@ jobs:
           PORTAINER_API_KEY: ${{ secrets.PORTAINER_API_KEY }}
         run: python3 scripts/ci/check_stack.py
 
+      # Sprawdzenie z PRAWDZIWEGO zewnątrz (runner GitHuba), bo sonda w Prometeusie
+      # leci z tego samego VPS-a. Uruchamia się tylko przy wdrożeniu, więc nie
+      # pali minut Actions.
+      #
+      # CELOWO nie blokuje wdrożenia: 22.09.2026 publiczne były 9090 (Cockpit)
+      # i 9443 (Portainer) — zamykanie portów jest decyzją właściciela hosta,
+      # a zablokowanie CI zatrzymałoby także wdrożenia monitoringu (i naprawę
+      # tych portów). Sygnał ciągły niesie alert AdminPortExposed + healthchecks.io;
+      # tutaj zostaje głośne ostrzeżenie w podsumowaniu przebiegu.
+      - name: Kontrola publicznych portów administracyjnych (z zewnątrz)
+        continue-on-error: true
+        run: |
+          zle=0
+          for port in 9090 9443 2375 2376 5432 3306 6379 9200 11211; do
+            if timeout 5 bash -c "cat < /dev/null > /dev/tcp/57.129.41.248/$port" 2>/dev/null; then
+              echo "::warning::port $port ODPOWIADA publicznie — zamknij go (docs/RUNBOOK.md #adminport)"
+              zle=1
+            else
+              echo "✓ port $port zamknięty"
+            fi
+          done
+          if [ "$zle" = "1" ]; then
+            echo "⚠ publiczny port administracyjny otwarty — to nie blokuje wdrożenia, ale wymaga decyzji właściciela (runbook #adminport)"
+          fi
+          exit 0
+
       - name: Smoke test (oczekujemy 401 = usługa żyje, wymaga logowania)
         if: steps.check.outputs.tryb != 'brak'
         run: |

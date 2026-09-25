@@ -35,6 +35,18 @@ import SectionCard from './SectionCard.astro';
     <span class="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2">
       <span class="truncate text-sm font-medium" data-role="name"></span>
       <span class="subtle truncate text-xs" data-role="detail"></span>
+      <!--
+        Podpowiedź dla najczęstszej fałszywej awarii: usługa odpowiada, ale
+        ścieżka sondy nie istnieje (HTTP 404). Bez tego 404 wygląda jak awaria
+        aplikacji, a zwykle znaczy „ta aplikacja nie obsługuje /".
+      -->
+      <span class="hint-ops w-full text-xs" data-role="sciezka-hint" hidden>
+        <span data-role="sciezka-tekst"></span>
+        <button type="button" class="link-ops" data-role="kopiuj-sciezke" data-action="kopiuj">
+          Kopiuj etykietę
+        </button>
+        <a class="link-ops" data-role="sciezka-runbook" target="_blank" rel="noopener">Jak to naprawić</a>
+      </span>
     </span>
     <span class="num w-[4.5rem] shrink-0 text-right text-xs" data-role="latency"></span>
     <span

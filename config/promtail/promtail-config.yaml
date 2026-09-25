@@ -117,3 +117,19 @@ scrape_configs:
           source: StartUTC
           format: RFC3339Nano
           fallback_formats: ['RFC3339']
+
+  # --- 4) fail2ban (bany) ---------------------------------------------------
+  # Powód (zmierzone 22.09.2026): fail2ban pisze do journala TYLKO start/stop
+  # („Server ready", „Shutdown successful"), więc reguła Fail2banBanSpike i licznik
+  # banów w panelu czytały zero. Bany są w pliku /var/log/fail2ban.log.
+  # Montaż to /host-log (cały /var/log, tylko do odczytu) — defensywnie: brak
+  # pliku nie jest błędem, job po prostu nic nie zbierze.
+  # Świadomie bez etapu `timestamp`: plik jest na żywo, więc czas odczytu ≈ czas
+  # zdarzenia, a `positions` (na wolumenie) chroni przed ponownym czytaniem.
+  - job_name: fail2ban
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: fail2ban
+          host: ${HOSTNAME}
+          __path__: /host-log/fail2ban.log

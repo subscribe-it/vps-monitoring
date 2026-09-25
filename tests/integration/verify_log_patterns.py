@@ -32,7 +32,9 @@ REGUŁY = os.path.join(os.path.dirname(__file__), "..", "..", "config", "loki", 
 PG = {"stack": "ventiplan-prod", "service": "postgres"}
 EDGE = {"stack": "portainer-edge-gateway", "service": "traefik"}
 SSH = {"job": "journald", "unit": "ssh.service"}
-F2B = {"job": "journald", "unit": "fail2ban.service"}
+# Bany fail2bana są w PLIKU (job `fail2ban` w promtailu), nie w journald:
+# fail2ban pisze do journala tylko start/stop (zmierzone 22.09.2026).
+F2B = {"job": "fail2ban", "host": "ovh-vps-1"}
 COCKPIT = {"job": "journald", "unit": "cockpit-ws"}
 KERNEL = {"job": "journald", "transport": "kernel"}
 TRAEFIK = {"job": "traefik"}

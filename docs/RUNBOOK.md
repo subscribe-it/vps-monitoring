@@ -280,6 +280,54 @@ sum by (RequestHost) (count_over_time({job="traefik"} | json | __error__="" | Re
 
 ---
 
+## <a name="sciezkasondy"></a>⚪ Jak wskazać ścieżkę sondy (HTTP 404 na „/")
+**Objaw:** w „Publicznych endpointach" usługa ma `HTTP 404`, choć aplikacja działa — użytkownicy korzystają z niej normalnie. To prawie nigdy nie jest awaria: sonda pyta o `/`, a aplikacja nie ma trasy w katalogu głównym (typowe dla API, paneli pod `/admin`, aplikacji pod prefiksem).
+
+**Skąd bierze się ścieżka sondy (w tej kolejności):**
+1. etykieta usługi **`monitoring.io/health-path`** — świadomy wybór, zalecany,
+2. `PathPrefix(...)` wyciągnięty z reguły routera Traefika,
+3. `DEFAULT_PROBE_PATH` ze stacku monitoringu,
+4. w ostateczności `/`.
+
+**Napraw (etykieta w `deploy.labels` usługi w Twoim stacku — nie w `labels`!):**
+```yaml
+deploy:
+  labels:
+    - monitoring.io/health-path=/api/health
+```
+Po wdrożeniu stacka sonda pójdzie na wskazaną ścieżkę. Akceptowane odpowiedzi: **2xx/3xx** i **401/403** (usługa żyje, wymaga logowania) → `ok`; `4xx` → `warning`; `5xx` i brak odpowiedzi → `critical`.
+
+**Jeśli nie masz osobnego healthchecku:** wskaż ścieżkę, która realnie istnieje (np. `/api`, `/login`, `/healthz`), byle odpowiadała 2xx/401/403. Nie zostawiaj `/`, jeśli aplikacja go nie obsługuje — taki wpis na stałe uczy ignorowania ostrzeżeń.
+
+**Sprawdzenie:** w panelu wiersz zmieni się na `HTTP 200`/`HTTP 401`, a pole sondy pokaże nową ścieżkę; w Prometeuszu `probe_success{instance="https://twoja-domena/…"}` wróci do 1.
+
+---
+
+## <a name="adminport"></a>🔴 AdminPortExposed — port administracyjny publicznie otwarty
+**Co to znaczy:** na publicznym adresie VPS-a odpowiada port, który nigdy nie powinien być widoczny z internetu: Cockpit (9090), Portainer (9443), Docker API (2375/2376), baza (5432/3306), Redis (6379), Elasticsearch (9200), memcached (11211). To najkrótsza droga do przejęcia serwera — nie wymaga łamania hasła, wystarczy jeden niezałatany błąd w usłudze, która tam słucha.
+
+**Zakres sondy (ważne, żeby nie mieć fałszywego poczucia bezpieczeństwa):** alert liczy się z sondy TCP **uruchamianej na tym samym VPS-ie**, więc wykrywa port wiązany publicznie, ale **nie zastępuje skanowania z internetu**. Pełne sprawdzenie z zewnątrz robi krok smoke w CI (runner GitHuba) przy każdym wdrożeniu; możesz też sprawdzić ręcznie z własnego komputera:
+```bash
+for p in 9090 9443 2375 2376 5432 3306 6379 9200 11211; do
+  timeout 3 bash -c "cat < /dev/null > /dev/tcp/57.129.41.248/$p" 2>/dev/null \
+    && echo "✗ $p ODPOWIADA" || echo "✓ $p zamknięty"
+done
+```
+
+**Napraw (na hoście, przez SSH):** zamknij port dla wszystkich, a jeśli naprawdę potrzebujesz dostępu — wpuść wyłącznie swój adres IP:
+```bash
+sudo ufw allow from TWOJE.IP.TUTAJ to any port 9090 proto tcp   # tylko dla Ciebie
+sudo ufw deny 9090                                             # reszta świata: nie
+sudo ufw status numbered
+```
+Dla usług w Swarmie lepszym rozwiązaniem niż publikowanie portu jest wystawienie ich przez Traefika (z ForwardAuth) — wtedy port zostaje w sieci wewnętrznej.
+
+**Sprawdź, kto już próbował:** nieudane logowania SSH i logowania do panelu są w sekcji „Bezpieczeństwo" panelu, a pełne logi w Grafanie (dashboard logów) — po włączeniu access logu Traefika zobaczysz też skanowanie portów.
+
+**Po naprawie:** `probe_success{job="blackbox-admin-ports"}` dla tego portu musi wrócić do 0, a alert wygasa sam po 5 minutach.
+
+---
+
 ## <a name="security"></a>⚪/🟡 SshLoginAccepted / SshAuthFailuresSpike / Fail2banBanSpike / CockpitLogin
 **Co to znaczy:** ktoś loguje się (albo próbuje) do hosta lub do panelu Cockpit.
 **Sprawdź:**
