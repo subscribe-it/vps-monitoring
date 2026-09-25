@@ -5,6 +5,7 @@
  */
 import '../styles/global.css';
 import IconSprite from '../components/IconSprite.astro';
+import { SKRYPT_MOTYWU } from '../lib/motyw';
 
 interface Props {
   title: string;
@@ -18,10 +19,15 @@ const {
 ---
 
 <!doctype html>
-<!-- Bez `data-theme`: motyw wybiera system (prefers-color-scheme). Atrybut
-     ustawiony na sztywno nadpisałby preferencję użytkownika. -->
+<!-- Bez `data-theme` w statycznym znaczniku: domyślnie motyw wybiera system
+     (`prefers-color-scheme`), a atrybut ustawiony na sztywno nadpisałby tę
+     preferencję. Jawny wybór użytkownika (jasny/ciemny, zapisany w
+     `localStorage`) dokłada go skryptem niżej — jeszcze przed pierwszym
+     malowaniem, więc nie ma mignięcia złego motywu. Skrypt pochodzi z
+     `lib/motyw.ts`, żeby klucz i nazwy motywów miały jedno źródło prawdy. -->
 <html lang="pl">
   <head>
+    <script is:inline set:html={SKRYPT_MOTYWU}></script>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title}</title>

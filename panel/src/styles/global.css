@@ -12,12 +12,18 @@
 }
 
 /*
- * Dwa motywy, jedna tożsamość. Wyboru dokonuje SYSTEM, nie JavaScript:
+ * Dwa motywy, jedna tożsamość. Domyślnie wybiera je SYSTEM:
  *   `ops-day` — domyślny (brak preferencji = jasny),
  *   `ops`      — wchodzi przez `prefersdark`, czyli przy
  *                `prefers-color-scheme: dark`.
  * Dzięki temu pierwsza klatka jest już w docelowym motywie (zero migotania),
  * a panel działa poprawnie także bez JavaScriptu.
+ *
+ * Użytkownik może tę decyzję nadpisać przełącznikiem w pasku (Auto / Jasny /
+ * Ciemny): jawny wybór ustawia `<html data-theme="ops|ops-day">` jeszcze przed
+ * pierwszym malowaniem (skrypt w `Base.astro`), a te selektory są niżej, więc
+ * wygrywają z media query. „Auto” nie ustawia atrybutu — wtedy znów decyduje
+ * system, na żywo.
  *
  * Wartości obu motywów trzymają ten sam zestaw tokenów: te same nazwy, inna
  * jasność. Kontrast tekstu na własnym tle: ≥ 12:1 (podstawowy),
@@ -636,6 +642,74 @@
   .btn-ops:disabled {
     opacity: 0.55;
     cursor: progress;
+  }
+
+  /*
+   * Przełącznik motywu (Auto / Jasny / Ciemny). Trzy opcje w jednej pigułce,
+   * każda z tap targetem ≥ 24 px (WCAG 2.5.8). Aktywną opcję niesie tło
+   * i obramowanie, nie sam kolor tekstu — dzięki temu zaznaczenie widać także
+   * przy słabym rozróżnianiu barw i w obu motywach.
+   */
+  .motyw {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 2px;
+    min-height: 1.875rem;
+    border: 1px solid var(--color-base-300);
+    border-radius: var(--radius-field);
+    background: color-mix(in oklab, var(--color-base-content) 5%, transparent);
+  }
+
+  .motyw-opcja {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.25rem;
+    min-height: 1.5rem;
+    padding: 0.125rem 0.5rem;
+    border: 1px solid transparent;
+    border-radius: calc(var(--radius-field) - 2px);
+    font-size: 0.75rem;
+    font-weight: 550;
+    color: color-mix(in oklab, var(--color-base-content) 78%, transparent);
+    background: transparent;
+    cursor: pointer;
+    transition:
+      background-color 150ms ease,
+      border-color 150ms ease,
+      color 150ms ease;
+  }
+
+  .motyw-opcja:hover {
+    color: var(--color-base-content);
+    background: color-mix(in oklab, var(--color-base-content) 10%, transparent);
+  }
+
+  .motyw-opcja[aria-checked="true"] {
+    color: var(--color-base-content);
+    background: var(--color-base-100);
+    border-color: color-mix(in oklab, var(--color-primary) 55%, var(--color-base-300));
+    box-shadow: var(--shadow-overlay);
+  }
+
+  .motyw-opcja:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 1px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .motyw-opcja {
+      transition: none;
+    }
+  }
+
+  /* Na wąskim ekranie zostają same ikony (podpowiedź `title` i opis dla
+     czytnika zostają) — pasek przyklejony nie może się rozjechać. */
+  @media (max-width: 640px) {
+    .motyw-etykieta {
+      display: none;
+    }
   }
 
   .skip-link {
@@ -2060,6 +2134,98 @@
 
     .top-slup {
       display: none;
+    }
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   zwijanie grup (wzorzec MatExpansionPanel) — wspólne dla wszystkich sekcji
+   ---------------------------------------------------------------------------
+   Nagłówek grupy jest przyciskiem, ale nazwa, licznik i pigułka stanu zostają
+   widoczne po zwinięciu, więc zwinięta grupa nadal niesie informację.
+   Cały nagłówek jest klikalny (klik przekazuje skrypt), a klawiatura działa
+   natywnie na <button> (Enter/Space). Kolory wyłącznie z tokenów motywu,
+   żeby jasny i ciemny tryb zachowywały się identycznie.
+   --------------------------------------------------------------------------- */
+@layer components {
+  .group-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem 0.375rem;
+    border-radius: var(--radius-field);
+  }
+
+  .group-head:hover {
+    background: color-mix(in oklab, var(--color-base-content) 4%, transparent);
+  }
+
+  .group-title {
+    min-width: 0;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+  }
+
+  .group-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    min-height: 1.5rem;
+    padding-inline: 0.25rem;
+    border-radius: var(--radius-field);
+    color: inherit;
+    text-align: left;
+  }
+
+  .group-toggle:focus-visible,
+  .zwijanie-zbiorcze:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
+
+  .group-chevron {
+    flex: none;
+    color: color-mix(in oklab, var(--color-base-content) 65%, transparent);
+    transition: transform 150ms ease;
+  }
+
+  [data-zwiniety='true'] .group-chevron {
+    transform: rotate(-90deg);
+  }
+
+  /* Zwinięcie chowa WYŁĄCZNIE wiersze — nagłówek zostaje. */
+  [data-zwiniety='true'] > [data-role='rows'] {
+    display: none;
+  }
+
+  .zwijanie-zbiorcze {
+    display: inline-flex;
+    align-items: center;
+    min-height: 1.5rem;
+    padding-inline: 0.5rem;
+    border: 1px solid color-mix(in oklab, var(--color-base-content) 18%, transparent);
+    border-radius: var(--radius-field);
+    font-size: 0.6875rem;
+    color: color-mix(in oklab, var(--color-base-content) 80%, transparent);
+    background: color-mix(in oklab, var(--color-base-content) 6%, transparent);
+  }
+
+  .zwijanie-zbiorcze:hover {
+    color: var(--color-base-content);
+    background: color-mix(in oklab, var(--color-base-content) 14%, transparent);
+  }
+
+  .zwijanie-zbiorcze[hidden] {
+    display: none;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .group-chevron,
+    .stack-chevron {
+      transition: none;
     }
   }
 }

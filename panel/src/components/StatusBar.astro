@@ -6,12 +6,20 @@
  * Powód istnienia: strona ze stanem ma kilka tysięcy pikseli (47 usług,
  * 16 endpointów). Przewijając „Stacki” użytkownik tracił z oczu odpowiedź na
  * dwa pytania: „czy coś jest zepsute?” i „czy dane są świeże?”. Pasek niesie
- * dokładnie te dwie informacje plus akcję odświeżenia.
+ * dokładnie te dwie informacje plus akcje: odświeżenie, wejście w Wykresy
+ * i Logi oraz przełącznik motywu.
  *
  * Wartości wypełnia skrypt klienta (role `sticky-*`), a `data-action="refresh"`
  * obsługuje ten sam delegowany handler co przycisk w nagłówku.
+ *
+ * Przełącznik motywu jest `radiogroup`, a nie trzema `aria-pressed`: to jeden
+ * wybór z trzech (auto / jasny / ciemny), więc czytnik ekranu ma zapowiedzieć
+ * „1 z 3”, a nie trzy niezależne przełączniki. Strzałki przeskakują między
+ * opcjami (roving tabindex), a wybór zapisuje się w `localStorage` i działa
+ * jeszcze przed pierwszym malowaniem (skrypt w `Base.astro`).
  */
 import { Icon } from 'astro-icon/components';
+import { opisWyboru, skrotWyboru } from '../lib/motyw';
 ---
 
 <div class="sticky-bar" data-section="sticky" data-state="unknown">
@@ -31,7 +39,7 @@ import { Icon } from 'astro-icon/components';
       <Icon name="lucide:x" size={12} aria-hidden="true" />
     </button>
   </span>
-  <span class="ml-auto flex shrink-0 items-center gap-2 sm:gap-3">
+  <span class="ml-auto flex flex-wrap items-center justify-end gap-2 sm:gap-3">
     <span
       class="subtle hidden items-center gap-1.5 text-xs sm:flex"
       data-role="sticky-fresh"
@@ -40,6 +48,53 @@ import { Icon } from 'astro-icon/components';
       <span class="state-dot" aria-hidden="true"></span>
       <span class="num" data-role="sticky-updated">—</span>
       <span data-role="sticky-ago"></span>
+    </span>
+    <span class="motyw" role="radiogroup" aria-label="Motyw panelu" data-role="motyw">
+      <button
+        type="button"
+        class="motyw-opcja"
+        role="radio"
+        aria-checked="true"
+        tabindex="0"
+        data-action="motyw"
+        data-wybor="auto"
+        data-role="motyw-auto"
+        title={opisWyboru('auto')}
+      >
+        <Icon name="lucide:monitor" size={14} aria-hidden="true" />
+        <span class="motyw-etykieta">{skrotWyboru('auto')}</span>
+        <span class="sr-only">— {opisWyboru('auto')}</span>
+      </button>
+      <button
+        type="button"
+        class="motyw-opcja"
+        role="radio"
+        aria-checked="false"
+        tabindex="-1"
+        data-action="motyw"
+        data-wybor="jasny"
+        data-role="motyw-jasny"
+        title={opisWyboru('jasny')}
+      >
+        <Icon name="lucide:sun" size={14} aria-hidden="true" />
+        <span class="motyw-etykieta">{skrotWyboru('jasny')}</span>
+        <span class="sr-only">— {opisWyboru('jasny')}</span>
+      </button>
+      <button
+        type="button"
+        class="motyw-opcja"
+        role="radio"
+        aria-checked="false"
+        tabindex="-1"
+        data-action="motyw"
+        data-wybor="ciemny"
+        data-role="motyw-ciemny"
+        title={opisWyboru('ciemny')}
+      >
+        <Icon name="lucide:moon" size={14} aria-hidden="true" />
+        <span class="motyw-etykieta">{skrotWyboru('ciemny')}</span>
+        <span class="sr-only">— {opisWyboru('ciemny')}</span>
+      </button>
     </span>
     <a
       class="btn-ops"

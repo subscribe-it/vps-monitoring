@@ -24,24 +24,10 @@ import SectionCard from './SectionCard.astro';
   </div>
 </SectionCard>
 
-<template id="tpl-check-group">
-  <section class="border-b border-base-300 last:border-b-0" data-role="group" data-state="unknown">
-    <header class="flex flex-wrap items-center gap-2 px-4 pt-2.5 pb-1">
-      <h3 class="text-xs font-semibold tracking-wide uppercase" data-role="group-name"></h3>
-      <span class="count-chip" data-role="group-count"></span>
-      <span
-        class="state-pill ml-auto"
-        data-role="group-rollup"
-        role="img"
-        aria-label="Stan grupy: nieznany"
-      >
-        <span class="state-dot" aria-hidden="true"></span>
-        <span data-role="group-rollup-label">Nieznany</span>
-      </span>
-    </header>
-    <div data-role="rows"></div>
-  </section>
-</template>
+<!--
+  Szablon grupy przeniesiony do `GroupTemplate.astro` (jeden mechanizm dla
+  wszystkich sekcji). Tutaj zostaje tylko szablon wiersza endpointu.
+-->
 
 <template id="tpl-check-row">
   <div class="row-ops" data-role="row" data-state="unknown">

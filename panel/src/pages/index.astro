@@ -20,6 +20,7 @@ import ChangesSection from '../components/ChangesSection.astro';
 import ChecksSection from '../components/ChecksSection.astro';
 import ErrorBanner from '../components/ErrorBanner.astro';
 import FiltersBar from '../components/FiltersBar.astro';
+import GroupTemplate from '../components/GroupTemplate.astro';
 import IframeView from '../components/IframeView.astro';
 import SecuritySection from '../components/SecuritySection.astro';
 import StacksSection from '../components/StacksSection.astro';
@@ -66,6 +67,14 @@ import LogiView from '../components/LogiView.astro';
       <WykresyView />
 
       <LogiView />
+
+      <!--
+        Szablon zwijanej grupy (MatExpansionPanel) — jedno źródło prawdy dla
+        wszystkich sekcji. Leży poza widokami, bo `<template>` nie renderuje
+        niczego, a skrypt klonuje go dla endpointów, certyfikatów, alertów
+        i logowań.
+      -->
+      <GroupTemplate />
     </main>
 
     <footer class="border-t border-base-300 py-3" data-role="footer">
@@ -236,7 +245,35 @@ import LogiView from '../components/LogiView.astro';
     opisZadania,
     skrotDigest,
   } from '../lib/usluga';
-  import { adresPoZmianieMotywu, parametrMotywu, zbudujAdres } from '../lib/motyw';
+  import {
+    WYBORY,
+    adresPoZmianieMotywu,
+    atrybutDlaWyboru,
+    motywEfektywny,
+    nastepnyWybor,
+    normalizujWybor,
+    odczytajWybor,
+    parametrMotywu,
+    schematKolorow,
+    zapiszWybor,
+    zbudujAdres,
+    type WyborMotywu,
+  } from '../lib/motyw';
+  import {
+    KLUCZ_ZWIJANIA,
+    czyZwinięta,
+    domyslnieZwinięta,
+    etykietaZbiorcza,
+    identyfikatorWierszy,
+    ileZwinietych,
+    kluczGrupy,
+    parsujZapis,
+    przelaczGrupe,
+    serializujZapis,
+    ustawWszystkie,
+    wszystkieZwinięte,
+    type MapaZwinięć,
+  } from '../lib/zwijanie';
 
   function bootstrap(app: HTMLElement): void {
     const endpoint = app.dataset.endpoint ?? '/status/api.json';
@@ -252,6 +289,17 @@ import LogiView from '../components/LogiView.astro';
     let mountedToolId: string | null = null;
     let frame: HTMLIFrameElement | null = null;
 
+    /*
+     * Motyw. Wybór użytkownika (auto/jasny/ciemny) siedzi w `localStorage`,
+     * a `auto` rozwiązuje się na żywo z `prefers-color-scheme`. Atrybut
+     * `data-theme` ustawił już skrypt w `<head>` — przed pierwszym malowaniem —
+     * więc tutaj tylko czytamy ten sam wybór, żeby kontrolka, ramki narzędzi
+     * i panel mówiły to samo. Hash celowo nie bierze w tym udziału: opisuje
+     * widok, nie preferencję, więc link do usługi nie przemyca cudzego motywu.
+     */
+    const mediaMotyw = window.matchMedia('(prefers-color-scheme: dark)');
+    let wyborMotywu: WyborMotywu = odczytajWybor((klucz) => window.localStorage.getItem(klucz));
+
     /** Sygnatury sekcji — zapobiegają zbędnemu przebudowywaniu DOM (i gubieniu fokusu). */
     const signatures = new Map<string, string>();
 
@@ -263,6 +311,13 @@ import LogiView from '../components/LogiView.astro';
     let poprzedni: StatusSnapshot | null = null;
     /** Stacki zwinięte przez użytkownika (przeżywają odświeżenie i reload). */
     const zwieteStacki = new Set<string>();
+    /** Wszystkie stacki widziane w ostatnim renderze — do zapisu stanu „rozwiń". */
+    const znaneStacki = new Set<string>();
+    /**
+     * Mapa zwinięć grup (localStorage `panel-zwijanie`) — wspólna dla sekcji
+     * i stacków. Klucze buduje `kluczGrupy(sekcja, grupa)` z `lib/zwijanie`.
+     */
+    let mapaZwinięć: MapaZwinięć = {};
     /** Cache przebiegów 6 h — klikanie po usługach nie młóci Prometheusa. */
     const przebiegi = new Map<string, { cpu: number[]; ram: number[] }>();
     let debounceFiltra: number | null = null;
@@ -275,6 +330,28 @@ import LogiView from '../components/LogiView.astro';
      */
     let ostatniHaszStatusu = '#/';
     const KLUCZ_ZWINIETE = 'monitoring:zwiete-stacki';
+
+    /*
+     * Nazwy zwijanych grup. Trzymamy je w jednym miejscu, żeby kolejność
+     * i brzmienie były spójne w całym panelu (i żeby test mógł je sprawdzić).
+     * Grupy pokazujemy w kolejności od najgroźniejszych — po zwinięciu
+     * najważniejsze zostają na górze.
+     */
+    const KOLEJNOSC_STANOW: State[] = ['critical', 'warning', 'ok', 'unknown', 'disabled'];
+    const ETYKIETY_CERT: Partial<Record<State, string>> = {
+      critical: 'Do odnowienia',
+      warning: 'Wygasają wkrótce',
+      ok: 'Ważne',
+      unknown: 'Bez danych',
+      disabled: 'Wyłączone',
+    };
+    const ETYKIETY_ALERT: Partial<Record<State, string>> = {
+      critical: 'Krytyczne',
+      warning: 'Ostrzeżenia',
+      ok: 'Informacyjne',
+      unknown: 'Bez danych',
+      disabled: 'Wyłączone',
+    };
 
     /* ---------------- pomocnicze DOM ---------------- */
 
@@ -535,18 +612,82 @@ import LogiView from '../components/LogiView.astro';
      */
     function embedSrc(tool: Tool): string {
       if (!tool.url) return '';
-      // Grafana i Prometheus mają WŁASNY motyw, więc przekazujemy im wybór
-      // systemu (`theme=dark|light`); reszta narzędzi nie zna takiego
-      // parametru i `zbudujAdres` go po prostu pomija.
+      // Grafana i Prometheus mają WŁASNY motyw, więc przekazujemy im motyw
+      // EFEKTYWNY (w trybie auto rozstrzygnięty z systemu, w jawnym wyborze —
+      // z wyboru użytkownika); reszta narzędzi nie zna takiego parametru
+      // i `zbudujAdres` go po prostu pomija.
       return zbudujAdres(tool.url, [
         tool.embed_query,
-        parametrMotywu(tool.id, ciemnySystemu()),
+        parametrMotywu(tool.id, motywEfektywny(wyborMotywu, mediaMotyw.matches)),
       ]);
     }
 
     /** Czy system jest teraz w trybie ciemnym (czytane na żywo, nie raz). */
     function ciemnySystemu(): boolean {
-      return window.matchMedia('(prefers-color-scheme: dark)').matches;
+      return mediaMotyw.matches;
+    }
+
+    /**
+     * Wprowadza wybór w życie: atrybut na `<html>` (tylko dla jawnego wyboru —
+     * w trybie auto decyduje media query), `color-scheme` dla kontrolek
+     * przeglądarki i stan kontrolki w pasku.
+     */
+    function zastosujMotyw(): void {
+      const korzen = document.documentElement;
+      const atrybut = atrybutDlaWyboru(wyborMotywu, ciemnySystemu());
+      if (atrybut) korzen.dataset.theme = atrybut;
+      else delete korzen.dataset.theme;
+      korzen.style.colorScheme = schematKolorow(wyborMotywu, ciemnySystemu());
+
+      const grupa = q<HTMLElement>(app, '[data-role="motyw"]');
+      if (grupa) grupa.dataset.motyw = wyborMotywu;
+      for (const opcja of Array.from(app.querySelectorAll<HTMLButtonElement>('[data-action="motyw"]'))) {
+        const wybrany = opcja.dataset.wybor === wyborMotywu;
+        opcja.setAttribute('aria-checked', wybrany ? 'true' : 'false');
+        // Roving tabindex: w grupie radio jeden przystanek Tab, reszta strzałkami.
+        opcja.tabIndex = wybrany ? 0 : -1;
+      }
+    }
+
+    /**
+     * Zmiana motywu przez użytkownika. Zapisujemy wybór (żeby przetrwał
+     * odświeżenie) i przeładowujemy ramkę tylko wtedy, gdy motyw efektywny
+     * naprawdę się zmienił — inaczej stracilibyśmy stan osadzonego narzędzia.
+     */
+    function ustawWyborMotywu(wartosc: unknown, przeniesFokus = false): void {
+      const nowy = normalizujWybor(wartosc);
+      const przed = motywEfektywny(wyborMotywu, ciemnySystemu());
+      wyborMotywu = nowy;
+      zapiszWybor((klucz, wartoscDoZapisu) => window.localStorage.setItem(klucz, wartoscDoZapisu), nowy);
+      zastosujMotyw();
+      const po = motywEfektywny(wyborMotywu, ciemnySystemu());
+      if (po !== przed) odswiezRamkeMotywu();
+      if (przeniesFokus) {
+        const opcja = app.querySelector<HTMLButtonElement>(`[data-action="motyw"][data-wybor="${nowy}"]`);
+        opcja?.focus();
+      }
+    }
+
+    /**
+     * Podmiana adresu ramki na motyw efektywny. Wołane tylko przy realnej
+     * zmianie motywu i tylko dla narzędzi, które rozumieją `theme=`
+     * (Grafana, Prometheus) — `adresPoZmianieMotywu` zwraca `null`, gdy nie ma
+     * czego podmieniać, a porównujemy z atrybutem, nie z `frame.src`
+     * (przeglądarka rozwija go do adresu absolutnego, więc porównanie z nim
+     * zawsze wypadałoby „inny” i przeładowywałoby ramkę bez potrzeby).
+     */
+    function odswiezRamkeMotywu(): void {
+      if (!frame || !mountedToolId) return;
+      const narzedzie = snapshot?.tools.find((t) => t.id === mountedToolId);
+      if (!narzedzie?.url) return;
+      const nowy = adresPoZmianieMotywu(
+        narzedzie.id,
+        narzedzie.url,
+        narzedzie.embed_query,
+        motywEfektywny(wyborMotywu, ciemnySystemu()),
+      );
+      if (!nowy || nowy === frame.getAttribute('src')) return;
+      frame.src = nowy;
     }
 
     /**
@@ -638,22 +779,19 @@ import LogiView from '../components/LogiView.astro';
       if (!holder) return;
       holder.replaceChildren();
 
-      for (const { group, items } of groupChecks(checks)) {
-        const block = instantiate('tpl-check-group');
-        if (!block) continue;
-
-        const groupState = worstState(items.map((item) => item.state));
-        block.dataset.state = groupState;
-        setText(block, '[data-role="group-name"]', group);
-        setText(block, '[data-role="group-count"]', String(items.length));
-        setText(block, '[data-role="group-rollup-label"]', stateLabel(groupState));
-        const rollup = q<HTMLElement>(block, '[data-role="group-rollup"]');
-        rollup?.setAttribute('aria-label', `Stan grupy ${group}: ${stateLabel(groupState)}`);
-
-        const rows = q<HTMLElement>(block, '[data-role="rows"]');
-        for (const check of items) {
+      // Grupy są zwijane (MatExpansionPanel) — nagłówek z nazwą, licznikiem
+      // i pigułką stanu zostaje widoczny także po zwinięciu.
+      renderGrupy(
+        'checks',
+        holder,
+        groupChecks(checks).map(({ group, items }) => ({
+          nazwa: group,
+          stan: worstState(items.map((item) => item.state)),
+          pozycje: items,
+        })),
+        (kontener, check) => {
           const row = instantiate('tpl-check-row');
-          if (!row || !rows) continue;
+          if (!row) return;
           row.dataset.state = check.state;
           setTextWithTitle(row, '[data-role="name"]', check.name);
           setTextWithTitle(row, '[data-role="detail"]', check.detail ?? stateLabel(check.state));
@@ -677,10 +815,9 @@ import LogiView from '../components/LogiView.astro';
               link.removeAttribute('href');
             }
           }
-          rows.append(row);
-        }
-        holder.append(block);
-      }
+          kontener.append(row);
+        },
+      );
     }
 
     function renderStacks(stacks: Stack[]): void {
@@ -707,12 +844,14 @@ import LogiView from '../components/LogiView.astro';
 
         block.dataset.state = stack.state;
         const zwiniety = zwieteStacki.has(stack.name);
+        znaneStacki.add(stack.name);
         block.dataset.zwiniety = zwiniety ? 'true' : 'false';
 
         const przelacznik = q<HTMLButtonElement>(block, '[data-role="stack-toggle"]');
         if (przelacznik) {
           przelacznik.setAttribute('aria-expanded', zwiniety ? 'false' : 'true');
           przelacznik.setAttribute('aria-label', `${zwiniety ? 'Rozwiń' : 'Zwiń'} stack ${stack.name}`);
+          przelacznik.title = `${zwiniety ? 'Rozwiń' : 'Zwiń'}: ${stack.name}`;
         }
         const tabela = q<HTMLElement>(block, '[data-role="stack-tabela"]');
         if (tabela) tabela.hidden = zwiniety;
@@ -794,6 +933,9 @@ import LogiView from '../components/LogiView.astro';
         }
         holder.append(block);
       }
+      // Przycisk zbiorczy sekcji mówi prawdę o stanie stacków (bez tego
+      // „Zwiń wszystko" w tej sekcji zostałoby ukryte).
+      odswiezPrzyciskZbiorczy('stacks');
       if (fokus) przewinDoFokusa();
     }
 
@@ -808,9 +950,21 @@ import LogiView from '../components/LogiView.astro';
       if (!holder) return;
       holder.replaceChildren();
 
-      for (const cert of certs) {
+      // Grupowanie po stanie: „Do odnowienia" pierwsze, dalej ostrzeżenia,
+      // ważne i bez danych. Nagłówek grupy niesie licznik i pigułkę stanu,
+      // więc zwinięcie nie ukrywa informacji, że coś wygasa.
+      const kolejność: State[] = ['critical', 'warning', 'ok', 'unknown', 'disabled'];
+      const grupyCert = kolejność
+        .map((stan) => ({
+          nazwa: ETYKIETY_CERT[stan] ?? stateLabel(stan),
+          stan,
+          pozycje: certs.filter((cert) => cert.state === stan),
+        }))
+        .filter((grupa) => grupa.pozycje.length > 0);
+
+      renderGrupy('certs', holder, grupyCert, (kontener, cert) => {
         const row = instantiate('tpl-cert-row');
-        if (!row) continue;
+        if (!row) return;
 
         row.dataset.state = cert.state;
         setState(row, '[data-role="days-wrap"]', certDaysState(cert.days_left));
@@ -818,8 +972,8 @@ import LogiView from '../components/LogiView.astro';
         setText(row, '[data-role="expires"]', cert.expires_at ? fmtDateUTC(cert.expires_at) : '');
         setText(row, '[data-role="days"]', `${fmtDays(cert.days_left)}`);
         setText(row, '[data-role="state-label"]', stateLabel(cert.state));
-        holder.append(row);
-      }
+        kontener.append(row);
+      });
     }
 
     function setField(field: string, value: string, sub: string, state: State): void {
@@ -901,14 +1055,33 @@ import LogiView from '../components/LogiView.astro';
       if (!holder) return;
       holder.replaceChildren();
 
+      // Logowania grupujemy po koncie (`service` = użytkownik), żeby jednym
+      // spojrzeniem ogarnąć „kto się logował", a nie przewijać płaską listę.
+      const wgKonta = new Map<string, Login[]>();
       for (const login of logins) {
-        const row = instantiate('tpl-login-row');
-        if (!row) continue;
-        setTextWithTitle(row, '[data-role="service"]', login.service);
-        setTextWithTitle(row, '[data-role="ip"]', login.ip);
-        setText(row, '[data-role="at"]', fmtDateTimeUTC(login.at));
-        holder.append(row);
+        const konto = (login.service || 'nieznane').trim() || 'nieznane';
+        const lista = wgKonta.get(konto);
+        if (lista) lista.push(login);
+        else wgKonta.set(konto, [login]);
       }
+
+      renderGrupy(
+        'security',
+        holder,
+        [...wgKonta.entries()].map(([konto, pozycje]) => ({
+          nazwa: konto,
+          stan: 'ok' as State,
+          pozycje,
+        })),
+        (kontener, login) => {
+          const row = instantiate('tpl-login-row');
+          if (!row) return;
+          setTextWithTitle(row, '[data-role="service"]', login.service);
+          setTextWithTitle(row, '[data-role="ip"]', login.ip);
+          setText(row, '[data-role="at"]', fmtDateTimeUTC(login.at));
+          kontener.append(row);
+        },
+      );
     }
 
     function renderAlerts(alerts: Alert[]): void {
@@ -937,17 +1110,27 @@ import LogiView from '../components/LogiView.astro';
       if (!holder) return;
       holder.replaceChildren();
 
-      for (const alert of alerts) {
+      // Alerty grupujemy po wadze (krytyczne → ostrzeżenia → informacyjne),
+      // żeby zwinięcie grupy „Informacyjne" nie chowało tego, co pilne.
+      const grupyAlertow = KOLEJNOSC_STANOW
+        .map((stan) => ({
+          nazwa: ETYKIETY_ALERT[stan] ?? stateLabel(stan),
+          stan,
+          pozycje: alerts.filter((alert) => alert.severity === stan),
+        }))
+        .filter((grupa) => grupa.pozycje.length > 0);
+
+      renderGrupy('alerts', holder, grupyAlertow, (kontener, alert) => {
         const row = instantiate('tpl-alert-row');
-        if (!row) continue;
+        if (!row) return;
         row.dataset.state = alert.severity;
         setTextWithTitle(row, '[data-role="name"]', alert.name);
         setText(row, '[data-role="severity"]', severityLabel(alert.severity));
         setTextWithTitle(row, '[data-role="alert-stack"]', alert.stack ?? '');
         setTextWithTitle(row, '[data-role="summary"]', alert.summary ?? '');
         setText(row, '[data-role="since"]', alert.since ? `od ${fmtTimeUTC(alert.since)}` : '');
-        holder.append(row);
-      }
+        kontener.append(row);
+      });
     }
 
     /* ---------------- banner + znacznik czasu ---------------- */
@@ -1469,13 +1652,31 @@ import LogiView from '../components/LogiView.astro';
       }
     }
 
+    /*
+     * Zwinięcia trzymamy w JEDNYM magazynie (`panel-zwijanie`) — wspólnym dla
+     * grup wszystkich sekcji i dla stacków. `zwieteStacki` zostaje jako wygodny
+     * zbiór nazw używany przy renderowaniu, a `znaneStacki` pozwala zapisać
+     * również ROZWINIĘCIE stacka (wpis `false`, nie brak wpisu).
+     */
     function wczytajZwiete(): void {
       try {
-        const zapis = window.localStorage.getItem(KLUCZ_ZWINIETE);
-        if (!zapis) return;
-        const nazwy: unknown = JSON.parse(zapis);
-        if (Array.isArray(nazwy)) {
-          for (const nazwa of nazwy) if (typeof nazwa === 'string') zwieteStacki.add(nazwa);
+        mapaZwinięć = parsujZapis(window.localStorage.getItem(KLUCZ_ZWIJANIA));
+        // Migracja sprzed ujednolicenia: osobny klucz z listą nazw stacków.
+        const stary = window.localStorage.getItem(KLUCZ_ZWINIETE);
+        if (stary) {
+          const nazwy: unknown = JSON.parse(stary);
+          if (Array.isArray(nazwy)) {
+            for (const nazwa of nazwy) {
+              if (typeof nazwa !== 'string') continue;
+              mapaZwinięć[kluczGrupy('stacki', nazwa)] = true;
+            }
+          }
+          window.localStorage.removeItem(KLUCZ_ZWINIETE);
+        }
+        for (const [klucz, zwiniety] of Object.entries(mapaZwinięć)) {
+          if (!zwiniety || !klucz.startsWith('stacki/')) continue;
+          const nazwa = klucz.slice('stacki/'.length);
+          if (nazwa) zwieteStacki.add(nazwa);
         }
       } catch {
         // brak localStorage (tryb prywatny) nie może psuć panelu
@@ -1483,11 +1684,178 @@ import LogiView from '../components/LogiView.astro';
     }
 
     function zapiszZwiete(): void {
+      for (const nazwa of znaneStacki) {
+        mapaZwinięć[kluczGrupy('stacki', nazwa)] = zwieteStacki.has(nazwa);
+      }
       try {
-        window.localStorage.setItem(KLUCZ_ZWINIETE, JSON.stringify([...zwieteStacki]));
+        window.localStorage.setItem(KLUCZ_ZWIJANIA, serializujZapis(mapaZwinięć));
       } catch {
         // jw.
       }
+    }
+
+    /* ---------------- zwijane grupy (MatExpansionPanel) ---------------- */
+
+    /** Ile zwijanych bloków ma sekcja w DOM — potrzebne do polityki domyślnej. */
+    function blokiSekcji(sekcja: string): HTMLElement[] {
+      return qa<HTMLElement>(app, `[data-section="${sekcja}"] [data-role="group"], [data-section="${sekcja}"] [data-role="stack"]`);
+    }
+
+    function liczbaGrupWSekcji(sekcja: string): number {
+      return blokiSekcji(sekcja).filter((blok) => blok.dataset.role === 'group').length;
+    }
+
+    /** Klucze i domyślne stany bloków sekcji odczytane z DOM (grupy i stacki). */
+    function kluczeGrup(sekcja: string): { klucze: string[]; domyslne: boolean[] } {
+      const bloki = blokiSekcji(sekcja);
+      const liczbaGrup = liczbaGrupWSekcji(sekcja);
+      const klucze: string[] = [];
+      const domyslne: boolean[] = [];
+      for (const blok of bloki) {
+        const czyGrupa = blok.dataset.role === 'group';
+        const nazwa = (
+          q<HTMLElement>(
+            blok,
+            czyGrupa ? '[data-role="group-name"]' : '[data-role="stack-name"]',
+          )?.textContent ?? ''
+        ).trim();
+        if (!nazwa) continue;
+        klucze.push(kluczGrupy(czyGrupa ? sekcja : 'stacki', nazwa));
+        // Stacki startują ROZWINIĘTE (chowamy dopiero na życzenie użytkownika),
+        // a grupy kierują się polityką z `domyslnieZwinięta`.
+        domyslne.push(czyGrupa ? domyslnieZwinięta(liczbaGrup, blok.dataset.state ?? 'unknown') : false);
+      }
+      return { klucze, domyslne };
+    }
+
+    /**
+     * Nakłada stan zwinięcia na blok grupy albo stacka.
+     *
+     * Grupy chowamy atrybutem `data-zwiniety` (robi to CSS), bo `hidden`
+     * kolidowałby z regułami układu; stacki mają własny kontener tabeli i tam
+     * `hidden` już działał, więc zostaje.
+     */
+    function zastosujZwiniecie(blok: HTMLElement, zwiniety: boolean): void {
+      blok.dataset.zwiniety = zwiniety ? 'true' : 'false';
+      const przycisk = q<HTMLButtonElement>(
+        blok,
+        '[data-role="group-toggle"], [data-role="stack-toggle"]',
+      );
+      const nazwa = (
+        q<HTMLElement>(blok, '[data-role="group-name"], [data-role="stack-name"]')?.textContent ?? ''
+      ).trim();
+      if (przycisk) {
+        przycisk.setAttribute('aria-expanded', zwiniety ? 'false' : 'true');
+        przycisk.title = `${zwiniety ? 'Rozwiń' : 'Zwiń'}${nazwa ? `: ${nazwa}` : ''}`;
+      }
+      const tabela = q<HTMLElement>(blok, '[data-role="stack-tabela"]');
+      if (tabela) tabela.hidden = zwiniety;
+    }
+
+    /** Odświeża etykietę i `aria-pressed` przycisku zbiorczego w sekcji. */
+    function odswiezPrzyciskZbiorczy(sekcja: string): void {
+      const przycisk = q<HTMLButtonElement>(
+        app,
+        `[data-section="${sekcja}"] [data-role="zwijanie-zbiorcze"]`,
+      );
+      if (!przycisk) return;
+      const { klucze, domyslne } = kluczeGrup(sekcja);
+      przycisk.hidden = klucze.length === 0;
+      const wszystkie = wszystkieZwinięte(mapaZwinięć, klucze, domyslne);
+      const ile = ileZwinietych(mapaZwinięć, klucze, domyslne);
+      przycisk.textContent = etykietaZbiorcza(wszystkie, ile);
+      przycisk.setAttribute('aria-pressed', wszystkie ? 'true' : 'false');
+      przycisk.title = wszystkie
+        ? 'Rozwiń wszystkie grupy w tej sekcji'
+        : 'Zwiń grupy w tej sekcji (stan i liczniki pozostaną widoczne)';
+    }
+
+    /**
+     * Renderuje grupy sekcji: nagłówek-przycisk, licznik, pigułka stanu i wiersze.
+     * Wołane przez sekcje w miejsce wcześniejszego „płaskiego" doklejania wierszy.
+     */
+    function renderGrupy<T>(
+      sekcja: string,
+      holder: HTMLElement,
+      grupy: readonly { nazwa: string; stan: State; pozycje: readonly T[] }[],
+      budujWiersz: (kontener: HTMLElement, pozycja: T) => void,
+    ): void {
+      holder.replaceChildren();
+      const klucze: string[] = [];
+      const domyslne: boolean[] = [];
+
+      grupy.forEach((grupa, indeks) => {
+        const blok = instantiate('tpl-group');
+        if (!blok) return;
+        blok.dataset.state = grupa.stan;
+        setText(blok, '[data-role="group-name"]', grupa.nazwa);
+        setText(blok, '[data-role="group-count"]', String(grupa.pozycje.length));
+        setText(blok, '[data-role="group-rollup-label"]', stateLabel(grupa.stan));
+        const rollup = q<HTMLElement>(blok, '[data-role="group-rollup"]');
+        rollup?.setAttribute('aria-label', `Stan grupy ${grupa.nazwa}: ${stateLabel(grupa.stan)}`);
+
+        const klucz = kluczGrupy(sekcja, grupa.nazwa);
+        const domyslna = domyslnieZwinięta(grupy.length, grupa.stan);
+        const zwiniety = czyZwinięta(mapaZwinięć, klucz, domyslna);
+        klucze.push(klucz);
+        domyslne.push(domyslna);
+
+        // `aria-controls` musi wskazywać istniejący element o unikalnym id.
+        const rows = q<HTMLElement>(blok, '[data-role="rows"]');
+        const idWierszy = identyfikatorWierszy(sekcja, grupa.nazwa, indeks);
+        if (rows) rows.id = idWierszy;
+        const przelacznik = q<HTMLButtonElement>(blok, '[data-role="group-toggle"]');
+        if (przelacznik) przelacznik.setAttribute('aria-controls', idWierszy);
+
+        if (rows) for (const pozycja of grupa.pozycje) budujWiersz(rows, pozycja);
+
+        zastosujZwiniecie(blok, zwiniety);
+        holder.append(blok);
+      });
+
+      odswiezPrzyciskZbiorczy(sekcja);
+    }
+
+    /** Przełącza jedną grupę: stan w mapie, zapis i natychmiastowa zmiana DOM. */
+    function przelaczGrupeDom(blok: Element | null): void {
+      if (!(blok instanceof HTMLElement)) return;
+      const sekcja = blok.closest<HTMLElement>('[data-section]')?.dataset.section ?? '';
+      const nazwa = q<HTMLElement>(blok, '[data-role="group-name"]')?.textContent?.trim() ?? '';
+      if (!sekcja || !nazwa) return;
+      const klucz = kluczGrupy(sekcja, nazwa);
+      const domyslna = domyslnieZwinięta(
+        liczbaGrupWSekcji(sekcja),
+        blok.dataset.state ?? 'unknown',
+      );
+      mapaZwinięć = przelaczGrupe(mapaZwinięć, klucz, domyslna);
+      zapiszZwiete();
+      zastosujZwiniecie(blok, czyZwinięta(mapaZwinięć, klucz, domyslna));
+      odswiezPrzyciskZbiorczy(sekcja);
+    }
+
+    /** Zbiorczo: zwija wszystko, a gdy wszystko zwinięte — rozwija. */
+    function przelaczSekcje(sekcjaEl: Element | null): void {
+      const sekcja = (sekcjaEl as HTMLElement | null)?.dataset.section ?? '';
+      if (!sekcja) return;
+      const { klucze, domyslne } = kluczeGrup(sekcja);
+      if (klucze.length === 0) return;
+      const zwijamy = !wszystkieZwinięte(mapaZwinięć, klucze, domyslne);
+      mapaZwinięć = ustawWszystkie(mapaZwinięć, klucze, zwijamy);
+      for (const blok of blokiSekcji(sekcja)) {
+        // Stacki mają dodatkowo zbiór nazw używany przy renderowaniu sekcji.
+        if (blok.dataset.role === 'stack') {
+          const nazwa = (
+            q<HTMLElement>(blok, '[data-role="stack-name"]')?.textContent ?? ''
+          ).trim();
+          if (!nazwa) continue;
+          znaneStacki.add(nazwa);
+          if (zwijamy) zwieteStacki.add(nazwa);
+          else zwieteStacki.delete(nazwa);
+        }
+        zastosujZwiniecie(blok, zwijamy);
+      }
+      zapiszZwiete();
+      odswiezPrzyciskZbiorczy(sekcja);
     }
 
     function ustawStanFiltra(stan: StanFiltra): void {
@@ -3284,6 +3652,53 @@ import LogiView from '../components/LogiView.astro';
       URL.revokeObjectURL(url);
     }
 
+    /*
+     * Zmiana preferencji systemu w trakcie pracy (np. automatyczny tryb nocny).
+     * W trybie `auto` motyw efektywny idzie za systemem — panel przełącza sam
+     * arkusz stylów (media query), a my musimy podmienić adres ramki, bo ona ma
+     * własny motyw. Przy jawnym wyborze (jasny/ciemny) system nie ma nic do
+     * rzeczy, więc nic nie robimy: żadnego niepotrzebnego przeładowania.
+     */
+    mediaMotyw.addEventListener('change', () => {
+      if (wyborMotywu !== 'auto') return;
+      odswiezRamkeMotywu();
+    });
+
+    /*
+     * Ten sam panel w drugiej karcie: wybór motywu jest wspólny (localStorage),
+     * więc zmiana w jednej karcie ma przełączyć także tę otwartą.
+     */
+    window.addEventListener('storage', (event) => {
+      if (event.key === null || event.key === 'panel-motyw') ustawWyborMotywu(event.newValue);
+    });
+
+    /*
+     * Przełącznik motywu jest `radiogroup`: Tab wchodzi w grupę, strzałki
+     * wybierają kolejną opcję (z zawijaniem), Home/End skaczą na krańce.
+     * Zaznaczanie idzie razem z fokusem — tak działa natywna grupa radio.
+     */
+    document.addEventListener('keydown', (event) => {
+      const opcja = (event.target as Element | null)?.closest?.('[data-action="motyw"]');
+      if (!(opcja instanceof HTMLElement)) return;
+      const klawisz = event.key;
+      const przeskok =
+        klawisz === 'ArrowRight' || klawisz === 'ArrowDown'
+          ? 1
+          : klawisz === 'ArrowLeft' || klawisz === 'ArrowUp'
+            ? -1
+            : 0;
+      if (przeskok) {
+        event.preventDefault();
+        ustawWyborMotywu(nastepnyWybor(opcja.dataset.wybor as WyborMotywu, przeskok), true);
+        return;
+      }
+      if (klawisz === 'Home' || klawisz === 'End') {
+        event.preventDefault();
+        const kraniec = klawisz === 'Home' ? WYBORY[0] : WYBORY[WYBORY.length - 1];
+        ustawWyborMotywu(kraniec, true);
+      }
+    });
+
     /* ---------------- zdarzenia ---------------- */
 
 
@@ -3293,35 +3708,33 @@ import LogiView from '../components/LogiView.astro';
     });
 
     /*
-     * Zmiana preferencji systemu w trakcie pracy (np. automatyczny tryb nocny):
-     * sam panel przełącza się arkuszem stylów, ale ramka narzędzia ma własny
-     * motyw — więc podmieniamy jej adres tylko wtedy, gdy narzędzie rozumie
-     * `theme=` (Grafana, Prometheus). Bez tego jasny panel trzymałby ciemną
-     * ramkę w środku.
+     * Zmiana preferencji systemu w trakcie pracy jest obsłużona wyżej
+     * (`mediaMotyw`), razem z przełącznikiem motywu — tutaj zostaje tylko
+     * reakcja na pełny ekran.
      */
-    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-      if (!frame || !mountedToolId) return;
-      const narzedzie = snapshot?.tools.find((t) => t.id === mountedToolId);
-      if (!narzedzie?.url) return;
-      const nowy = adresPoZmianieMotywu(
-        narzedzie.id,
-        narzedzie.url,
-        narzedzie.embed_query,
-        ciemnySystemu(),
-      );
-      if (!nowy || nowy === frame.src) return;
-      frame.src = nowy;
-    });
     document.addEventListener('fullscreenchange', renderFullscreenState);
 
     document.addEventListener('click', (event) => {
       const target = event.target;
       if (!(target instanceof Element)) return;
 
+      /*
+       * Cały nagłówek grupy jest klikalny (tak działa MatExpansionPanel).
+       * Klik w sam przycisk obsłuży ścieżka `data-action` niżej; tutaj
+       * przechwytujemy klik w tło nagłówka, żeby nie trzeba było trafiać
+       * w chevron ani w nazwę.
+       */
+      const naglowek = target.closest('[data-role="group-head"]');
+      if (naglowek && !target.closest('a, button')) {
+        przelaczGrupeDom(naglowek.closest('[data-role="group"]'));
+        return;
+      }
+
       const trigger = target.closest('[data-action]');
       if (trigger instanceof HTMLElement) {
         const action = trigger.dataset.action;
         if (action === 'refresh' || action === 'retry') void load();
+        if (action === 'motyw') ustawWyborMotywu(trigger.dataset.wybor);
         if (action === 'fullscreen') void toggleFullscreen();
         if (action === 'filter-stan') {
           ustawStanFiltra((trigger.dataset.stan ?? 'wszystko') as StanFiltra);
@@ -3334,6 +3747,8 @@ import LogiView from '../components/LogiView.astro';
         if (action === 'filter-csv') eksportCsv();
         if (action === 'sortuj') ustawSortowanie(trigger.dataset.sort ?? 'stan');
         if (action === 'stack-zwijanie') przelaczZwiniety(trigger.closest('[data-role="stack"]'));
+        if (action === 'grupa-zwijanie') przelaczGrupeDom(trigger.closest('[data-role="group"]'));
+        if (action === 'sekcja-zwijanie') przelaczSekcje(trigger.closest('[data-section]'));
         if (action === 'stack-filtr') ustawFiltrStacka(trigger.dataset.stack ?? '');
         if (action === 'usluga-fokus') {
           przelaczFokus(trigger.dataset.stack ?? '', trigger.dataset.usluga ?? '');
@@ -3543,6 +3958,10 @@ import LogiView from '../components/LogiView.astro';
     wczytajZwiete();
     wczytajStanZHasza();
     renderMeta();
+    // Motyw jest już zastosowany przez skrypt w `<head>`; tutaj tylko
+    // odzwierciedlamy zapisany wybór w kontrolce paska (i pilnujemy spójności
+    // `data-theme` z `localStorage`, gdyby ktoś grzebał w nim ręcznie).
+    zastosujMotyw();
     const sekcjeWykresow = q<HTMLElement>(app, '[data-role="wykresy-sekcje"]');
     if (sekcjeWykresow) podlaczTooltipy(sekcjeWykresow);
     applyRoute();

@@ -363,6 +363,60 @@ ciemny — `/grafana?kiosk&theme=dark` (zmierzone).
 Zmiana motywu w testach: emulacja `prefers-color-scheme` w narzędziach
 przeglądarki albo ręcznie `document.documentElement.dataset.theme = 'ops'`.
 
+## Zwijane grupy (wzorzec MatExpansionPanel)
+
+Każda sekcja z listą pokazuje wiersze w **zwijanych grupach**: nagłówek grupy
+jest przyciskiem, treść siedzi w `[data-role="rows"]`, a cały nagłówek jest
+klikalny (klik w tło nagłówka też przełącza). Wzorzec odpowiada
+`MatExpansionPanel` z Angular Material.
+
+Grupowanie w poszczególnych sekcjach:
+
+| Sekcja | Klucz grupy | Kolejność |
+| --- | --- | --- |
+| Publiczne endpointy | `group` z API | jak w odpowiedzi API |
+| Certyfikaty | stan (`critical` → „Do odnowienia", `warning` → „Wygasają wkrótce", `ok` → „Ważne", `unknown` → „Bez danych") | od najgroźniejszych |
+| Alerty | waga (`critical` → „Krytyczne", `warning` → „Ostrzeżenia", `ok` → „Informacyjne") | od najgroźniejszych |
+| Logowania | konto (`service` = użytkownik SSH) | kolejność z API |
+| Usługi (stacki) | stack | jak w API |
+
+**Zwinięcie nigdy nie ukrywa stanu**: nazwa grupy, licznik pozycji i pigułka
+stanu zostają w nagłówku, więc zwinięta grupa dalej mówi, co się dzieje.
+Chowany jest wyłącznie kontener `[data-role="rows"]` (przez
+`[data-zwiniety="true"]` w CSS, nie przez `hidden` — inaczej reguły układu
+wygrywałyby z ukrywaniem).
+
+### Gdzie siedzi stan
+
+- klucz w `localStorage`: **`panel-zwijanie`** — mapa `sekcja/grupa → czy zwinięta`,
+  np. `{"checks/publiczne endpointy": true}`; nazwy są normalizowane
+  (trim, spacje, wielkość liter), więc zmiana brzmienia w API nie kasuje ustawień,
+- **stacki przeniesione do tej samej mapy** pod kluczami `stacki/<nazwa>`
+  (stary klucz `monitoring:zwiete-stacki` migruje się przy pierwszym odczycie
+  i jest usuwany),
+- zapis jest tolerancyjny: urwany JSON, tablica, `null` albo wpis nieboolowski
+  są ignorowane pojedynczo — reszta mapy zostaje.
+
+### Domyślne stany
+
+Wszystko startuje **rozwinięte**, poza jednym wyjątkiem: gdy sekcja ma
+**co najmniej 6 grup**, grupa bez problemów (`ok`/`disabled`) startuje zwinięta,
+żeby nie zasłaniać tego, co się psuje. Grupa z ostrzeżeniem, krytyczna albo bez
+danych jest **zawsze rozwinięta** na starcie — politykę trzyma funkcja
+`domyslnieZwinięta` i pilnuje jej `scripts/ci/check_zwijanie.mts`. Stacki
+startują rozwinięte niezależnie od liczby.
+
+### Sterowanie zbiorcze i klawiatura
+
+W nagłówku każdej sekcji jest przycisk **„Zwiń wszystko" / „Rozwiń wszystko"**
+(`aria-pressed` mówi prawdę o stanie, a nie o liczbie kliknięć; przy częściowym
+zwinięciu pokazuje licznik). Klawiatura: `Enter`/`Space` na przycisku grupy
+(działa natywnie), fokus widoczny (`:focus-visible`). Animacja chevronu jest
+wyłączona przy `prefers-reduced-motion`.
+
+Weryfikacja: `node scripts/ci/check_zwijanie.mts` (45 asercji na czystej
+logice) plus sekcja „Dostępność" niżej.
+
 ## Progi wizualne (tylko prezentacja)
 
 API zwraca gotowe stany dla sekcji, więc panel ich nie wymyśla. Progi stosowane

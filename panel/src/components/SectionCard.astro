@@ -28,6 +28,18 @@ const headingId = `section-${section}-title`;
     <h2 class="card-title" id={headingId}>{title}</h2>
     <span class="count-chip" data-role="count">—</span>
     <span class="subtle text-xs" data-role="count-filtr" hidden></span>
+    <!--
+      Zbiorcze zwijanie grup (wzorzec MatExpansionPanel). Przycisk jest ukryty,
+      dopóki sekcja nie ma grup — odsłania go skrypt klienta, a `aria-pressed`
+      mówi prawdę o stanie („wszystko zwinięte”), nie o liczbie kliknięć.
+    -->
+    <button
+      type="button"
+      class="zwijanie-zbiorcze"
+      data-action="sekcja-zwijanie"
+      data-role="zwijanie-zbiorcze"
+      aria-pressed="false"
+      hidden>Zwiń wszystko</button>
     <span
       class="state-pill ml-auto"
       data-role="rollup"

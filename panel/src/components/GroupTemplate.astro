@@ -1,0 +1,57 @@
+---
+/**
+ * Szablon zwijanej grupy — jedno źródło prawdy dla WSZYSTKICH sekcji panelu
+ * (endpointy, certyfikaty, alerty, logowania). Wzorzec jak
+ * `MaterialExpansionPanel` w Angular Material: nagłówek jest przyciskiem,
+ * treść siedzi w `[data-role="rows"]`, a stan zwinięcia przeżywa odświeżenie.
+ *
+ * Dostępność (wzorzec „accordion" z WAI-ARIA):
+ *  - `<h3>` trzyma nagłówek logiczny, a wewnątrz jest prawdziwy `<button>`
+ *    z `aria-expanded` i `aria-controls` (identyfikator nadaje skrypt klienta,
+ *    bo grup jest wiele i muszą być unikalne w dokumencie),
+ *  - nazwa, licznik i pigułka stanu są w nagłówku, więc ZWINIĘCIE NIGDY NIE
+ *    UKRYWA STANU — zwinięta grupa dalej mówi, co się dzieje,
+ *  - cały nagłówek jest klikalny (skrypt klienta przekazuje klik do przycisku),
+ *    ale klawiatura obsługuje się natywnie: `Enter`/`Space` na przycisku.
+ *
+ * Kolory/stany pochodzą z tokenów motywu (`--state`, `--token`), więc grupa
+ * działa identycznie w trybie jasnym i ciemnym.
+ */
+import { Icon } from 'astro-icon/components';
+---
+
+<template id="tpl-group">
+  <section
+    class="border-b border-base-300 last:border-b-0"
+    data-role="group"
+    data-state="unknown"
+    data-zwiniety="false"
+  >
+    <header class="group-head" data-role="group-head">
+      <h3 class="group-title">
+        <button
+          type="button"
+          class="group-toggle"
+          data-action="grupa-zwijanie"
+          data-role="group-toggle"
+          aria-expanded="true"
+          title="Zwiń lub rozwiń grupę"
+        >
+          <Icon name="lucide:chevron-right" size={14} class="group-chevron" aria-hidden="true" />
+          <span class="truncate" data-role="group-name"></span>
+        </button>
+      </h3>
+      <span class="count-chip" data-role="group-count"></span>
+      <span
+        class="state-pill ml-auto"
+        data-role="group-rollup"
+        role="img"
+        aria-label="Stan grupy: nieznany"
+      >
+        <span class="state-dot" aria-hidden="true"></span>
+        <span data-role="group-rollup-label">Nieznany</span>
+      </span>
+    </header>
+    <div data-role="rows"></div>
+  </section>
+</template>

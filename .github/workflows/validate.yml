@@ -289,5 +289,11 @@ jobs:
       - name: Testy motywu (jasny/ciemny, tokeny, brak kolorów na sztywno)
         run: node scripts/ci/check_motyw.mts
 
+      # Zwijanie grup (wzorzec MatExpansionPanel) trzyma stan w localStorage,
+      # więc błąd w parsowaniu zapisu albo w polityce domyślnych stanów potrafi
+      # ukryć to, co się psuje, albo skasować ustawienia użytkownika.
+      - name: Testy zwijania grup (klucze, zapis, stan zbiorczy)
+        run: node scripts/ci/check_zwijanie.mts
+
       - name: Kontrola artefaktu
         run: test -f panel/dist/index.html
