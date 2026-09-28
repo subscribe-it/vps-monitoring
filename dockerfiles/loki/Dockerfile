@@ -1,5 +1,5 @@
 # Loki z konfiguracją i regułami alertów logowych (ruler).
-FROM grafana/loki:3.6.17
+FROM grafana/loki:3.7.8
 USER root
 COPY config/loki/loki-config.yaml /etc/loki/loki-config.yaml
 # Reguły muszą leżeć w podkatalogu tenanta: przy auth_enabled=false tenant to
