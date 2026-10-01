@@ -27,7 +27,7 @@ jobs:
       dashboards: ${{ steps.f.outputs.dashboards }}
       panel: ${{ steps.f.outputs.panel }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -57,7 +57,7 @@ jobs:
     name: Compose / zasady stacku
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: "Walidacja schematem SWARMA (autorytatywna — to on wdraża stack)"
         env:
@@ -80,7 +80,7 @@ jobs:
     name: Prometheus (config + reguły + testy reguł)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: promtool check config
         run: |
@@ -102,7 +102,7 @@ jobs:
     name: Loki (config + reguły logowe)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Weryfikacja konfiguracji Loki
         run: |
@@ -120,14 +120,14 @@ jobs:
     name: Grafana (provisioning + dashboardy)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: python3 scripts/ci/check_grafana.py
 
   images:
     name: Spójność obrazów (compose ↔ macierz buildów)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Każdy własny obraz ma job budujący
         env:
@@ -141,7 +141,7 @@ jobs:
     name: Spójność alertów z runbookiem
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: python3 scripts/ci/check_runbook.py
 
 
@@ -151,7 +151,7 @@ jobs:
     if: needs.zmiany.outputs.dashboards == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Uruchom Prometheusa i Loki do walidacji zapytań
         run: |
@@ -219,8 +219,8 @@ jobs:
     name: Serwisy Pythona (testy)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.13'
       - name: Składnia skryptów bash
@@ -242,13 +242,13 @@ jobs:
     if: needs.zmiany.outputs.panel == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 10
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
           cache: pnpm
