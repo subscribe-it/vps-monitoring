@@ -33,7 +33,7 @@ jobs:
     name: Widoczność pakietów (${{ inputs.visibility }})
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Gdy PATCH zwraca 404, trzeba wiedzieć DLACZEGO: zły typ tokenu, brak
       # zakresu, brak roli w organizacji czy pakiet pod innym właścicielem.
