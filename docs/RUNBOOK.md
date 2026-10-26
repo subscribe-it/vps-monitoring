@@ -140,11 +140,14 @@ backupu, co jest słabszym sygnałem (`source: "logs"` w `/backup.json`).
 
 **Sprawdź:**
 ```bash
-docker service ps ventiplan-prod_db-backup
-docker service logs --tail 300 ventiplan-prod_db-backup
+docker service ps monitoring_duplicati
+docker service logs --tail 300 monitoring_duplicati
 ```
-oraz stan obiektów w Cloudflare R2 (konsola → bucket `ventiplan-backups`).
-**Działaj:** jeśli `BACKUP_SUCCESS_REGEX` nie pasuje do logów, dopasuj go w env stacku — dopóki to nie działa, watchdog nie potwierdzi sukcesu.
+oraz stan obiektów w Cloudflare R2 (konsola → bucket `ovh1backup`, prefiks
+`vps/full/`). **Działaj:** jeśli `BACKUP_SUCCESS_REGEX` nie pasuje do logów,
+dopasuj go w env stacku — dopóki to nie działa, watchdog nie potwierdzi sukcesu.
+Jeśli log pokazuje `401`, sprawdź oba klucze Swarma i ich zakres do bucketu;
+nie wkładaj kluczy do repozytorium ani do publicznego env.
 
 ## <a name="restoretest"></a>🟡 RestoreTestOverdue
 **Co to znaczy:** minęło > 45 dni od testu odtworzenia. Kopia, której nie odtworzono, nie jest kopią.

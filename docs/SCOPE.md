@@ -2,7 +2,9 @@
 
 ## Zasada nadrzędna (twarda)
 
-> **Ten stack wyłącznie obserwuje. Nie modyfikuje żadnej innej aplikacji na tym VPS.**
+> **Ten stack obserwuje hosta i zapisuje wyłącznie własny backup do jawnie
+> skonfigurowanego zewnętrznego bucketu. Nie modyfikuje żadnej innej aplikacji
+> na tym VPS.**
 
 Na tym hoście działa produkcja kilku projektów. Monitoring nie może być przyczyną
 awarii, którą ma wykrywać, i nie może zmieniać cudzego stanu. Zasada nie opiera się
@@ -19,11 +21,14 @@ na dobrej woli — wynika z konstrukcji stacku.
 | Logi hosta | journald zamontowany **`:ro`** |
 | Logi Traefika | cudzy wolumen `portainer-edge-gateway_traefik-logs` zamontowany **`:ro`** |
 | Powiadomienia | ruch **wychodzący** do ntfy.sh, SMTP i healthchecks.io |
+| Backup hosta | Duplicati czyta `/` przez bind `:ro` i zapisuje szyfrowane archiwum wyłącznie do wskazanego prefiksu Cloudflare R2 |
 
 ## Czego stack NIGDY nie robi
 
 - nie wywołuje `docker service update/scale/restart/rm`, `docker stack rm`, `docker prune`, `volume rm`;
 - nie zmienia zmiennych środowiskowych ani konfiguracji innych stacków;
+- nie zapisuje do lokalnego systemu plików hosta; jedyny zapis poza własnym
+  wolumenem to obiekty pod skonfigurowanym prefiksem R2;
 - nie dotyka Traefika, Portainera, CrowdSeca, firewall-a hosta ani `/etc/docker/daemon.json`;
 - nie publikuje **żadnego** portu na hoście (co eliminuje kolizje, m.in. z Cockpitem na 9090);
 - nie tworzy ani nie modyfikuje cudzych sieci, wolumenów i konfiguracji Swarma;
@@ -50,3 +55,8 @@ na dobrej woli — wynika z konstrukcji stacku.
 
 Każde odstępstwo od tej zasady wymaga **Twojej wyraźnej zgody** i wpisu tutaj,
 wraz z powodem i zakresem. Domyślnie: nie.
+
+Backup Duplicati jest wyjątkiem już zatwierdzonym zakresem tego repozytorium:
+nie ma portu, routera, dostępu do Docker API ani prawa zapisu do hosta. Pełna
+spójność uruchomionych baz wymaga osobnych dumpów logicznych; backup systemu
+plików jest warstwą odtworzeniową hosta, a nie substytutem dumpu bazy.

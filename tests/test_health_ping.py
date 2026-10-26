@@ -9,6 +9,7 @@ import json
 import pathlib
 import re
 import sys
+import tempfile
 import unittest
 import urllib.parse
 from datetime import datetime, timedelta, timezone
@@ -708,6 +709,31 @@ class ConfigTests(unittest.TestCase):
         warnings = health.Config(env={}).config_warnings
         self.assertEqual(len(warnings), 3)
         self.assertTrue(any("R2" in w for w in warnings), warnings)
+
+    def test_r2_credentials_are_read_from_secret_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            access = pathlib.Path(directory) / "access"
+            secret = pathlib.Path(directory) / "secret"
+            access.write_text("file-access\n", encoding="utf-8")
+            secret.write_text("file-secret\n", encoding="utf-8")
+            config = health.Config(env={
+                "R2_ACCESS_KEY": "env-access",
+                "R2_SECRET_KEY": "env-secret",
+                "R2_ACCESS_KEY_FILE": str(access),
+                "R2_SECRET_KEY_FILE": str(secret),
+            })
+        self.assertEqual(config.r2_access_key, "file-access")
+        self.assertEqual(config.r2_secret_key, "file-secret")
+
+    def test_r2_credentials_fall_back_to_env_when_secret_file_is_missing(self):
+        config = health.Config(env={
+            "R2_ACCESS_KEY": "env-access",
+            "R2_SECRET_KEY": "env-secret",
+            "R2_ACCESS_KEY_FILE": "/tmp/health-ping-no-such-access-secret",
+            "R2_SECRET_KEY_FILE": "/tmp/health-ping-no-such-secret-secret",
+        })
+        self.assertEqual(config.r2_access_key, "env-access")
+        self.assertEqual(config.r2_secret_key, "env-secret")
 
 
 if __name__ == "__main__":

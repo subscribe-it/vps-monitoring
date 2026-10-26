@@ -56,10 +56,14 @@ co jest dziś zepsute.
 - tematu i tokenu ntfy, danych SMTP, hasła Grafany, hasha htpasswd,
 - kluczy R2, klucza prywatnego age, tokenów GitHub i Portainera.
 
-Wszystkie te wartości żyją **wyłącznie** w zmiennych środowiskowych stacka w Portainerze.
+Wszystkie te wartości żyją **wyłącznie** w sekretach Swarma lub zmiennych
+środowiskowych stacka w Portainerze. Klucze R2 i passphrase Duplicati są
+sekretami Swarma; nie wklejaj ich do env stacka.
 
 ## Gdyby kiedyś trzeba było zrotować
 
-1. Zmień wartość w Portainerze (env stacka `monitoring`) i zapisz stack — usługa podniesie się z nową wartością.
+1. Dla zwykłych ustawień zmień wartość w Portainerze (env stacka `monitoring`).
+   Klucze R2 zrotuj przez utworzenie nowych sekretów Swarma i redeploy stacka;
+   stary sekret usuń dopiero po potwierdzeniu udanego backupu.
 2. Dla webhooka: Portainer → stack → Webhooks → usuń i dodaj nowy, potem zaktualizuj sekret w GitHubie.
 3. Dla htpasswd: wygeneruj nowy hash i podmień `PANEL_AUTH_PASSWORD_HTPASSWD` (bez przebudowy obrazów).
