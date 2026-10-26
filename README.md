@@ -16,7 +16,7 @@ Wdrażany w całości z tego repozytorium przez GitHub Actions → Portainer.
 | **Host** | dysk, i-węzły, RAM, PSI, OOM, load, zegar, restarty, błędy I/O jądra |
 | **Swarm** | repliki `N/N`, zadania `rejected`, pętle restartów, `unhealthy`, limity pamięci |
 | **Baza (z logów)** | `page verification failed`, PANIC, brak miejsca, wyczerpane połączenia |
-| **Backupy** | Duplicati całego hosta do R2, wiek obiektu, zaległy test odtworzenia, dostarczalność powiadomień |
+| **Backupy** | Duplicati nazwanych wolumenów Portainera, stanu Swarma i konfiguracji Dockera do R2, wiek obiektu, zaległy test odtworzenia, dostarczalność powiadomień |
 | **Logi** | centralne zbieranie (kontenery + journald + access log Traefika) i reguły logowe |
 | **Bezpieczeństwo** | logowania SSH/Cockpit, skoki nieudanych prób, bany fail2bana |
 | **Zewnętrznie** | watchdog healthchecks.io — cisza z VPS oznacza alarm |

@@ -530,9 +530,9 @@ services:
       start_period: 15s
 
   # ---------------------------------------------------------------------------
-  # duplicati — szyfrowany, headless backup całego hosta do Cloudflare R2.
-  # Nie ma portu ani routera Traefika. Stan Duplicati jest we własnym wolumenie,
-  # a system plików hosta jest widoczny wyłącznie do odczytu.
+  # duplicati — szyfrowany backup danych potrzebnych do odtworzenia stacków.
+  # Obejmuje nazwane wolumeny Dockera, stan Swarma i /etc/docker; nie skanuje
+  # całego systemu plików ani warstw obrazów. Nie ma portu ani routera Traefika.
   # ---------------------------------------------------------------------------
   duplicati:
     image: duplicati/duplicati@sha256:e32e280cc30e98ac5cea8d2b339cd19810b1b39e638fb9d39253786630104de0
@@ -543,14 +543,17 @@ services:
       - DUPLICATI_INTERVAL_SECONDS=${DUPLICATI_INTERVAL_SECONDS:-86400}
       - DUPLICATI_S3_CLIENT=${DUPLICATI_S3_CLIENT:-minio}
       - DUPLICATI_R2_BUCKET=${DUPLICATI_R2_BUCKET:-ovh1backup}
-      - DUPLICATI_R2_PREFIX=${DUPLICATI_R2_PREFIX:-vps/full}
+      - DUPLICATI_R2_PREFIX=${DUPLICATI_R2_PREFIX:-vps/portainer-volumes}
       - DUPLICATI_R2_ENDPOINT=${DUPLICATI_R2_ENDPOINT:-3d399a03e559532edbd9380548e1426e.r2.cloudflarestorage.com}
     secrets:
       - source: duplicati_secretprovider
         target: duplicati-secretprovider
     volumes:
       - duplicati_data_v2:/data
-      - /:/host:ro
+      # Tylko dane odtwarzalne dla stacków; brak montażu całego hosta.
+      - /var/lib/docker/volumes:/source/docker-volumes:ro
+      - /var/lib/docker/swarm:/source/docker-swarm:ro
+      - /etc/docker:/source/docker-config:ro
     command:
       - /bin/sh
       - -ec
@@ -559,16 +562,13 @@ services:
         while :; do
           started=$$(date -u +%FT%TZ)
           output_file=$$(mktemp /tmp/duplicati-run.XXXXXX)
-          if /opt/duplicati/duplicati-cli backup "$$target" /host \
-            --exclude=/host/proc/** \
-            --exclude=/host/sys/** \
-            --exclude=/host/dev/** \
-            --exclude=/host/run/** \
-            --exclude=/host/tmp/** \
-            --exclude=/host/var/lib/docker/overlay2/** \
-            --exclude=/host/var/lib/docker/containers/*/*-json.log \
-            --exclude=/host/var/lib/docker/volumes/monitoring_duplicati_data_v2/** \
-            --dbpath=/data/duplicati-vps.sqlite \
+          if /opt/duplicati/duplicati-cli backup "$$target" \
+            /source/docker-volumes /source/docker-swarm /source/docker-config \
+            --exclude=/source/docker-volumes/monitoring_duplicati_data_v2/** \
+            --exclude=/source/docker-volumes/monitoring_duplicati_data/** \
+            --exclude=/source/docker-volumes/monitoring_duplicati_backups/** \
+            --exclude=/source/docker-volumes/portainer-edge-gateway_traefik-logs/** \
+            --dbpath=/data/duplicati-volumes.sqlite \
             --secret-provider=file-secret:///run/secrets/duplicati-secretprovider \
             --secret-provider-cache=None \
             '--passphrase=$$backup-passphrase' \

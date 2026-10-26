@@ -19,12 +19,15 @@ class BackupComposeTests(unittest.TestCase):
         self.assertNotIn("traefik.", service)
         self.assertIn("\n      - monitoring\n", service)
 
-    def test_host_is_read_only_and_state_is_dedicated(self):
-        self.assertIn("- /:/host:ro", COMPOSE)
+    def test_recovery_sources_are_read_only_and_state_is_dedicated(self):
+        self.assertIn("- /var/lib/docker/volumes:/source/docker-volumes:ro", COMPOSE)
+        self.assertIn("- /var/lib/docker/swarm:/source/docker-swarm:ro", COMPOSE)
+        self.assertIn("- /etc/docker:/source/docker-config:ro", COMPOSE)
+        self.assertNotIn("- /:/host:ro", COMPOSE)
         self.assertIn("- duplicati_data_v2:/data", COMPOSE)
-        self.assertIn("--exclude=/host/proc/**", COMPOSE)
-        self.assertIn("--exclude=/host/var/lib/docker/overlay2/**", COMPOSE)
-        self.assertIn("--exclude=/host/var/lib/docker/volumes/monitoring_duplicati_data_v2/**", COMPOSE)
+        self.assertIn("/source/docker-volumes /source/docker-swarm /source/docker-config", COMPOSE)
+        self.assertIn("--exclude=/source/docker-volumes/monitoring_duplicati_data_v2/**", COMPOSE)
+        self.assertIn("--dbpath=/data/duplicati-volumes.sqlite", COMPOSE)
 
     def test_secrets_are_external_and_not_inline(self):
         self.assertIn("external: true\n    name: ${DUPLICATI_SECRET_PROVIDER_NAME", COMPOSE)

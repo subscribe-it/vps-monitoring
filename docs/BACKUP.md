@@ -1,11 +1,13 @@
-# Backup VPS przez Duplicati
+# Backup danych Portainera przez Duplicati
 
 Stack `monitoring` uruchamia jedną usługę `monitoring_duplicati`. Usługa:
 
-- montuje `/` jako `/:/host:ro` i nie ma dostępu do Docker API;
+- montuje tylko `/var/lib/docker/volumes`, `/var/lib/docker/swarm` i `/etc/docker` jako `:ro`;
+- obejmuje dane wszystkich nazwanych wolumenów używanych przez stacki, w tym `portainer_portainer_data`, dane RustFS i dane aplikacji;
+- nie obejmuje warstw obrazów, logów kontenerów ani całego systemu plików;
 - zapisuje lokalny stan w `monitoring_duplicati_data_v2`;
 - wykonuje szyfrowany backup co 24 godziny;
-- zapisuje obiekty do `s3://ovh1backup/vps/full` przez Cloudflare R2;
+- zapisuje obiekty do `s3://ovh1backup/vps/portainer-volumes` przez Cloudflare R2;
 - nie publikuje portu i nie tworzy routera Traefika.
 
 Obraz jest przypięty digestem. Zmiana obrazu wymaga osobnego przeglądu i testu
@@ -51,7 +53,7 @@ docker service logs --tail 200 monitoring_duplicati
 ```
 
 Pierwszy udany przebieg musi zawierać linię `[duplicati] backup complete`.
-Watchdog dodatkowo listuje obiekty R2 pod `vps/full/`; sam log nie jest dowodem
+Watchdog dodatkowo listuje obiekty R2 pod `vps/portainer-volumes/`; sam log nie jest dowodem
 istnienia kopii.
 
 ## Odtworzenie i drill
@@ -62,7 +64,7 @@ katalogu testowego, potem wykonaj pełny drill na czystym wolumenie:
 
 ```bash
 /opt/duplicati/duplicati-cli restore \
-  's3://ovh1backup/vps/full?aws-access-key-id=$s3-user&aws-secret-access-key=$s3-pass&s3-server-name=3d399a03e559532edbd9380548e1426e.r2.cloudflarestorage.com&use-ssl=true&s3-client=minio' \
+  's3://ovh1backup/vps/portainer-volumes?aws-access-key-id=$s3-user&aws-secret-access-key=$s3-pass&s3-server-name=3d399a03e559532edbd9380548e1426e.r2.cloudflarestorage.com&use-ssl=true&s3-client=minio' \
   '*' --restore-path=/restore-drill \
   --secret-provider=file-secret:///run/secrets/duplicati-secretprovider \
   '--passphrase=$backup-passphrase'
