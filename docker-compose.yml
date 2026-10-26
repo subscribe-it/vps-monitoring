@@ -46,7 +46,7 @@ secrets:
   # trafia do repozytorium ani do zmiennych środowiskowych Portainera.
   duplicati_secretprovider:
     external: true
-    name: ${DUPLICATI_SECRET_PROVIDER_NAME:-monitoring-duplicati-secretprovider-v1}
+    name: ${DUPLICATI_SECRET_PROVIDER_NAME:-monitoring-duplicati-secretprovider-v2}
   monitoring_r2_access:
     external: true
     name: ${MONITORING_R2_ACCESS_SECRET_NAME:-monitoring-r2-access-v1}

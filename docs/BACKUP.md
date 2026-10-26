@@ -4,7 +4,7 @@ Stack `monitoring` uruchamia jedną usługę `monitoring_duplicati`. Usługa:
 
 - montuje tylko `/var/lib/docker/volumes`, `/var/lib/docker/swarm` i `/etc/docker` jako `:ro`;
 - obejmuje dane wszystkich nazwanych wolumenów używanych przez stacki, w tym `portainer_portainer_data`, dane RustFS i dane aplikacji;
-- nie obejmuje warstw obrazów, logów kontenerów ani całego systemu plików;
+- nie obejmuje warstw obrazów, logów kontenerów ani całego systemu plików; logi Traefika i własne wolumeny Duplicati są wyłączone;
 - zapisuje lokalny stan w `monitoring_duplicati_data_v2`;
 - wykonuje szyfrowany backup co 24 godziny;
 - zapisuje obiekty do `s3://ovh1backup/vps/portainer-volumes` przez Cloudflare R2;
@@ -19,7 +19,7 @@ Przed redeployem stacka utwórz trzy sekrety na managerze Swarma. Wartości nie
 trafiają do repozytorium, pliku env ani logów:
 
 ```bash
-docker secret create monitoring-duplicati-secretprovider-v1 ./duplicati-secrets.json
+docker secret create monitoring-duplicati-secretprovider-v2 ./duplicati-secrets.json
 docker secret create monitoring-r2-access-v1 ./r2-access-key
 docker secret create monitoring-r2-secret-v1 ./r2-secret-key
 ```
