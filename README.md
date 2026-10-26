@@ -3,8 +3,9 @@
 Kompletny monitoring infrastruktury z **automatycznym wykrywaniem nowych aplikacji**.
 Wdrażany w całości z tego repozytorium przez GitHub Actions → Portainer.
 
-> **Zasada nadrzędna:** ten stack wyłącznie **obserwuje**. Nie modyfikuje żadnego
-> innego stacka na tym hoście. Szczegóły i granice: [`docs/SCOPE.md`](docs/SCOPE.md).
+> **Zasada nadrzędna:** ten stack obserwuje hosta i wykonuje wyłącznie własny,
+> szyfrowany backup do wskazanego bucketu R2. Nie modyfikuje żadnego innego
+> stacka na tym hoście. Szczegóły i granice: [`docs/SCOPE.md`](docs/SCOPE.md).
 
 ## Co tu jest
 
@@ -15,7 +16,7 @@ Wdrażany w całości z tego repozytorium przez GitHub Actions → Portainer.
 | **Host** | dysk, i-węzły, RAM, PSI, OOM, load, zegar, restarty, błędy I/O jądra |
 | **Swarm** | repliki `N/N`, zadania `rejected`, pętle restartów, `unhealthy`, limity pamięci |
 | **Baza (z logów)** | `page verification failed`, PANIC, brak miejsca, wyczerpane połączenia |
-| **Backupy** | wiek ostatniego dumpu, zaległy test odtworzenia, dostarczalność powiadomień |
+| **Backupy** | Duplicati całego hosta do R2, wiek obiektu, zaległy test odtworzenia, dostarczalność powiadomień |
 | **Logi** | centralne zbieranie (kontenery + journald + access log Traefika) i reguły logowe |
 | **Bezpieczeństwo** | logowania SSH/Cockpit, skoki nieudanych prób, bany fail2bana |
 | **Zewnętrznie** | watchdog healthchecks.io — cisza z VPS oznacza alarm |
@@ -49,6 +50,7 @@ Adresy i logowanie: [`ACCESS.md`](ACCESS.md).
 | [`docs/SCOPE.md`](docs/SCOPE.md) | zasada nadrzędna, co wolno, granice wiedzy |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | przepływ, komponenty, auto-discovery, poziomy istotności |
 | [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | co robić przy każdym alercie (24 procedury) |
+| [`docs/BACKUP.md`](docs/BACKUP.md) | sekrety, wdrożenie Duplicati i drill odtworzenia |
 | [`docs/ONBOARDING-APP.md`](docs/ONBOARDING-APP.md) | jak dodać nową aplikację i co stanie się samo |
 | [`docs/STATUS-API.md`](docs/STATUS-API.md) | kontrakt `/status/api.json` dla panelu |
 | [`docs/BASELINE.md`](docs/BASELINE.md) | stan hosta i aplikacji z dnia rozpoznania |
@@ -102,7 +104,7 @@ odpowiedzi i najczęstsze ścieżki.
 ## Struktura
 
 ```
-docker-compose.yml        # jedyne źródło prawdy (12 usług, zero publikowanych portów)
+docker-compose.yml        # jedyne źródło prawdy (13 usług, zero publikowanych portów)
 dockerfiles/              # obrazy z konfiguracją wypaloną w środku
 config/                   # prometheus (+alerts), loki (+rules), promtail, blackbox, grafana, auth, alertmanager
 services/                 # discovery, notifier, health-ping (Python, tylko stdlib)

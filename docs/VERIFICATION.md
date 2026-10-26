@@ -10,7 +10,7 @@ Zasada: jeśli czegoś tu nie ma, nie zakładaj, że działa — sprawdź.
 
 | Co | Jak sprawdzone | Wynik |
 | --- | --- | --- |
-| Stack wstaje w całości | `make up` (12 usług lokalnie) | 12/12 zdrowych |
+| Stack wstaje w całości | `make up` (13 usług lokalnie) | 13/13 zdrowych |
 | Prometheus: config + reguły | `promtool check config/rules` + uruchomiony Prometheus | 44 reguły w 6 grupach |
 | Progi alertów faktycznie działają | `promtool test rules` (13 przypadków) | zapalają się i **nie** zapalają na szum |
 | Loki: config + 15 reguł | `loki -verify-config` + API rulera | 15 reguł w 4 grupach |

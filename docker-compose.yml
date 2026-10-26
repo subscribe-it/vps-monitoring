@@ -3,7 +3,9 @@
 #  Stack name w Portainerze: monitoring
 #
 #  ZASADA NADRZĘDNA (docs/SCOPE.md):
-#    Ten stack WYŁĄCZNIE OBSERWUJE. Nie modyfikuje żadnego innego stacka.
+#    Ten stack obserwuje hosta i wykonuje wyłącznie własny, jawnie opisany
+#    zapis backupu do zewnętrznego bucketu R2. Nie modyfikuje żadnego innego
+#    stacka.
 #    - zero publikowanych portów na hoście (ruch tylko przez Traefika, po labelach)
 #    - zero zewnętrznych Docker Swarm configs (konfiguracja jest w obrazach)
 #    - cudze wolumeny wyłącznie jako :ro (np. logi Traefika)
@@ -11,7 +13,8 @@
 #    - jedyne zapisy: wolumeny tego stacka
 #
 #  Wdrożenie: Portainer → stack z Git repository (branch main) → ten plik.
-#  Sekrety: wyłącznie zmienne środowiskowe stacka w Portainerze (env.portainer.example).
+#  Sekrety: zewnętrzne sekrety Swarma utworzone poza repozytorium
+#  (env.portainer.example zawiera tylko nazwy i ustawienia niesekretne).
 # =============================================================================
 networks:
   monitoring:
@@ -33,6 +36,23 @@ volumes:
   # Pozycje promtaila — trzymają stan „dokąd doczytano logi” między restartami
   # (bez tego każdy redeploy odtwarza od zera tydzień logów i część gubi).
   promtail_positions: {}
+  # Stan lokalnej bazy Duplicati i cache bloków. Nie jest montowany do innych
+  # usług i nie zawiera sekretów R2 (te są w sekrecie Swarma).
+  duplicati_data_v2: {}
+
+secrets:
+  # Sekret zawiera JSON: s3-user, s3-pass, backup-passphrase. Jest tworzony
+  # ręcznie/automatycznie na hoście i nie
+  # trafia do repozytorium ani do zmiennych środowiskowych Portainera.
+  duplicati_secretprovider:
+    external: true
+    name: ${DUPLICATI_SECRET_PROVIDER_NAME:-monitoring-duplicati-secretprovider-v1}
+  monitoring_r2_access:
+    external: true
+    name: ${MONITORING_R2_ACCESS_SECRET_NAME:-monitoring-r2-access-v1}
+  monitoring_r2_secret:
+    external: true
+    name: ${MONITORING_R2_SECRET_SECRET_NAME:-monitoring-r2-secret-v1}
 
 x-common: &common
   networks:
@@ -469,6 +489,14 @@ services:
       - DISCOVERY_URL=http://discovery:8080
       - BACKUP_MAX_AGE_HOURS=${BACKUP_MAX_AGE_HOURS:-26}
       - BACKUP_MIN_SIZE_MB=${BACKUP_MIN_SIZE_MB:-1}
+      - R2_ENDPOINT=${R2_ENDPOINT:-}
+      - R2_BUCKET=${R2_BUCKET:-}
+      - R2_PREFIX=${R2_PREFIX:-}
+      - R2_REGION=${R2_REGION:-auto}
+      # Klucze są czytane z plików sekretów; wartości R2_ACCESS_KEY/R2_SECRET_KEY
+      # pozostają wyłącznie jako tryb zgodności dla lokalnych testów.
+      - R2_ACCESS_KEY_FILE=${R2_ACCESS_KEY_FILE:-/run/secrets/monitoring-r2-access}
+      - R2_SECRET_KEY_FILE=${R2_SECRET_KEY_FILE:-/run/secrets/monitoring-r2-secret}
       - DISK_MIN_FREE_PERCENT=${DISK_MIN_FREE_PERCENT:-15}
       - INODES_MIN_FREE_PERCENT=${INODES_MIN_FREE_PERCENT:-10}
       - CERT_MIN_DAYS=${CERT_MIN_DAYS:-14}
@@ -476,6 +504,11 @@ services:
       - DOCKER_HOST=unix:///var/run/docker.sock
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+    secrets:
+      - source: monitoring_r2_access
+        target: monitoring-r2-access
+      - source: monitoring_r2_secret
+        target: monitoring-r2-secret
     # jak wyżej: schemat Swarma nie zna `group_add`
     user: "10001:${DOCKER_GID:-999}"
     <<: *common
@@ -495,6 +528,108 @@ services:
       timeout: 10s
       retries: 3
       start_period: 15s
+
+  # ---------------------------------------------------------------------------
+  # duplicati — szyfrowany, headless backup całego hosta do Cloudflare R2.
+  # Nie ma portu ani routera Traefika. Stan Duplicati jest we własnym wolumenie,
+  # a system plików hosta jest widoczny wyłącznie do odczytu.
+  # ---------------------------------------------------------------------------
+  duplicati:
+    image: duplicati/duplicati@sha256:e32e280cc30e98ac5cea8d2b339cd19810b1b39e638fb9d39253786630104de0
+    hostname: duplicati
+    user: "0:0"
+    environment:
+      - TZ=${TZ:-Europe/Warsaw}
+      - DUPLICATI_INTERVAL_SECONDS=${DUPLICATI_INTERVAL_SECONDS:-86400}
+      - DUPLICATI_S3_CLIENT=${DUPLICATI_S3_CLIENT:-minio}
+      - DUPLICATI_R2_BUCKET=${DUPLICATI_R2_BUCKET:-ovh1backup}
+      - DUPLICATI_R2_PREFIX=${DUPLICATI_R2_PREFIX:-vps/full}
+      - DUPLICATI_R2_ENDPOINT=${DUPLICATI_R2_ENDPOINT:-3d399a03e559532edbd9380548e1426e.r2.cloudflarestorage.com}
+    secrets:
+      - source: duplicati_secretprovider
+        target: duplicati-secretprovider
+    volumes:
+      - duplicati_data_v2:/data
+      - /:/host:ro
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        target='s3://'"$${DUPLICATI_R2_BUCKET}"'/'"$${DUPLICATI_R2_PREFIX}"'?aws-access-key-id=$$s3-user&aws-secret-access-key=$$s3-pass&s3-server-name='"$${DUPLICATI_R2_ENDPOINT}"'&use-ssl=true&s3-client='"$${DUPLICATI_S3_CLIENT}"
+        while :; do
+          started=$$(date -u +%FT%TZ)
+          output_file=$$(mktemp /tmp/duplicati-run.XXXXXX)
+          if /opt/duplicati/duplicati-cli backup "$$target" /host \
+            --exclude=/host/proc/** \
+            --exclude=/host/sys/** \
+            --exclude=/host/dev/** \
+            --exclude=/host/run/** \
+            --exclude=/host/tmp/** \
+            --exclude=/host/var/lib/docker/overlay2/** \
+            --exclude=/host/var/lib/docker/containers/*/*-json.log \
+            --exclude=/host/var/lib/docker/volumes/monitoring_duplicati_data_v2/** \
+            --dbpath=/data/duplicati-vps.sqlite \
+            --secret-provider=file-secret:///run/secrets/duplicati-secretprovider \
+            --secret-provider-cache=None \
+            '--passphrase=$$backup-passphrase' \
+            --encryption-module=aes \
+            --compression-module=zip \
+            --dblock-size=50mb \
+            --retention-policy=7D:1D,4W:1W,6M:1M \
+            --ignore-advisory-locking=true >"$$output_file" 2>&1; then
+            result=0
+          else
+            result=$$?
+          fi
+          cat "$$output_file"
+          # Duplicati: 0 = success, 1 = no changes, 2 = success with warnings.
+          # Dopiero 3+ oznacza nieudany lub niepełny backup.
+          if [ "$$result" -le 2 ]; then
+            remote_size=$$(sed -n 's/^[[:space:]]*Remote size: //p' "$$output_file" | tail -1)
+            remote_size=$${remote_size:-unknown}
+            if [ "$$result" -eq 2 ]; then
+              echo "$$started [duplicati] backup complete with warnings: remote-size=$$remote_size"
+            else
+              echo "$$started [duplicati] backup complete: remote-size=$$remote_size"
+            fi
+            date -u +%FT%TZ > /data/last-success
+            date -u +%FT%TZ > /data/last-attempt
+            rm -f "$$output_file"
+          else
+            echo "$$started [duplicati] backup failed: exit=$$result"
+            date -u +%FT%TZ > /data/last-attempt
+            rm -f "$$output_file"
+            exit 1
+          fi
+          sleep "$$DUPLICATI_INTERVAL_SECONDS"
+        done
+    networks:
+      - monitoring
+    <<: *common
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: any
+        delay: 60s
+        max_attempts: 0
+      update_config:
+        order: stop-first
+        failure_action: rollback
+        monitor: 2m
+      rollback_config:
+        order: stop-first
+      resources:
+        limits: { cpus: '1.00', memory: 1G }
+        reservations: { cpus: '0.10', memory: 128M }
+    healthcheck:
+      test: ["CMD-SHELL", "test -s /data/last-success && find /data/last-success -mmin -2880 -print -quit | grep -q ."]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 5m
 
   # ---------------------------------------------------------------------------
   # node-exporter — metryki hosta

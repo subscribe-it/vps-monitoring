@@ -86,7 +86,7 @@ o nieudanym deployu.
 
 ```bash
 curl -s -o /dev/null -w '%{http_code}\n' https://monitoring.subscribeit.pl/          # oczekiwane 401
-docker service ls | grep monitoring                                                  # 12 usług, wszystkie 1/1
+docker service ls | grep monitoring                                                  # 13 usług, wszystkie 1/1
 docker service logs --tail 50 monitoring_discovery
 ```
 I w przeglądarce: `https://monitoring.subscribeit.pl/` → login z punktu 4 → panel

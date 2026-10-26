@@ -141,7 +141,7 @@ jobs:
       # Smoke test skrócony do ~2 min: job, który śpi, też zajmuje minuty.
       # Sam kod 401 na domenie to za mało: 22.09.2026 wdrożenie było
       # „udane” przy stacku z zerem usług. Ten krok pyta Swarma wprost.
-      - name: Kontrola kompletności stacku (12 usług z pełnymi replikami)
+      - name: Kontrola kompletności stacku (13 usług z pełnymi replikami)
         if: steps.check.outputs.tryb == 'api'
         env:
           PORTAINER_URL: ${{ secrets.PORTAINER_URL }}

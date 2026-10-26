@@ -12,7 +12,7 @@ import time
 import urllib.parse
 import urllib.request
 
-OCZEKIWANE = int(os.environ.get("OCZEKIWANE_USLUGI", "12"))
+OCZEKIWANE = int(os.environ.get("OCZEKIWANE_USLUGI", "13"))
 BUDZET_SEKUND = int(os.environ.get("CZAS_NA_WDROZENIE", "240"))
 PREFIX = os.environ.get("PREFIX_USLUG", "monitoring_")
 # Zawór testowy: wymusza ścieżkę liczenia zadań (dowód, że fallback działa).
@@ -66,7 +66,7 @@ while True:
         if status is None or IGNORUJ_STAN:
             # Docker zwraca ServiceStatus tylko z ?status=true. Bez tego każda
             # usługa wygląda na 0/1 — fałszywy alarm zmierzony 22.09.2026 na
-            # żywym, zdrowym stacku (12/12 działających usług).
+            # żywym, zdrowym stacku (13/13 działających usług).
             bez_licznika[nazwa] = usluga["ID"]
             continue
         mamy = int(status.get("RunningTasks", 0))

@@ -41,7 +41,7 @@ pokazuje metrykę razem z jej wiarygodnością.
 
 ## Operating Context
 
-- Jeden VPS (Ubuntu, single-node Docker Swarm) — na nim monitoring w 12 usługach
+- Jeden VPS (Ubuntu, single-node Docker Swarm) — na nim monitoring w 13 usługach
   oraz **cudze, produkcyjne stacki klientów**, których nie wolno dotykać.
 - Panel jest **tylko do odczytu**: żadnych restartów, skalowań ani zmian
   w cudzych stackach z poziomu UI.
@@ -77,7 +77,7 @@ pokazuje metrykę razem z jej wiarygodnością.
 
 ## Evidence on Hand
 
-- Realne dane produkcyjne: 12 usług monitoringu, ~47 usług w 9 stackach,
+- Realne dane produkcyjne: 13 usług monitoringu, ~47 usług w 9 stackach,
   metryki Prometheusa, logi Loki, access log Traefika.
 - Historia incydentów, które ukształtowały produkt (opisana w repo): puste
   wdrożenie raportowane jako sukces, brak alertu przy padniętej bazie, logi

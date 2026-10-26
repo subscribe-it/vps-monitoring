@@ -102,8 +102,12 @@ class Config:
         self.r2_endpoint = (env.get("R2_ENDPOINT", "") or "").strip()
         self.r2_bucket = (env.get("R2_BUCKET", "") or "").strip()
         self.r2_prefix = (env.get("R2_PREFIX", "") or "").strip()
-        self.r2_access_key = (env.get("R2_ACCESS_KEY", "") or "").strip()
-        self.r2_secret_key = (env.get("R2_SECRET_KEY", "") or "").strip()
+        # W produkcji klucze pochodzą z plików Docker secrets. Wartości
+        # R2_ACCESS_KEY/R2_SECRET_KEY zostają jako jawny tryb zgodności dla
+        # lokalnych testów, ale nie są potrzebne w stacku wdrażanym przez
+        # Portainera.
+        self.r2_access_key = _secret_from_env(env, "R2_ACCESS_KEY", "R2_ACCESS_KEY_FILE")
+        self.r2_secret_key = _secret_from_env(env, "R2_SECRET_KEY", "R2_SECRET_KEY_FILE")
         self.r2_region = (env.get("R2_REGION", "auto") or "auto").strip()
         self.disk_min_free_percent = _env_float(env, "DISK_MIN_FREE_PERCENT", 15.0, minimum=0.0)
         self.inodes_min_free_percent = _env_float(env, "INODES_MIN_FREE_PERCENT", 10.0, minimum=0.0)
@@ -163,6 +167,26 @@ def _env_csv(env, key, default=""):
     if raw is None:
         raw = default
     return [item.strip() for item in str(raw).split(",") if item.strip()]
+
+
+def _secret_from_env(env, value_key, file_key):
+    """Czyta sekret z pliku, z bezpiecznym fallbackiem dla lokalnych testów.
+
+    Nie logujemy zawartości ani ścieżki. Jeśli plik istnieje, ale jest pusty,
+    traktujemy to tak samo jak brak sekretu. Błąd pliku jest ostrzeżeniem, a
+    nie wyjątkiem konfiguracyjnym, żeby watchdog nadal raportował stan hosta.
+    """
+    path = (env.get(file_key, "") or "").strip()
+    if path:
+        try:
+            with open(path, "r", encoding="utf-8") as secret_file:
+                value = secret_file.read().strip()
+        except OSError as exc:
+            log("Ostrzeżenie: nie można odczytać %s (%s)", file_key, type(exc).__name__)
+        else:
+            if value:
+                return value
+    return (env.get(value_key, "") or "").strip()
 
 
 def _normalize_docker_host(raw):

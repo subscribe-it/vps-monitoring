@@ -31,7 +31,7 @@ collisions=$(docker service ls --format '{{.Name}}' | grep -E '^monitoring_' || 
                      || bad "istnieją usługi o naszych nazwach: $collisions"
 
 head_ "2. Wolumeny"
-for v in prometheus_data_v2 grafana_data_v2 loki_data_v2 alertmanager_data_v2; do
+for v in prometheus_data_v2 grafana_data_v2 loki_data_v2 alertmanager_data_v2 duplicati_data_v2; do
   if docker volume ls --format '{{.Name}}' | grep -qx "monitoring_${v}"; then
     warn "wolumen monitoring_${v} już istnieje — zostanie użyty ponownie"
   else
@@ -79,7 +79,7 @@ echo "  host: ${cpus} CPU, ${mem} MiB RAM (dostępne ${avail} MiB)"
 if [ "$avail" != "?" ] && [ "$avail" -lt 2048 ]; then
   warn "mniej niż 2 GiB wolnej pamięci — sprawdź, czy monitoring się zmieści"
 else
-  ok "wolnej pamięci wystarczy dla stacku (limity: ok. 3,7 GiB)"
+  ok "wolnej pamięci wystarczy dla stacku (limity: ok. 4,7 GiB)"
 fi
 swap=$(free -m | awk '/^Swap:/{print $2}')
 [ "$swap" = "0" ] && warn "swap = 0 B — presja pamięci skończy się OOM bez ostrzeżenia (alerty to pokrywają)" \
@@ -98,7 +98,19 @@ else
   bad "brak /var/run/docker.sock"
 fi
 
-head_ "8. DNS monitoringu"
+head_ "8. Sekrety backupu"
+for secret in \
+  "${DUPLICATI_SECRET_PROVIDER_NAME:-monitoring-duplicati-secretprovider-v1}" \
+  "${MONITORING_R2_ACCESS_SECRET_NAME:-monitoring-r2-access-v1}" \
+  "${MONITORING_R2_SECRET_SECRET_NAME:-monitoring-r2-secret-v1}"; do
+  if docker secret ls --format '{{.Name}}' | grep -qx "$secret"; then
+    ok "sekret $secret istnieje"
+  else
+    bad "brak sekretu $secret — deploy stacka zatrzyma się na external secret"
+  fi
+done
+
+head_ "9. DNS monitoringu"
 if command -v dig >/dev/null; then
   ip=$(dig +short "$DOMAIN" A | head -1)
   if [ -z "$ip" ]; then bad "$DOMAIN nie rozwiązuje się — certyfikat się nie wystawi"
