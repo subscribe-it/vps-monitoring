@@ -17,6 +17,16 @@ BUDZET_SEKUND = int(os.environ.get("CZAS_NA_WDROZENIE", "240"))
 PREFIX = os.environ.get("PREFIX_USLUG", "monitoring_")
 # Zawór testowy: wymusza ścieżkę liczenia zadań (dowód, że fallback działa).
 IGNORUJ_STAN = os.environ.get("IGNORUJ_STAN_USLUG") == "1"
+# Usługi z długim, prawidłowym startem mogą przez kilka minut mieć stan
+# `starting`, mimo że ich kontener działa. Duplicati wykonuje pierwszy normalny
+# przebieg przed zapisaniem `last-success`; nie powinien przez to oznaczać
+# poprawnego redeployu jako pustego stacka. Stan `starting` zaliczamy wyłącznie
+# dla jawnie wymienionych usług i tylko wtedy, gdy Docker podał ContainerID.
+STARTING_OK = {
+    nazwa.strip()
+    for nazwa in os.environ.get("STARTING_OK_SERVICES", "monitoring_duplicati").split(",")
+    if nazwa.strip()
+}
 
 
 def zmienna(nazwa: str) -> str:
@@ -87,8 +97,24 @@ while True:
             blad_api = type(wyjatek).__name__
         zywe: dict[str, int] = {}
         for zadanie in zadania:
-            if (zadanie.get("Status") or {}).get("State") == "running":
-                identyfikator = zadanie.get("ServiceID", "")
+            status_zadania = zadanie.get("Status") or {}
+            stan_zadania = status_zadania.get("State")
+            identyfikator = zadanie.get("ServiceID", "")
+            aktywne = stan_zadania == "running"
+            if not aktywne and stan_zadania == "starting":
+                # `starting` jest akceptowalne wyłącznie dla usług z listy
+                # STARTING_OK. ContainerID odróżnia żywy kontener od zadania,
+                # które Swarm dopiero przygotowuje albo już odrzucił.
+                nazwa_uslugi = next(
+                    (nazwa for nazwa, ident in bez_licznika.items() if ident == identyfikator),
+                    "",
+                )
+                aktywne = (
+                    nazwa_uslugi in STARTING_OK
+                    and bool((status_zadania.get("ContainerStatus") or {}).get("ContainerID"))
+                    and not status_zadania.get("Err")
+                )
+            if aktywne:
                 zywe[identyfikator] = zywe.get(identyfikator, 0) + 1
         for nazwa, identyfikator in bez_licznika.items():
             mamy = zywe.get(identyfikator, 0)
