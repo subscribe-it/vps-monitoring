@@ -559,7 +559,11 @@ services:
       - -ec
       - |
         target='s3://'"$${DUPLICATI_R2_BUCKET}"'/'"$${DUPLICATI_R2_PREFIX}"'?aws-access-key-id=$$s3-user&aws-secret-access-key=$$s3-pass&s3-server-name='"$${DUPLICATI_R2_ENDPOINT}"'&use-ssl=true&s3-client='"$${DUPLICATI_S3_CLIENT}"
+        # Stary marker po twardym restarcie jest usuwany przy nowym starcie.
+        # Podczas aktywnego uploadu healthcheck nie może go zabić.
+        rm -f /data/backup-running
         while :; do
+          touch /data/backup-running
           started=$$(date -u +%FT%TZ)
           output_file=$$(mktemp /tmp/duplicati-run.XXXXXX)
           if /opt/duplicati/duplicati-cli backup "$$target" \
@@ -594,10 +598,12 @@ services:
             fi
             date -u +%FT%TZ > /data/last-success
             date -u +%FT%TZ > /data/last-attempt
+            rm -f /data/backup-running
             rm -f "$$output_file"
           else
             echo "$$started [duplicati] backup failed: exit=$$result"
             date -u +%FT%TZ > /data/last-attempt
+            rm -f /data/backup-running
             rm -f "$$output_file"
             exit 1
           fi
@@ -630,7 +636,7 @@ services:
       # kontener pozostaje zdrowy, a Swarm nie przerywa uploadu po 5 minutach.
       # Po zakończonej porażce `last-attempt` istnieje i healthcheck wymusza
       # restart, natomiast sukces wymaga świeżego `last-success`.
-      test: ["CMD-SHELL", "if [ ! -s /data/last-attempt ]; then exit 0; fi; test -s /data/last-success && find /data/last-success -mmin -2880 -print -quit | grep -q ."]
+      test: ["CMD-SHELL", "if [ -f /data/backup-running ]; then exit 0; fi; if [ ! -s /data/last-attempt ]; then exit 0; fi; test -s /data/last-success && find /data/last-success -mmin -2880 -print -quit | grep -q ."]
       interval: 60s
       timeout: 10s
       retries: 3

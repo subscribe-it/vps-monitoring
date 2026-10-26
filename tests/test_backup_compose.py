@@ -28,6 +28,8 @@ class BackupComposeTests(unittest.TestCase):
         self.assertIn("/source/docker-volumes /source/docker-swarm /source/docker-config", COMPOSE)
         self.assertIn("--exclude=/source/docker-volumes/monitoring_duplicati_data_v2/**", COMPOSE)
         self.assertIn("--dbpath=/data/duplicati-volumes.sqlite", COMPOSE)
+        self.assertIn("touch /data/backup-running", COMPOSE)
+        self.assertIn("if [ -f /data/backup-running ]; then exit 0; fi", COMPOSE)
 
     def test_secrets_are_external_and_not_inline(self):
         self.assertIn("external: true\n    name: ${DUPLICATI_SECRET_PROVIDER_NAME", COMPOSE)
