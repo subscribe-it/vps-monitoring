@@ -18,6 +18,7 @@ class BackupComposeTests(unittest.TestCase):
         self.assertNotIn("\n    ports:", service)
         self.assertNotIn("traefik.", service)
         self.assertIn("\n      - monitoring\n", service)
+        self.assertIn("limits: { cpus: '1.00', memory: 4G }", service)
 
     def test_recovery_sources_are_read_only_and_state_is_dedicated(self):
         self.assertIn("- /var/lib/docker/volumes:/source/docker-volumes:ro", COMPOSE)

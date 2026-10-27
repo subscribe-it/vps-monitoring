@@ -630,7 +630,11 @@ services:
       rollback_config:
         order: stop-first
       resources:
-        limits: { cpus: '1.00', memory: 1G }
+        # The dlist for the VPS volume inventory is already ~90 MiB. Duplicati
+        # expands the catalogue in memory while creating encrypted blocks; a
+        # 1 GiB cgroup caused exit=137 during a normal upload. Keep a bounded
+        # 4 GiB ceiling so backup completion is reliable on the 24 GiB VPS.
+        limits: { cpus: '1.00', memory: 4G }
         reservations: { cpus: '0.10', memory: 128M }
     healthcheck:
       # Nie oznaczaj pierwszego, długiego przebiegu jako awarii. Duplicati
