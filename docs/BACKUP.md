@@ -7,6 +7,8 @@ Stack `monitoring` uruchamia jedną usługę `monitoring_duplicati`. Usługa:
 - nie obejmuje warstw obrazów, logów kontenerów ani całego systemu plików; logi Traefika i własne wolumeny Duplicati są wyłączone;
 - zapisuje lokalny stan w `monitoring_duplicati_data_v2`;
 - wykonuje szyfrowany backup co 24 godziny;
+- ponawia błędy transportu pięć razy z 30-sekundowym opóźnieniem, zanim zgłosi
+  przebieg jako nieudany;
 - zapisuje obiekty do `s3://ovh1backup/vps/portainer-volumes` przez Cloudflare R2;
 - nie publikuje portu i nie tworzy routera Traefika.
 
@@ -55,6 +57,11 @@ docker service logs --tail 200 monitoring_duplicati
 Pierwszy udany przebieg musi zawierać linię `[duplicati] backup complete`.
 Watchdog dodatkowo listuje obiekty R2 pod `vps/portainer-volumes/`; sam log nie jest dowodem
 istnienia kopii.
+
+Stan operacyjny jest zapisany w wolumenie `duplicati_data_v2`: `backup-running`
+oznacza aktywny przebieg, `last-attempt` ostatnią zakończoną próbę, a
+`last-success` ostatni przebieg zakończony kodem 0–2. Healthcheck nie przerywa
+długiego uploadu; po błędzie wymusza ponowne uruchomienie usługi przez Swarma.
 
 ## Odtworzenie i drill
 

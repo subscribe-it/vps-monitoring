@@ -580,6 +580,8 @@ services:
             --compression-module=zip \
             --dblock-size=50mb \
             --retention-policy=7D:1D,4W:1W,6M:1M \
+            --number-of-retries=5 \
+            --retry-delay=30s \
             --ignore-advisory-locking=true >"$$output_file" 2>&1; then
             result=0
           else
