@@ -58,6 +58,35 @@ scrape_configs:
       - action: drop
         source_labels: ['__meta_docker_container_name']
         regex: '/(monitoring_(loki|promtail|discovery|health-ping|notifier|auth|panel)).*'
+      # Traefik (edge) od 2026-11-05 pisze access log na STDOUT, nie do pliku
+      # `/traefik-logs/access.log` (job `traefik` niżej czyta już tylko stary plik).
+      # Bez tego dashboard „Ruch”, Traefik5xxRateHigh i TrafficErrorSpike byłyby
+      # ślepe. Linie access logu dostają `job="traefik"` w pipeline poniżej.
+      - source_labels: ['__meta_docker_container_label_com_docker_swarm_service_name']
+        regex: 'portainer-edge-gateway_traefik'
+        target_label: edge
+        replacement: traefik
+    pipeline_stages:
+      # Tylko kontener Traefika. Access log rozpoznajemy po polu `RequestHost`
+      # (zmierzone: ma je każda linia access logu i żadna linia logu aplikacji —
+      # ACME, routery — więc te zostają pod `job="docker"`).
+      - match:
+          selector: '{edge="traefik"} |= "\"RequestHost\":"'
+          stages:
+            - static_labels:
+                job: traefik
+            - json:
+                expressions:
+                  StartUTC: StartUTC
+                  RequestHost: RequestHost
+            - labels:
+                RequestHost:
+            - timestamp:
+                source: StartUTC
+                format: RFC3339Nano
+                fallback_formats: ['RFC3339']
+      - labeldrop:
+          - edge
 
   # --- 2) journald hosta ----------------------------------------------------
   - job_name: journal
