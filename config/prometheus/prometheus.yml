@@ -82,9 +82,20 @@ scrape_configs:
       - targets: ['portainer-edge-gateway_crowdsec:6060']
         labels:
           crowdsec_instance: 'edge'
-      - targets: ['traefik_crowdsec:6060']
-        labels:
-          crowdsec_instance: 'traefik-old'
+      # `traefik_crowdsec` (osierocony stack `traefik`) usunięty 2026-11-05 —
+      # była to nieużywana kopia; jedyny CrowdSec edge'a to ten powyżej.
+
+  # --- Traefik (edge): metryki ruchu, TYLKO ODCZYT ---------------------------
+  # Entrypoint `metrics` (:8082) włączony w Traefiku 2026-11-05; port NIE jest
+  # publikowany — osiągalny tylko z sieci `traefik-public`, w której jest też
+  # Prometheus. Daje: `traefik_service_requests_total{code,service}` (błędy 5xx
+  # per aplikacja), `traefik_service_request_duration_seconds` (latencja),
+  # `traefik_tls_certs_not_after` (daty wygaśnięcia certyfikatów),
+  # `traefik_open_connections`.
+  - job_name: 'traefik'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['portainer-edge-gateway_traefik:8082']
 
   # --- host ---------------------------------------------------------------
   - job_name: 'node-exporter'
